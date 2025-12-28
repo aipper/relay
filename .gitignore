@@ -1,0 +1,21 @@
+# Secrets / local config
+conf/env
+.env
+.env.*
+
+# Rust
+/target
+**/*.rs.bk
+
+# Node/Bun
+**/node_modules
+**/.DS_Store
+
+# Web
+web/dist
+web/.svelte-kit
+web/.vite
+
+# Logs / data
+data/
+*.log
