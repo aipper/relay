@@ -2,6 +2,7 @@
 conf/env
 .env
 .env.*
+docker/server.env
 
 # Rust
 /target
@@ -19,3 +20,9 @@ web/.vite
 # Logs / data
 data/
 *.log
+
+# Local dev tmp
+.relay-tmp/
+
+# Packaging output
+dist/

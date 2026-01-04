@@ -6,6 +6,7 @@ pub struct Config {
     pub local_unix_socket: String,
     pub redaction_extra_regex: Vec<String>,
     pub spool_db_path: String,
+    pub log_path: Option<String>,
 }
 
 impl Config {
@@ -16,11 +17,24 @@ impl Config {
             std::env::var("HOST_ID").unwrap_or_else(|_| format!("host-{}", uuid::Uuid::new_v4()));
         let host_token = std::env::var("HOST_TOKEN").unwrap_or_else(|_| "dev-token".into());
 
-        let local_unix_socket =
-            std::env::var("LOCAL_UNIX_SOCKET").unwrap_or_else(|_| "/tmp/relay-hostd.sock".into());
+        let local_unix_socket = std::env::var("LOCAL_UNIX_SOCKET").unwrap_or_else(|_| {
+            // Default to a stable, user-local socket path so CLI shims can discover it without
+            // requiring per-shell env vars.
+            let home = std::env::var("HOME").unwrap_or_default();
+            if home.trim().is_empty() {
+                "/tmp/relay-hostd.sock".into()
+            } else {
+                format!("{home}/.relay/relay-hostd.sock")
+            }
+        });
 
         let spool_db_path =
             std::env::var("SPOOL_DB_PATH").unwrap_or_else(|_| "data/hostd-spool.db".into());
+
+        let log_path = std::env::var("HOSTD_LOG_PATH")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
         let redaction_extra_regex = std::env::var("REDACTION_EXTRA_REGEX")
             .ok()
@@ -40,6 +54,7 @@ impl Config {
             local_unix_socket,
             redaction_extra_regex,
             spool_db_path,
+            log_path,
         }
     }
 }

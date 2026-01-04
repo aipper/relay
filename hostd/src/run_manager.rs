@@ -20,7 +20,6 @@ pub struct RunManager {
     redactor: Arc<Redactor>,
     events: broadcast::Sender<WsEnvelope>,
     runs: Arc<RwLock<HashMap<String, Arc<Run>>>>,
-    prompt_regex: Arc<Regex>,
 }
 
 struct Run {
@@ -28,8 +27,21 @@ struct Run {
     seq: AtomicI64,
     writer: Mutex<Box<dyn Write + Send>>,
     pid: i32,
+    cwd: String,
+    tool: String,
+    prompt_regex: Arc<Regex>,
     awaiting_input: Mutex<bool>,
     processed_input_ids: Mutex<HashSet<String>>,
+    pending_permission: Mutex<Option<PendingPermission>>,
+}
+
+#[derive(Clone)]
+struct PendingPermission {
+    request_id: String,
+    reason: String,
+    prompt: String,
+    approve_text: String,
+    deny_text: String,
 }
 
 impl Run {
@@ -44,29 +56,20 @@ impl RunManager {
         redactor: Arc<Redactor>,
         events: broadcast::Sender<WsEnvelope>,
     ) -> Self {
-        // MVP: heuristic patterns for interactive prompts.
-        let prompt_regex = Regex::new(
-            r"(?ix)
-            (proceed\\?|continue\\?|are\\s+you\\s+sure\\?|confirm\\b)
-            |(\\(\\s*y\\s*/\\s*n\\s*\\))
-            |(\\[\\s*y\\s*/\\s*n\\s*\\])
-            |(\\(\\s*y\\s*/\\s*N\\s*\\))
-            |(\\[\\s*y\\s*/\\s*N\\s*\\])
-            ",
-        )
-        .expect("valid prompt regex");
-
         Self {
             host_id,
             redactor,
             events,
             runs: Arc::new(RwLock::new(HashMap::new())),
-            prompt_regex: Arc::new(prompt_regex),
         }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<WsEnvelope> {
         self.events.subscribe()
+    }
+
+    pub fn host_id_value(&self) -> String {
+        self.host_id.clone()
     }
 
     pub async fn start_run(
@@ -76,6 +79,13 @@ impl RunManager {
         cwd: Option<String>,
     ) -> anyhow::Result<String> {
         let run_id = format!("run-{}", uuid::Uuid::new_v4());
+        let resolved_cwd = match cwd.as_deref() {
+            Some(c) => c.to_string(),
+            None => std::env::current_dir()
+                .ok()
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| ".".into()),
+        };
 
         let pty_system = portable_pty::native_pty_system();
         let pair = pty_system
@@ -87,12 +97,10 @@ impl RunManager {
             })
             .context("openpty")?;
 
-        let mut command = CommandBuilder::new("bash");
-        command.arg("-lc");
-        command.arg(&cmd);
-        if let Some(cwd) = cwd.as_deref() {
-            command.cwd(cwd);
-        }
+        let spec = crate::runners::for_tool(&tool)
+            .build(&cmd, &resolved_cwd)
+            .context("build runner command")?;
+        let command: CommandBuilder = spec.command;
 
         let mut child = pair.slave.spawn_command(command).context("spawn_command")?;
 
@@ -106,8 +114,12 @@ impl RunManager {
             seq: AtomicI64::new(0),
             writer: Mutex::new(writer),
             pid,
+            cwd: resolved_cwd,
+            tool: tool.clone(),
+            prompt_regex: spec.prompt_regex,
             awaiting_input: Mutex::new(false),
             processed_input_ids: Mutex::new(HashSet::new()),
+            pending_permission: Mutex::new(None),
         });
 
         {
@@ -120,7 +132,7 @@ impl RunManager {
             "run.started",
             json!({
                 "tool": tool,
-                "cwd": cwd,
+                "cwd": run.cwd,
                 "command": cmd,
             }),
         );
@@ -133,7 +145,6 @@ impl RunManager {
         let events = self.events.clone();
         let host_id = self.host_id.clone();
         let run_for_thread = run.clone();
-        let prompt_regex = self.prompt_regex.clone();
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 4096];
@@ -142,7 +153,7 @@ impl RunManager {
                     Ok(0) => break,
                     Ok(n) => {
                         let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let is_prompt = prompt_regex.is_match(&text);
+                        let is_prompt = run_for_thread.prompt_regex.is_match(&text);
                         let mut env = WsEnvelope::new(
                             "run.output",
                             json!({
@@ -161,11 +172,41 @@ impl RunManager {
                                 if !*awaiting {
                                     *awaiting = true;
                                     let prompt = text.chars().take(200).collect::<String>();
+                                    let request_id = uuid::Uuid::new_v4().to_string();
+
+                                    if let Ok(mut pending) =
+                                        run_for_thread.pending_permission.try_lock()
+                                    {
+                                        *pending = Some(PendingPermission {
+                                            request_id: request_id.clone(),
+                                            reason: "prompt".to_string(),
+                                            prompt: prompt.clone(),
+                                            approve_text: "y\n".to_string(),
+                                            deny_text: "n\n".to_string(),
+                                        });
+                                    }
+
+                                    let mut pr = WsEnvelope::new(
+                                        "run.permission_requested",
+                                        json!({
+                                            "request_id": request_id,
+                                            "reason": "prompt",
+                                            "prompt": prompt,
+                                            "approve_text": "y\n",
+                                            "deny_text": "n\n"
+                                        }),
+                                    );
+                                    pr.host_id = Some(host_id.clone());
+                                    pr.run_id = Some(run_for_thread.run_id.clone());
+                                    pr.seq = Some(run_for_thread.next_seq());
+                                    let _ = events.send(pr);
+
                                     let mut p = WsEnvelope::new(
                                         "run.awaiting_input",
                                         json!({
                                             "reason": "prompt",
-                                            "prompt": prompt
+                                            "prompt": prompt,
+                                            "request_id": request_id
                                         }),
                                     );
                                     p.host_id = Some(host_id.clone());
@@ -185,6 +226,7 @@ impl RunManager {
         let events = self.events.clone();
         let host_id = self.host_id.clone();
         let run_for_thread = run.clone();
+        let runs_map = self.runs.clone();
         std::thread::spawn(move || {
             let exit = child.wait();
             let exit_code = exit.map(|s| s.exit_code() as i64).unwrap_or(-1);
@@ -193,6 +235,10 @@ impl RunManager {
             env.run_id = Some(run_for_thread.run_id.clone());
             env.seq = Some(run_for_thread.next_seq());
             let _ = events.send(env);
+
+            if let Ok(mut map) = runs_map.try_write() {
+                map.remove(&run_for_thread.run_id);
+            }
         });
 
         Ok(run_id)
@@ -231,6 +277,10 @@ impl RunManager {
             let mut awaiting = run.awaiting_input.lock().await;
             *awaiting = false;
         }
+        {
+            let mut pending = run.pending_permission.lock().await;
+            *pending = None;
+        }
 
         let redacted = self.redactor.redact(text);
         let mut env = WsEnvelope::new(
@@ -247,6 +297,37 @@ impl RunManager {
         env.seq = Some(run.next_seq());
         let _ = self.events.send(env);
 
+        Ok(())
+    }
+
+    pub async fn decide_permission(
+        &self,
+        run_id: &str,
+        actor: &str,
+        request_id: &str,
+        decision: &str,
+    ) -> anyhow::Result<()> {
+        let run = {
+            let runs = self.runs.read().await;
+            runs.get(run_id).cloned()
+        }
+        .context("unknown run_id")?;
+
+        let pending = { run.pending_permission.lock().await.clone() };
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+        if pending.request_id != request_id {
+            return Ok(());
+        }
+
+        let text = match decision {
+            "approve" => pending.approve_text,
+            "deny" => pending.deny_text,
+            _ => return Err(anyhow::anyhow!("invalid decision")),
+        };
+
+        self.send_input(run_id, actor, request_id, &text).await?;
         Ok(())
     }
 
@@ -270,4 +351,65 @@ impl RunManager {
 
         Ok(())
     }
+
+    pub async fn get_run_cwd(&self, run_id: &str) -> anyhow::Result<String> {
+        let run = {
+            let runs = self.runs.read().await;
+            runs.get(run_id).cloned()
+        }
+        .context("unknown run_id")?;
+        Ok(run.cwd.clone())
+    }
+
+    pub async fn emit_run_event(
+        &self,
+        run_id: &str,
+        event_type: &str,
+        data: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let run = {
+            let runs = self.runs.read().await;
+            runs.get(run_id).cloned()
+        }
+        .context("unknown run_id")?;
+
+        let mut env = WsEnvelope::new(event_type, data);
+        env.host_id = Some(self.host_id.clone());
+        env.run_id = Some(run.run_id.clone());
+        env.seq = Some(run.next_seq());
+        let _ = self.events.send(env);
+        Ok(())
+    }
+
+    pub async fn list_runs(&self) -> Vec<RunSummary> {
+        let runs = {
+            let map = self.runs.read().await;
+            map.values().cloned().collect::<Vec<_>>()
+        };
+
+        let mut out = Vec::with_capacity(runs.len());
+        for run in runs {
+            let awaiting_input = *run.awaiting_input.lock().await;
+            let pending_permission = run.pending_permission.lock().await.clone();
+            out.push(RunSummary {
+                run_id: run.run_id.clone(),
+                pid: run.pid,
+                tool: run.tool.clone(),
+                cwd: run.cwd.clone(),
+                awaiting_input,
+                pending_request_id: pending_permission.map(|p| p.request_id),
+            });
+        }
+        out
+    }
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct RunSummary {
+    pub run_id: String,
+    pub pid: i32,
+    pub tool: String,
+    pub cwd: String,
+    pub awaiting_input: bool,
+    pub pending_request_id: Option<String>,
 }

@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS events (
   input_id TEXT,
   text TEXT,
   text_redacted TEXT,
-  text_sha256 TEXT
+  text_sha256 TEXT,
+  data_json TEXT
 );
 "#,
     )
@@ -104,6 +105,9 @@ CREATE TABLE IF NOT EXISTS events (
 
     // Best-effort schema upgrades for dev (ignore if already exists).
     let _ = sqlx::query("ALTER TABLE events ADD COLUMN input_id TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE events ADD COLUMN data_json TEXT;")
         .execute(pool)
         .await;
     let _ = sqlx::query(
@@ -127,11 +131,12 @@ pub async fn insert_event(
     text: Option<&str>,
     text_redacted: Option<&str>,
     text_sha256: Option<&str>,
+    data_json: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
         r#"
-INSERT OR IGNORE INTO events (run_id, seq, ts, type, stream, actor, input_id, text, text_redacted, text_sha256)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+INSERT OR IGNORE INTO events (run_id, seq, ts, type, stream, actor, input_id, text, text_redacted, text_sha256, data_json)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 "#,
     )
     .bind(run_id)
@@ -144,6 +149,7 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
     .bind(text)
     .bind(text_redacted)
     .bind(text_sha256)
+    .bind(data_json)
     .execute(pool)
     .await?;
     Ok(())
@@ -229,6 +235,104 @@ ORDER BY started_at DESC
 LIMIT 200
 "#,
     )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn get_run(pool: &Db, run_id: &str) -> anyhow::Result<Option<RunRow>> {
+    let row = sqlx::query_as::<_, RunRow>(
+        r#"
+SELECT id, host_id, tool, cwd, status, started_at, ended_at, exit_code
+FROM runs
+WHERE id = ?1
+LIMIT 1
+"#,
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn list_recent_runs(pool: &Db, limit: i64) -> anyhow::Result<Vec<RunRow>> {
+    let limit = limit.clamp(1, 200);
+    let rows = sqlx::query_as::<_, RunRow>(
+        r#"
+SELECT id, host_id, tool, cwd, status, started_at, ended_at, exit_code
+FROM runs
+ORDER BY started_at DESC
+LIMIT ?1
+"#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct HostRow {
+    pub id: String,
+    pub name: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+pub async fn list_hosts(pool: &Db) -> anyhow::Result<Vec<HostRow>> {
+    let rows = sqlx::query_as::<_, HostRow>(
+        r#"
+SELECT id, name, last_seen_at
+FROM hosts
+ORDER BY id ASC
+LIMIT 200
+"#,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+#[derive(sqlx::FromRow)]
+pub struct MessageEventRow {
+    pub id: i64,
+    pub ts: String,
+    pub r#type: String,
+    pub actor: Option<String>,
+    pub input_id: Option<String>,
+    pub text: Option<String>,
+    pub text_redacted: Option<String>,
+    pub data_json: Option<String>,
+}
+
+pub async fn list_message_events(
+    pool: &Db,
+    run_id: &str,
+    before_id: Option<i64>,
+    limit: i64,
+) -> anyhow::Result<Vec<MessageEventRow>> {
+    let limit = limit.clamp(1, 500);
+    let rows = sqlx::query_as::<_, MessageEventRow>(
+        r#"
+SELECT id, ts, type, actor, input_id, text, text_redacted, data_json
+FROM events
+WHERE run_id=?1
+  AND type IN (
+    'run.started',
+    'run.output',
+    'run.permission_requested',
+    'run.input',
+    'run.exited',
+    'tool.call',
+    'tool.result'
+  )
+  AND (?2 IS NULL OR id < ?2)
+ORDER BY id DESC
+LIMIT ?3
+"#,
+    )
+    .bind(run_id)
+    .bind(before_id)
+    .bind(limit)
     .fetch_all(pool)
     .await?;
     Ok(rows)

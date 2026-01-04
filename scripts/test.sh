@@ -49,7 +49,7 @@ done
 need cargo
 
 if [[ "$only_e2e" == "true" ]]; then
-  run scripts/e2e.sh
+  run bash scripts/e2e.sh
   exit 0
 fi
 
@@ -64,7 +64,7 @@ fi
 run cargo test --workspace
 
 if [[ "$skip_e2e" != "true" ]]; then
-  run scripts/e2e.sh
+  run bash scripts/e2e.sh
 fi
 
 echo "ok"

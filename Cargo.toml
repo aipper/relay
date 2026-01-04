@@ -1,5 +1,5 @@
 [workspace]
-members = ["protocol", "server", "hostd"]
+members = ["protocol", "server", "hostd", "relay-cli"]
 resolver = "2"
 
 [workspace.package]

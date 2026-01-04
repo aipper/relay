@@ -21,6 +21,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use rand_core::OsRng;
 use relay_protocol::{WsEnvelope, redaction::Redactor};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use sqlx::Executor;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::broadcast;
@@ -49,6 +50,7 @@ struct AppState {
     redactor: Arc<Redactor>,
     hosts_tx: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
     run_to_host: Arc<RwLock<HashMap<String, String>>>,
+    web_dist_dir: Option<std::path::PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -181,6 +183,267 @@ async fn http_list_runs(State(state): State<AppState>, headers: HeaderMap) -> im
     }
 }
 
+async fn http_list_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // MVP: sessions are backed by the runs table. Expose a stable semantic alias to align with
+    // session-based clients (e.g. hapi/happy) while keeping existing /runs compatibility.
+    http_list_runs(State(state), headers).await
+}
+
+#[derive(Deserialize)]
+struct SessionsQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+async fn http_list_recent_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<SessionsQuery>,
+) -> impl IntoResponse {
+    let Some(token) = bearer_token(&headers) else {
+        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
+    };
+    if validate_jwt(&state, &token).is_err() {
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+    let limit = q.limit.unwrap_or(50);
+    match db::list_recent_runs(&state.db, limit).await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn http_get_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let Some(token) = bearer_token(&headers) else {
+        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
+    };
+    if validate_jwt(&state, &token).is_err() {
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+    match db::get_run(&state.db, &session_id).await {
+        Ok(Some(row)) => Json(row).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "unknown session_id").into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+#[derive(Serialize)]
+struct HostInfo {
+    id: String,
+    name: Option<String>,
+    last_seen_at: Option<String>,
+    online: bool,
+}
+
+async fn http_list_hosts(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    let Some(token) = bearer_token(&headers) else {
+        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
+    };
+    if validate_jwt(&state, &token).is_err() {
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+
+    let online = {
+        let hosts = state.hosts_tx.read().await;
+        hosts
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
+    };
+
+    match db::list_hosts(&state.db).await {
+        Ok(rows) => {
+            let out = rows
+                .into_iter()
+                .map(|h| HostInfo {
+                    online: online.contains(&h.id),
+                    id: h.id,
+                    name: h.name,
+                    last_seen_at: h.last_seen_at,
+                })
+                .collect::<Vec<_>>();
+            Json(out).into_response()
+        }
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct MessagesQuery {
+    before_id: Option<i64>,
+    limit: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct ChatMessage {
+    id: i64,
+    ts: String,
+    role: &'static str,
+    kind: String,
+    actor: Option<String>,
+    request_id: Option<String>,
+    text: String,
+}
+
+fn truncate_text(s: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut out = String::with_capacity(std::cmp::min(s.len(), max_chars));
+    for (i, ch) in s.chars().enumerate() {
+        if i >= max_chars {
+            out.push_str("…");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn json_compact(v: &JsonValue) -> String {
+    serde_json::to_string(v).unwrap_or_else(|_| "null".to_string())
+}
+
+async fn http_list_messages(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(run_id): axum::extract::Path<String>,
+    Query(q): Query<MessagesQuery>,
+) -> impl IntoResponse {
+    let Some(token) = bearer_token(&headers) else {
+        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
+    };
+    if validate_jwt(&state, &token).is_err() {
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+
+    let limit = q.limit.unwrap_or(200);
+    let rows = match db::list_message_events(&state.db, &run_id, q.before_id, limit).await {
+        Ok(r) => r,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    };
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows.into_iter().rev() {
+        let (role, text, request_id) = match row.r#type.as_str() {
+            "run.output" => ("assistant", row.text.unwrap_or_default(), None),
+            "run.input" => (
+                "user",
+                row.text_redacted.or(row.text).unwrap_or_default(),
+                row.input_id.clone(),
+            ),
+            "run.permission_requested" => {
+                let parsed = row
+                    .data_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
+                    .unwrap_or(JsonValue::Null);
+                let prompt = parsed
+                    .get("prompt")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let req = parsed
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                ("system", prompt, req)
+            }
+            "tool.call" => {
+                let parsed = row
+                    .data_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
+                    .unwrap_or(JsonValue::Null);
+                let tool = parsed
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let req = parsed
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let args = parsed.get("args").unwrap_or(&JsonValue::Null);
+                let args = truncate_text(&json_compact(args), 2000);
+                ("system", format!("tool.call {tool} {args}"), req)
+            }
+            "tool.result" => {
+                let parsed = row
+                    .data_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
+                    .unwrap_or(JsonValue::Null);
+                let tool = parsed
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let req = parsed
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let ok = parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                let duration_ms = parsed
+                    .get("duration_ms")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let mut text = format!("tool.result {tool} ok={ok} duration_ms={duration_ms}");
+                if ok {
+                    if let Some(result) = parsed.get("result") {
+                        let res = truncate_text(&json_compact(result), 2000);
+                        text.push(' ');
+                        text.push_str(&res);
+                    }
+                } else {
+                    let err = parsed
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown error");
+                    text.push(' ');
+                    text.push_str(&truncate_text(err, 2000));
+                }
+                ("system", text, req)
+            }
+            "run.started" => ("system", "run started".to_string(), None),
+            "run.exited" => ("system", "run exited".to_string(), None),
+            _ => continue,
+        };
+
+        out.push(ChatMessage {
+            id: row.id,
+            ts: row.ts,
+            role,
+            kind: row.r#type,
+            actor: row.actor,
+            request_id,
+            text,
+        });
+    }
+
+    Json(out).into_response()
+}
+
+async fn http_list_session_messages(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    Query(q): Query<MessagesQuery>,
+) -> impl IntoResponse {
+    http_list_messages(
+        State(state),
+        headers,
+        axum::extract::Path(session_id),
+        Query(q),
+    )
+    .await
+}
+
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
     let v = headers
         .get(axum::http::header::AUTHORIZATION)?
@@ -253,18 +516,38 @@ async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
                 match incoming {
                     Message::Text(text) => {
                         let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                        if env.r#type != "run.send_input" && env.r#type != "run.stop" { continue; }
-                        let Some(run_id) = env.run_id.clone() else { continue; };
-
-                        let host_id = {
-                            let map = state.run_to_host.read().await;
-                            map.get(&run_id).cloned()
+                        let is_rpc = env.r#type.starts_with("rpc.");
+                        if env.r#type != "run.send_input"
+                            && env.r#type != "run.stop"
+                            && env.r#type != "run.permission.approve"
+                            && env.r#type != "run.permission.deny"
+                            && !is_rpc
+                        {
+                            continue;
+                        }
+                        let (host_id, run_id) = if env.r#type == "rpc.run.start"
+                            || env.r#type == "rpc.host.info"
+                            || env.r#type == "rpc.host.doctor"
+                            || env.r#type == "rpc.host.capabilities"
+                            || env.r#type == "rpc.host.logs.tail"
+                        {
+                            let host_id =
+                                env.data.get("host_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let Some(host_id) = host_id else { continue; };
+                            (host_id, None)
+                        } else {
+                            let Some(run_id) = env.run_id.clone() else { continue; };
+                            let host_id = {
+                                let map = state.run_to_host.read().await;
+                                map.get(&run_id).cloned()
+                            };
+                            let Some(host_id) = host_id else { continue; };
+                            (host_id, Some(run_id))
                         };
-                        let Some(host_id) = host_id else { continue; };
 
                         let mut cmd = WsEnvelope::new(env.r#type.clone(), env.data.clone());
                         cmd.host_id = Some(host_id.clone());
-                        cmd.run_id = Some(run_id);
+                        cmd.run_id = run_id;
 
                         let payload = match serde_json::to_string(&cmd) {
                             Ok(p) => p,
@@ -342,6 +625,11 @@ ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash, last_seen_at=exclu
                 let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
                     continue;
                 };
+                let _ = sqlx::query("UPDATE hosts SET last_seen_at=?2 WHERE id=?1")
+                    .bind(&host_id)
+                    .bind(Utc::now().to_rfc3339())
+                    .execute(&state.db)
+                    .await;
                 let run_id = env.run_id.clone().unwrap_or_else(|| "unknown".into());
                 let seq = env.seq;
 
@@ -366,35 +654,46 @@ ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash, last_seen_at=exclu
                         .and_then(|v| v.as_i64())
                         .unwrap_or(-1);
                     let _ = db::finish_run(&state.db, &run_id, env.ts, exit_code).await;
+                } else if env.r#type == "rpc.response" && run_id != "unknown" {
+                    let mut map = state.run_to_host.write().await;
+                    map.insert(run_id.clone(), host_id.clone());
                 }
 
-                // Persist minimal event.
-                let _ = db::insert_event(
-                    &state.db,
-                    &run_id,
-                    seq,
-                    env.ts,
-                    &env.r#type,
-                    env.data.get("stream").and_then(|v| v.as_str()),
-                    env.data.get("actor").and_then(|v| v.as_str()),
-                    env.data.get("input_id").and_then(|v| v.as_str()),
-                    env.data.get("text").and_then(|v| v.as_str()),
-                    env.data.get("text_redacted").and_then(|v| v.as_str()),
-                    env.data.get("text_sha256").and_then(|v| v.as_str()),
-                )
-                .await;
+                // Persist minimal event. Skip RPC responses that don't belong to any run to avoid polluting
+                // the DB with an "unknown" run_id.
+                let should_persist = !(env.run_id.is_none() && env.r#type == "rpc.response");
+                if should_persist {
+                    let data_json = serde_json::to_string(&env.data).ok();
+                    let _ = db::insert_event(
+                        &state.db,
+                        &run_id,
+                        seq,
+                        env.ts,
+                        &env.r#type,
+                        env.data.get("stream").and_then(|v| v.as_str()),
+                        env.data.get("actor").and_then(|v| v.as_str()),
+                        env.data.get("input_id").and_then(|v| v.as_str()),
+                        env.data.get("text").and_then(|v| v.as_str()),
+                        env.data.get("text_redacted").and_then(|v| v.as_str()),
+                        env.data.get("text_sha256").and_then(|v| v.as_str()),
+                        data_json.as_deref(),
+                    )
+                    .await;
+                }
 
                 // Ack to host for spool replay.
-                if let Some(last_seq) = seq {
-                    let ack = WsEnvelope::new(
-                        "run.ack",
-                        serde_json::json!({
-                            "run_id": run_id,
-                            "last_seq": last_seq
-                        }),
-                    );
-                    if let Ok(payload) = serde_json::to_string(&ack) {
-                        let _ = tx_for_internal.send(Message::Text(payload)).await;
+                if should_persist {
+                    if let Some(last_seq) = seq {
+                        let ack = WsEnvelope::new(
+                            "run.ack",
+                            serde_json::json!({
+                                "run_id": run_id,
+                                "last_seq": last_seq
+                            }),
+                        );
+                        if let Ok(payload) = serde_json::to_string(&ack) {
+                            let _ = tx_for_internal.send(Message::Text(payload)).await;
+                        }
                     }
                 }
 
@@ -417,6 +716,70 @@ ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash, last_seen_at=exclu
         hosts.remove(&host_id);
     }
     send_task.abort();
+}
+
+async fn http_static_fallback(
+    State(state): State<AppState>,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+) -> impl IntoResponse {
+    let Some(root) = state.web_dist_dir.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let mut path = uri.path().trim_start_matches('/').to_string();
+    if path.is_empty() {
+        path = "index.html".to_string();
+    }
+
+    // Basic traversal prevention: reject any parent-dir component.
+    if path.split('/').any(|c| c == "..") {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let full = root.join(&path);
+    let mut served_path = path.clone();
+    let data = match tokio::fs::read(&full).await {
+        Ok(d) => d,
+        Err(_) => {
+            if path != "index.html" {
+                let index = root.join("index.html");
+                match tokio::fs::read(&index).await {
+                    Ok(d) => {
+                        served_path = "index.html".to_string();
+                        d
+                    }
+                    Err(_) => return StatusCode::NOT_FOUND.into_response(),
+                }
+            } else {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+        }
+    };
+
+    let mime = match std::path::Path::new(&served_path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "html" => "text/html; charset=utf-8",
+        "js" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "ico" => "image/x-icon",
+        "txt" => "text/plain; charset=utf-8",
+        "map" => "application/json; charset=utf-8",
+        "wasm" => "application/wasm",
+        _ => "application/octet-stream",
+    };
+
+    let mut resp = axum::response::Response::new(axum::body::Body::from(data));
+    resp.headers_mut()
+        .insert(axum::http::header::CONTENT_TYPE, mime.parse().unwrap());
+    resp
 }
 
 #[tokio::main]
@@ -458,7 +821,14 @@ async fn main() -> anyhow::Result<()> {
         redactor,
         hosts_tx: Arc::new(RwLock::new(HashMap::new())),
         run_to_host: Arc::new(RwLock::new(HashMap::new())),
+        web_dist_dir: None,
     };
+
+    let mut state = state;
+    let web_dist_dir = std::env::var("WEB_DIST_DIR").unwrap_or_else(|_| "web/dist".into());
+    if std::path::Path::new(&web_dist_dir).is_dir() {
+        state.web_dist_dir = Some(std::path::PathBuf::from(web_dist_dir));
+    }
 
     // Background cleanup: keep 3 days of finished runs/events (MVP: only events table).
     let cleanup_db = state.db.clone();
@@ -478,9 +848,19 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/auth/login", post(login))
         .route("/runs", get(http_list_runs))
+        .route("/sessions", get(http_list_sessions))
+        .route("/sessions/recent", get(http_list_recent_sessions))
+        .route("/hosts", get(http_list_hosts))
+        .route("/runs/:run_id/messages", get(http_list_messages))
+        .route("/sessions/:session_id", get(http_get_session))
+        .route(
+            "/sessions/:session_id/messages",
+            get(http_list_session_messages),
+        )
         .route("/runs/:run_id/input", post(http_send_input))
         .route("/ws/app", get(ws_app))
         .route("/ws/host", get(ws_host))
+        .fallback(http_static_fallback)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;

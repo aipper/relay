@@ -1,0 +1,18 @@
+services:
+  relay-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: relay-server
+    restart: unless-stopped
+    env_file:
+      - ./docker/server.env
+    ports:
+      - "8787:8787"
+    volumes:
+      - relay-data:/data
+      # Optional: override web assets with a host directory
+      # - ./web/dist:/app/web/dist:ro
+
+volumes:
+  relay-data:
