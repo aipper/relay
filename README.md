@@ -2,6 +2,10 @@
 
 Run AI coding CLIs (Codex / Claude / iFlow, etc.) on host machines, and monitor/control them remotely from a mobile-friendly PWA.
 
+Docs:
+- Deploy (VPS + clients): `docs/deploy.md`
+- 中文说明（部署/使用）：`README.zh-CN.md`
+
 ## Components
 
 - `server/`: central server (auth, routing, SQLite storage, WebSocket)
