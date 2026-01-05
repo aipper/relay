@@ -22,11 +22,17 @@ cp docker/server.env.example docker/server.env
 ```
 
 编辑 `docker/server.env`：
-- `JWT_SECRET`：设置为足够长的随机字符串
+- `JWT_SECRET`：设置为足够长的随机字符串（推荐用脚本生成）
 - `ADMIN_USERNAME`：比如 `admin`
 - 二选一：
   - `ADMIN_PASSWORD`（容器启动时会自动生成 `ADMIN_PASSWORD_HASH`）
   - `ADMIN_PASSWORD_HASH`（生产推荐直接用 hash）
+
+随机生成 `JWT_SECRET`：
+
+```sh
+bash scripts/gen-jwt-secret.sh
+```
 
 可选：不装 Rust 也能生成 hash：
 
@@ -97,4 +103,3 @@ bash scripts/install-shims.sh --auto-path
 ```sh
 bash scripts/install-shims.sh --uninstall
 ```
-

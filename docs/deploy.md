@@ -14,11 +14,17 @@ cp docker/server.env.example docker/server.env
 ```
 
 Edit `docker/server.env`:
-- `JWT_SECRET`: set to a long random string
+- `JWT_SECRET`: set to a long random string (recommended: generate)
 - `ADMIN_USERNAME`: e.g. `admin`
 - set **one** of:
   - `ADMIN_PASSWORD` (entrypoint will generate `ADMIN_PASSWORD_HASH` on boot)
   - `ADMIN_PASSWORD_HASH` (recommended for production)
+
+Generate a random JWT secret:
+
+```sh
+bash scripts/gen-jwt-secret.sh
+```
 
 Optional: generate the password hash without installing Rust:
 
@@ -78,4 +84,3 @@ Then check:
 ```sh
 systemctl --user status relay-hostd
 ```
-

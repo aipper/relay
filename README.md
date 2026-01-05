@@ -170,6 +170,12 @@ cp docker/server.env.example docker/server.env
 
 2) Edit `docker/server.env` (set a strong `JWT_SECRET`; set `ADMIN_PASSWORD` or `ADMIN_PASSWORD_HASH`).
 
+Tip: generate a random JWT secret:
+
+```sh
+bash scripts/gen-jwt-secret.sh
+```
+
 3) Start:
 
 ```sh
