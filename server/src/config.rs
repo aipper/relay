@@ -1,4 +1,5 @@
 use anyhow::{Context, anyhow};
+use argon2::PasswordHash;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -23,6 +24,11 @@ impl Config {
         let admin_username = std::env::var("ADMIN_USERNAME").context("missing ADMIN_USERNAME")?;
         let admin_password_hash =
             std::env::var("ADMIN_PASSWORD_HASH").context("missing ADMIN_PASSWORD_HASH")?;
+        PasswordHash::new(&admin_password_hash).map_err(|e| {
+            anyhow!(
+                "invalid ADMIN_PASSWORD_HASH (expected an argon2 PHC string like $argon2id$...); run `relay-server --hash-password` or set ADMIN_PASSWORD for docker entrypoint; error={e}"
+            )
+        })?;
 
         let store_raw_input = std::env::var("STORE_RAW_INPUT")
             .ok()

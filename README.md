@@ -192,6 +192,11 @@ curl -s http://127.0.0.1:8787/health
 
 PWA:
 - Open `http://<your-vps>:8787/` in a browser.
+  - If you use a reverse proxy with HTTPS, prefer `https://<your-domain>/`.
+
+Notes:
+- The PWA defaults to same-origin (current page) and does not require a Server URL.
+- Avoid logging in over plain HTTP on the public Internet; prefer HTTPS.
 
 ## Package relay-hostd + relay CLI for a client machine (no Bun)
 

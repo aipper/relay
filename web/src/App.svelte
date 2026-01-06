@@ -48,11 +48,29 @@
     data: unknown;
   };
 
-  let baseUrl = localStorage.getItem("relay.baseUrl") ?? "http://127.0.0.1:8787";
+  const browserOrigin =
+    typeof window !== "undefined" && typeof window.location?.origin === "string" ? window.location.origin : "";
+
+  let useCustomServer = false;
+  let customBaseUrl = "";
+  if (typeof window !== "undefined") {
+    const savedBaseUrl = localStorage.getItem("relay.baseUrl") ?? "";
+    const savedUseCustom = localStorage.getItem("relay.useCustomServer") === "1";
+    customBaseUrl = savedBaseUrl;
+    // Prefer current page (same-origin) by default; only opt into a custom server explicitly.
+    useCustomServer = savedUseCustom || (!browserOrigin && Boolean(savedBaseUrl));
+  }
+
+  $: apiBaseUrl =
+    (useCustomServer ? customBaseUrl.trim() : browserOrigin) ||
+    customBaseUrl.trim() ||
+    "http://127.0.0.1:8787";
+
   let username = "admin";
   let password = "";
   let token = "";
   let status = "disconnected";
+  let view: "sessions" | "hosts" | "start" | "tools" | "settings" = "sessions";
   let health: Health | null = null;
   let events: WsEnvelope[] = [];
   let runs: RunRow[] = [];
@@ -102,6 +120,13 @@
   const pendingRpc = new Map<string, (msg: WsEnvelope) => void>();
 
   type SearchMatch = { path: string; line: number; column: number; text: string };
+
+  function persistServerPrefs() {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("relay.useCustomServer", useCustomServer ? "1" : "0");
+    if (customBaseUrl.trim()) localStorage.setItem("relay.baseUrl", customBaseUrl.trim());
+    else localStorage.removeItem("relay.baseUrl");
+  }
 
   function isRecord(v: unknown): v is Record<string, unknown> {
     return Boolean(v) && typeof v === "object";
@@ -374,6 +399,18 @@
     return url.replace(/^http:/, "ws:").replace(/^https:/, "wss:").replace(/\/$/, "");
   }
 
+  function isProbablyInsecureUrl(url: string) {
+    if (!/^http:\/\//i.test(url)) return false;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      if (host === "localhost" || host === "127.0.0.1") return false;
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
   function truncateHead<T>(arr: T[], maxLen: number): T[] {
     if (arr.length <= maxLen) return arr;
     return arr.slice(arr.length - maxLen);
@@ -474,27 +511,38 @@
         ws = null;
       }
 
-      const h = await fetch(`${baseUrl.replace(/\/$/, "")}/health`);
-      if (!h.ok) throw new Error(`health failed: ${h.status}`);
+      const h = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/health`);
+      if (!h.ok) {
+        const body = await h.text().catch(() => "");
+        throw new Error(`health failed: ${h.status} ${body}`.trim());
+      }
       health = (await h.json()) as Health;
 
-      const l = await fetch(`${baseUrl.replace(/\/$/, "")}/auth/login`, {
+      const l = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/auth/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      if (!l.ok) throw new Error(`login failed: ${l.status}`);
+      if (!l.ok) {
+        const body = await l.text().catch(() => "");
+        const hint =
+          body.includes("bad password hash") || l.status === 500
+            ? "（服务端 ADMIN_PASSWORD_HASH 配置无效；请在 VPS 重新运行 scripts/docker-init.sh --reset-password，或设置 ADMIN_PASSWORD 让容器启动时自动生成）"
+            : "";
+        throw new Error(`login failed: ${l.status} ${body} ${hint}`.trim());
+      }
       const login = (await l.json()) as LoginResponse;
       token = login.access_token;
+      view = "sessions";
 
-      localStorage.setItem("relay.baseUrl", baseUrl);
+      persistServerPrefs();
 
       await refreshHosts();
       await refreshRuns();
       if (selectedRunId) await loadMessages(selectedRunId);
 
       status = "connecting";
-      const nextWs = new WebSocket(`${toWsBase(baseUrl)}/ws/app?token=${encodeURIComponent(token)}`);
+      const nextWs = new WebSocket(`${toWsBase(apiBaseUrl)}/ws/app?token=${encodeURIComponent(token)}`);
       ws = nextWs;
       nextWs.onopen = () => {
         if (ws === nextWs) status = "connected";
@@ -568,14 +616,22 @@
         }
       };
     } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
+      lastError = `${e instanceof Error ? e.message : String(e)}\nserver=${apiBaseUrl}`.trim();
       status = "error";
     }
   }
 
+  function disconnect() {
+    if (ws) ws.close();
+    ws = null;
+    token = "";
+    status = "disconnected";
+    view = "sessions";
+  }
+
   async function refreshHosts() {
     if (!token) return;
-    const r = await fetch(`${baseUrl.replace(/\/$/, "")}/hosts`, {
+    const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/hosts`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (r.ok) {
@@ -590,7 +646,7 @@
 
   async function refreshRuns() {
     if (!token) return;
-    const r = await fetch(`${baseUrl.replace(/\/$/, "")}/sessions`, {
+    const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/sessions`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (r.ok) {
@@ -603,7 +659,7 @@
 
   async function refreshRecentSessions() {
     if (!token) return;
-    const r = await fetch(`${baseUrl.replace(/\/$/, "")}/sessions/recent?limit=50`, {
+    const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/sessions/recent?limit=50`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (r.ok) {
@@ -616,7 +672,7 @@
   async function loadMessages(runId: string) {
     if (!token) return;
     const r = await fetch(
-      `${baseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200`,
+      `${apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200`,
       {
         headers: { Authorization: `Bearer ${token}` },
       },
@@ -939,32 +995,88 @@
 </script>
 
 <main>
-  <h1>relay</h1>
+  <header class="topbar">
+    <div>
+      <h1 style="margin:0">Relay</h1>
+      <div class="subtle">
+        {#if health}
+          {health.name} {health.version}
+        {:else}
+          {apiBaseUrl}
+        {/if}
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+      <span class="status-pill" data-kind={status}>{status}</span>
+      {#if token}
+        <span class="subtle"><code>{username}</code></span>
+      {/if}
+    </div>
+  </header>
 
+  {#if token}
+    <nav class="segmented" aria-label="navigation">
+      <button class:active={view === "sessions"} on:click={() => (view = "sessions")}>会话</button>
+      <button class:active={view === "hosts"} on:click={() => (view = "hosts")}>主机</button>
+      <button class:active={view === "start"} on:click={() => (view = "start")}>启动</button>
+      <button class:active={view === "tools"} on:click={() => (view = "tools")}>工具</button>
+      <button class:active={view === "settings"} on:click={() => (view = "settings")}>设置</button>
+    </nav>
+  {/if}
+
+  {#if !token}
   <section>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:600">Server</div>
+        <div style="font-size:12px;color:#6b7280">
+          {#if useCustomServer}
+            自定义：<code>{apiBaseUrl}</code>
+          {:else}
+            当前页面（同源）：<code>{apiBaseUrl}</code>
+          {/if}
+        </div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin:0">
+        <input
+          type="checkbox"
+          bind:checked={useCustomServer}
+          on:change={() => {
+            persistServerPrefs();
+          }}
+        />
+        使用自定义 Server URL
+      </label>
+    </div>
+    {#if useCustomServer}
+      <label>
+        Server URL
+        <input
+          bind:value={customBaseUrl}
+          placeholder="http(s)://host:8787"
+          on:change={() => {
+            persistServerPrefs();
+          }}
+        />
+      </label>
+    {/if}
     <label>
-      Server URL
-      <input bind:value={baseUrl} placeholder="http://host:8787" />
-    </label>
-    <label>
-      Username
+      用户名
       <input bind:value={username} />
     </label>
     <label>
-      Password
+      密码
       <input type="password" bind:value={password} />
     </label>
-    <button on:click={connect}>Connect</button>
-    <button
-      on:click={() => {
-        if (ws) ws.close();
-        ws = null;
-        status = "disconnected";
-      }}
-      disabled={!ws}
-    >
-      Disconnect
-    </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button on:click={connect}>登录</button>
+      <button on:click={disconnect} disabled={!ws && !token}>断开</button>
+    </div>
+    {#if isProbablyInsecureUrl(apiBaseUrl)}
+      <div style="margin-top:8px;padding:8px;border:1px solid #f59e0b;background:#fffbeb">
+        注意：当前是 <code>http://</code>，密码会明文传输。建议通过 HTTPS 访问（例如用 Caddy 反代）。
+      </div>
+    {/if}
     <div>Status: {status}</div>
     {#if health}
       <div>Health: {health.name} {health.version}</div>
@@ -973,9 +1085,62 @@
       <div style="color:#b91c1c">{lastError}</div>
     {/if}
   </section>
+  {/if}
 
+  {#if token && view === "settings"}
   <section>
-    <h2>Sessions</h2>
+    <h2>设置</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:600">当前服务</div>
+        <div class="subtle">
+          <code>{apiBaseUrl}</code>
+          {#if health}
+            <span class="subtle"> · {health.name} {health.version}</span>
+          {/if}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button on:click={disconnect} disabled={!ws && !token}>断开</button>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <label style="display:flex;gap:8px;align-items:center;margin:0">
+        <input
+          type="checkbox"
+          bind:checked={useCustomServer}
+          on:change={() => {
+            persistServerPrefs();
+          }}
+        />
+        使用自定义 Server URL（仅当 PWA 与服务不同源时需要）
+      </label>
+      {#if useCustomServer}
+        <label style="margin-top:10px">
+          Server URL
+          <input
+            bind:value={customBaseUrl}
+            placeholder="http(s)://host:8787"
+            on:change={() => {
+              persistServerPrefs();
+            }}
+          />
+        </label>
+      {/if}
+      {#if isProbablyInsecureUrl(apiBaseUrl)}
+        <div style="margin-top:10px;padding:8px;border:1px solid #f59e0b;background:#fffbeb">
+          检测到 <code>http://</code>：密码与 token 在传输层不加密。建议通过 HTTPS 访问。
+        </div>
+      {/if}
+    </div>
+  </section>
+  {/if}
+
+  {#if token && view === "sessions"}
+  <div class="sessions-layout">
+  <section class="sessions-list">
+    <h2>会话</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button on:click={refreshRuns} disabled={!token}>Refresh all</button>
       <button on:click={refreshRecentSessions} disabled={!token}>Refresh recent</button>
@@ -1038,8 +1203,8 @@
     {/if}
   </section>
 
-  <section>
-    <h2>Messages</h2>
+  <section class="sessions-messages">
+    <h2>消息</h2>
     <button on:click={() => selectedRunId && loadMessages(selectedRunId)} disabled={!selectedRunId || !token} style="margin-bottom:8px">
       Refresh messages
     </button>
@@ -1095,8 +1260,8 @@
     </div>
   </section>
 
-  <section>
-    <h2>Send Input</h2>
+  <section class="sessions-input">
+    <h2>发送输入</h2>
     <div style="margin:8px 0">
       <strong>Selected:</strong>
       {#if selectedRun}
@@ -1134,8 +1299,8 @@
     </button>
   </section>
 
-  <section>
-    <h2>Output</h2>
+  <section class="sessions-output">
+    <h2>输出</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <button
         on:click={() => {
@@ -1153,8 +1318,8 @@
     >
   </section>
 
-  <section>
-    <h2>Files (run cwd)</h2>
+  <section class:hidden={!token || view !== "tools"}>
+    <h2>文件（run cwd）</h2>
     <label>
       Path (relative)
       <input bind:value={filePath} placeholder="README.md" />
@@ -1168,8 +1333,8 @@
     >
   </section>
 
-  <section>
-    <h2>Search (run cwd)</h2>
+  <section class:hidden={!token || view !== "tools"}>
+    <h2>搜索（run cwd）</h2>
     <label>
       Query
       <input bind:value={searchQuery} placeholder="TODO" />
@@ -1194,8 +1359,8 @@
     {/if}
   </section>
 
-  <section>
-    <h2>Host Diagnostics (WS-RPC)</h2>
+  <section class:hidden={!token || view !== "hosts"}>
+    <h2>主机诊断（WS-RPC）</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <button on:click={refreshHosts} disabled={!token}>Refresh hosts</button>
     </div>
@@ -1256,8 +1421,8 @@
     {/if}
   </section>
 
-  <section>
-    <h2>Start Run (remote)</h2>
+  <section class:hidden={!token || view !== "start"}>
+    <h2>启动运行（远程）</h2>
     <button on:click={refreshHosts} disabled={!token} style="margin-bottom:8px">Refresh hosts</button>
     <label>
       Host ID
@@ -1289,8 +1454,8 @@
     {/if}
   </section>
 
-  <section>
-    <h2>Git (run cwd)</h2>
+  <section class:hidden={!token || view !== "tools"}>
+    <h2>Git（run cwd）</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button on:click={fetchGitStatus} disabled={!selectedRunId || status !== "connected"}>Status</button>
       <button on:click={fetchGitDiff} disabled={!selectedRunId || status !== "connected"}>Diff</button>
@@ -1312,8 +1477,8 @@
     >
   </section>
 
-  <section>
-    <h2>Todo</h2>
+  <section class="sessions-todo">
+    <h2>待办</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
       <input bind:value={todoText} placeholder="Add a todo..." />
       <button
@@ -1357,9 +1522,11 @@
       </ul>
     {/if}
   </section>
+  </div>
+  {/if}
 
-  <section>
-    <h2>Events</h2>
+  <section class:hidden={!token || view !== "settings"}>
+    <h2>事件</h2>
     <pre>{JSON.stringify(events[0] ?? null, null, 2)}</pre>
     <ul>
       {#each events as e (e.ts + e.type + (e.seq ?? 0))}
@@ -1375,25 +1542,242 @@
 </main>
 
 <style>
-  main {
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 16px;
+  :global(body) {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Segoe UI, Roboto, sans-serif;
+    background: #f2f2f7;
+    color: #111827;
   }
+
+  :global(code) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+  }
+
+  main {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .subtle {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 2px;
+  }
+
+  .segmented {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    background: rgba(17, 24, 39, 0.06);
+    border-radius: 14px;
+    padding: 6px;
+  }
+
+  .segmented button {
+    border: none;
+    background: transparent;
+    border-radius: 12px;
+    padding: 10px 8px;
+    font-weight: 800;
+    font-size: 13px;
+  }
+
+  .segmented button.active {
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+  }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.1);
+    background: rgba(255, 255, 255, 0.85);
+  }
+
+  .status-pill[data-kind="connected"] {
+    background: rgba(52, 199, 89, 0.12);
+    border-color: rgba(52, 199, 89, 0.28);
+    color: #065f46;
+  }
+
+  .status-pill[data-kind="checking"],
+  .status-pill[data-kind="connecting"] {
+    background: rgba(0, 122, 255, 0.12);
+    border-color: rgba(0, 122, 255, 0.28);
+    color: #1d4ed8;
+  }
+
+  .status-pill[data-kind="error"] {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.22);
+    color: #991b1b;
+  }
+
+  .hidden {
+    display: none;
+  }
+
+  .sessions-layout {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+
+  @media (max-width: 920px) {
+    .sessions-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .sessions-list {
+    grid-column: 1;
+    grid-row: 1 / span 4;
+  }
+
+  @media (max-width: 920px) {
+    .sessions-list {
+      grid-row: auto;
+    }
+  }
+
+  .sessions-messages {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .sessions-input {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .sessions-output {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
+  .sessions-todo {
+    grid-column: 2;
+    grid-row: 4;
+  }
+
+  @media (max-width: 920px) {
+    .sessions-messages,
+    .sessions-input,
+    .sessions-output,
+    .sessions-todo {
+      grid-column: 1;
+      grid-row: auto;
+    }
+  }
+
+  .sessions-list ul {
+    max-height: 520px;
+    overflow: auto;
+    margin-top: 10px;
+    padding-left: 18px;
+  }
+
+  h1 {
+    margin: 6px 0 2px 0;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    font-size: 20px;
+  }
+
+  h2 {
+    margin: 0 0 10px 0;
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  h3 {
+    margin: 12px 0 6px 0;
+    font-size: 13px;
+    font-weight: 800;
+    color: #374151;
+  }
+
+  section {
+    background: rgba(255, 255, 255, 0.86);
+    backdrop-filter: saturate(180%) blur(18px);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 10px 30px rgba(0, 0, 0, 0.06);
+  }
+
   label {
     display: block;
-    margin: 8px 0;
+    margin: 10px 0;
+    font-size: 12px;
+    font-weight: 700;
+    color: #374151;
   }
-  input {
+
+  input,
+  select {
     width: 100%;
-    padding: 10px;
+    padding: 10px 12px;
     box-sizing: border-box;
+    border-radius: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(255, 255, 255, 0.92);
+    font-size: 14px;
+    outline: none;
   }
+
+  input:focus,
+  select:focus {
+    border-color: rgba(0, 122, 255, 0.5);
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.18);
+  }
+
   button {
-    padding: 10px 14px;
-    margin-top: 8px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.92);
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
   }
+
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-radius: 14px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(255, 255, 255, 0.88);
+    padding: 12px;
+    overflow: auto;
+  }
+
   ul {
     padding-left: 18px;
   }

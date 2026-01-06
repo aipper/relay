@@ -58,6 +58,12 @@ curl -s http://127.0.0.1:8787/health
 
 Open the PWA:
 - `http://<your-vps>:8787/`
+- If you serve it via a reverse proxy with HTTPS, prefer `https://<your-domain>/`.
+
+PWA login notes:
+- By default, the PWA connects to the same origin (the current page), so you don't need to enter a Server URL.
+- Only use a custom Server URL when the PWA and `relay-server` are on different origins (e.g. local dev).
+- If you access the PWA over plain HTTP (non-localhost), the password is sent without transport encryption; prefer HTTPS.
 
 ## Client machine (hostd + relay CLI)
 

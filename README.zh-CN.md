@@ -66,6 +66,12 @@ curl -s http://127.0.0.1:8787/health
 
 4) 打开 PWA：
 - `http://<你的VPS>:8787/`
+  - 如果你用 Caddy/反代并启用了 HTTPS，请用 `https://<你的域名>/`
+
+PWA 登录说明：
+- 默认会连接“当前页面所在的服务”（同源），不需要填写 Server URL。
+- 只有在本地开发（PWA 不是由 `relay-server` 提供）或需要连接到其他地址时，才在页面里启用“自定义 Server URL”。
+- 如果使用 `http://` 访问（非本机 `localhost/127.0.0.1`），密码会明文传输；建议只在 HTTPS 下登录。
 
 ## 客户端（hostd + relay CLI，不依赖 bun）
 
