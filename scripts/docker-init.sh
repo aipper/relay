@@ -41,19 +41,26 @@ EXTERNAL_NET_NAME=""
 CREATE_NET_IF_MISSING="1"
 RUST_LOG_LEVEL="${RUST_LOG_LEVEL:-info}"
 PUBLISH_PORTS=""
+ADMIN_USERNAME_SET="0"
+CONTAINER_NAME_SET="0"
+EXTERNAL_NET_NAME_SET="0"
+CREATE_NET_SET="0"
+RUST_LOG_SET="0"
+PUBLISH_PORTS_SET="0"
+DO_UP_SET="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --env) ENV_PATH="${2:-}"; shift 2 ;;
-    --admin) ADMIN_USERNAME="${2:-}"; shift 2 ;;
-    --up) DO_UP="1"; shift ;;
-    --container-name) CONTAINER_NAME="${2:-}"; shift 2 ;;
-    --network) EXTERNAL_NET_NAME="${2:-}"; shift 2 ;;
-    --no-create-network) CREATE_NET_IF_MISSING="0"; shift ;;
-    --rust-log) RUST_LOG_LEVEL="${2:-}"; shift 2 ;;
-    --publish-ports) PUBLISH_PORTS="1"; shift ;;
-    --no-ports) PUBLISH_PORTS="0"; shift ;;
+    --admin) ADMIN_USERNAME="${2:-}"; ADMIN_USERNAME_SET="1"; shift 2 ;;
+    --up) DO_UP="1"; DO_UP_SET="1"; shift ;;
+    --container-name) CONTAINER_NAME="${2:-}"; CONTAINER_NAME_SET="1"; shift 2 ;;
+    --network) EXTERNAL_NET_NAME="${2:-}"; EXTERNAL_NET_NAME_SET="1"; shift 2 ;;
+    --no-create-network) CREATE_NET_IF_MISSING="0"; CREATE_NET_SET="1"; shift ;;
+    --rust-log) RUST_LOG_LEVEL="${2:-}"; RUST_LOG_SET="1"; shift 2 ;;
+    --publish-ports) PUBLISH_PORTS="1"; PUBLISH_PORTS_SET="1"; shift ;;
+    --no-ports) PUBLISH_PORTS="0"; PUBLISH_PORTS_SET="1"; shift ;;
     *) echo "unknown arg: $1" >&2; usage; exit 2 ;;
   esac
 done
@@ -90,6 +97,53 @@ compose() {
   exit 1
 }
 
+fail() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+prompt() {
+  local var="$1"
+  local label="$2"
+  local default="${3:-}"
+  local val=""
+  if [[ -n "$default" ]]; then
+    read -r -p "$label [$default]: " val
+    val="${val:-$default}"
+  else
+    read -r -p "$label: " val
+  fi
+  printf -v "$var" '%s' "$val"
+}
+
+prompt_yn() {
+  local var="$1"
+  local label="$2"
+  local default="${3:-N}"
+  local val=""
+  read -r -p "$label [y/${default}]: " val
+  val="${val:-$default}"
+  case "${val}" in
+    y|Y|yes|YES) printf -v "$var" '1' ;;
+    n|N|no|NO) printf -v "$var" '0' ;;
+    *) fail "invalid input: $val (expected y/n)" ;;
+  esac
+}
+
+prompt_secret_confirm() {
+  local var="$1"
+  local label="$2"
+  local v1=""
+  local v2=""
+  read -r -s -p "$label: " v1
+  echo ""
+  read -r -s -p "Confirm: " v2
+  echo ""
+  [[ -n "$v1" ]] || fail "empty input"
+  [[ "$v1" == "$v2" ]] || fail "inputs do not match"
+  printf -v "$var" '%s' "$v1"
+}
+
 mask_line() {
   local k="$1"
   local v="$2"
@@ -120,82 +174,33 @@ echo "[docker-init] env: $ENV_PATH"
 need bash
 need awk
 
-JWT_SECRET="$(bash "$ROOT/scripts/gen-jwt-secret.sh")"
-set_kv "JWT_SECRET" "$JWT_SECRET"
-set_kv "ADMIN_USERNAME" "$ADMIN_USERNAME"
-set_kv "RUST_LOG" "$RUST_LOG_LEVEL"
-
-echo "[docker-init] set JWT_SECRET, ADMIN_USERNAME, and RUST_LOG"
-echo "[docker-init] enter a new admin password to generate ADMIN_PASSWORD_HASH"
-read -r -s -p "Admin password: " ADMIN_PASSWORD
-echo ""
-read -r -s -p "Confirm password: " ADMIN_PASSWORD_CONFIRM
-echo ""
-
-if [[ -z "$ADMIN_PASSWORD" ]]; then
-  echo "error: empty password" >&2
-  exit 2
+if [[ "$ADMIN_USERNAME_SET" != "1" ]]; then
+  prompt ADMIN_USERNAME "Admin username" "$ADMIN_USERNAME"
 fi
-if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
-  echo "error: passwords do not match" >&2
-  exit 2
+if [[ "$RUST_LOG_SET" != "1" ]]; then
+  prompt RUST_LOG_LEVEL "RUST_LOG" "$RUST_LOG_LEVEL"
+fi
+if [[ "$EXTERNAL_NET_NAME_SET" != "1" ]]; then
+  prompt EXTERNAL_NET_NAME "External docker network name (blank to skip)" "$EXTERNAL_NET_NAME"
+fi
+if [[ "$CONTAINER_NAME_SET" != "1" ]]; then
+  prompt CONTAINER_NAME "Container name" "$CONTAINER_NAME"
 fi
 
-echo "[docker-init] building image (needed to hash password)..."
-compose build relay-server
-
-ADMIN_PASSWORD_HASH="$(
-  compose run --rm --entrypoint /app/relay-server relay-server --hash-password "$ADMIN_PASSWORD"
-)"
-if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
-  echo "error: failed to derive ADMIN_PASSWORD_HASH" >&2
-  exit 1
-fi
-
-set_kv "ADMIN_PASSWORD_HASH" "$ADMIN_PASSWORD_HASH"
-
-# Best-effort: remove any plaintext ADMIN_PASSWORD line if present.
-tmp="$(mktemp)"
-awk 'BEGIN{FS="="} $0 ~ "^ADMIN_PASSWORD[=]" {next} {print}' "$ENV_PATH" >"$tmp"
-install -m 0600 "$tmp" "$ENV_PATH"
-rm -f "$tmp"
-
-echo "[docker-init] wrote ADMIN_PASSWORD_HASH (removed ADMIN_PASSWORD if present)"
-
-prompt() {
-  local var="$1"
-  local label="$2"
-  local default="${3:-}"
-  local val=""
-  if [[ -n "$default" ]]; then
-    read -r -p "$label [$default]: " val
-    val="${val:-$default}"
+if [[ "$PUBLISH_PORTS_SET" != "1" ]]; then
+  if [[ -n "$EXTERNAL_NET_NAME" ]]; then
+    prompt_yn PUBLISH_PORTS "Publish 8787 to host?" "N"
   else
-    read -r -p "$label: " val
+    prompt_yn PUBLISH_PORTS "Publish 8787 to host?" "y"
   fi
-  printf -v "$var" '%s' "$val"
-}
-
-prompt_yn() {
-  local var="$1"
-  local label="$2"
-  local default="${3:-N}"
-  local val=""
-  read -r -p "$label [y/${default}]: " val
-  val="${val:-$default}"
-  case "${val}" in
-    y|Y|yes|YES) printf -v "$var" '1' ;;
-    n|N|no|NO) printf -v "$var" '0' ;;
-    *) echo "invalid input: $val (expected y/n)" >&2; exit 2 ;;
-  esac
-}
-
-echo "[docker-init] docker compose override (for reverse proxy network / container_name)"
-if [[ -z "${EXTERNAL_NET_NAME}" ]]; then
-  prompt EXTERNAL_NET_NAME "External docker network name (blank to skip)" ""
 fi
-if [[ -z "${CONTAINER_NAME}" ]]; then
-  CONTAINER_NAME="relay-server"
+
+if [[ -n "$EXTERNAL_NET_NAME" && "$CREATE_NET_SET" != "1" ]]; then
+  prompt_yn CREATE_NET_IF_MISSING "Create external network if missing?" "y"
+fi
+
+if [[ "$DO_UP_SET" != "1" ]]; then
+  prompt_yn DO_UP "Run docker compose up after init?" "y"
 fi
 
 if [[ -z "$PUBLISH_PORTS" ]]; then
@@ -213,11 +218,57 @@ if [[ "$PUBLISH_PORTS" != "0" && "$PUBLISH_PORTS" != "1" ]]; then
   exit 2
 fi
 
+echo "[docker-init] enter a new admin password to generate ADMIN_PASSWORD_HASH"
+prompt_secret_confirm ADMIN_PASSWORD "Admin password"
+
 if [[ -z "${EXTERNAL_NET_NAME}" && "$PUBLISH_PORTS" == "0" ]]; then
   echo "error: internal-only mode requires an external network (e.g. your caddy network)" >&2
   echo "hint: re-run and set --network caddy (or answer the network prompt), or use --publish-ports" >&2
   exit 2
 fi
+
+echo ""
+echo "[docker-init] summary"
+echo "  env:            $ENV_PATH"
+echo "  admin username: $ADMIN_USERNAME"
+echo "  RUST_LOG:       $RUST_LOG_LEVEL"
+echo "  container_name: $CONTAINER_NAME"
+echo "  network:        ${EXTERNAL_NET_NAME:-<none>}"
+if [[ "$PUBLISH_PORTS" == "1" ]]; then
+  echo "  ports:          publish"
+else
+  echo "  ports:          internal-only"
+fi
+if [[ "$DO_UP" == "1" ]]; then
+  echo "  up:             yes"
+else
+  echo "  up:             no"
+fi
+prompt_yn CONFIRM "Proceed?" "y"
+[[ "$CONFIRM" == "1" ]] || fail "aborted"
+
+JWT_SECRET="$(bash "$ROOT/scripts/gen-jwt-secret.sh")"
+set_kv "JWT_SECRET" "$JWT_SECRET"
+set_kv "ADMIN_USERNAME" "$ADMIN_USERNAME"
+set_kv "RUST_LOG" "$RUST_LOG_LEVEL"
+
+echo "[docker-init] building image (needed to hash password)..."
+compose build relay-server
+
+ADMIN_PASSWORD_HASH="$(
+  compose run --rm --entrypoint /app/relay-server relay-server --hash-password "$ADMIN_PASSWORD"
+)"
+[[ -n "$ADMIN_PASSWORD_HASH" ]] || fail "failed to derive ADMIN_PASSWORD_HASH"
+
+set_kv "ADMIN_PASSWORD_HASH" "$ADMIN_PASSWORD_HASH"
+
+# Best-effort: remove any plaintext ADMIN_PASSWORD line if present.
+tmp="$(mktemp)"
+awk 'BEGIN{FS="="} $0 ~ "^ADMIN_PASSWORD[=]" {next} {print}' "$ENV_PATH" >"$tmp"
+install -m 0600 "$tmp" "$ENV_PATH"
+rm -f "$tmp"
+
+echo "[docker-init] wrote ADMIN_PASSWORD_HASH (removed ADMIN_PASSWORD if present)"
 
 if [[ -n "$EXTERNAL_NET_NAME" ]]; then
   if ! docker network inspect "$EXTERNAL_NET_NAME" >/dev/null 2>&1; then
