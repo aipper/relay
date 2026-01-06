@@ -12,6 +12,8 @@ export default defineConfig({
     target: "es2022",
     // Include sourcemaps for debugging production deployments (personal-use friendly).
     sourcemap: true,
+    // Work around occasional minifier issues in some environments; personal-use deploys can afford larger assets.
+    minify: false,
   },
   plugins: [
     svelte(),
