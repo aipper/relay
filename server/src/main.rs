@@ -772,6 +772,7 @@ async fn http_static_fallback(
         "ico" => "image/x-icon",
         "txt" => "text/plain; charset=utf-8",
         "map" => "application/json; charset=utf-8",
+        "webmanifest" => "application/manifest+json; charset=utf-8",
         "wasm" => "application/wasm",
         _ => "application/octet-stream",
     };

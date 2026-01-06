@@ -7,6 +7,12 @@ const disablePwa =
   process.env.RELAY_DISABLE_PWA === "1" || (nodeMajor >= 25 && process.env.RELAY_FORCE_PWA !== "1");
 
 export default defineConfig({
+  build: {
+    // Prefer modern JS output to avoid downlevel private-field helpers that can be brittle in some environments.
+    target: "es2022",
+    // Include sourcemaps for debugging production deployments (personal-use friendly).
+    sourcemap: true,
+  },
   plugins: [
     svelte(),
     VitePWA({
