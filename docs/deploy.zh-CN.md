@@ -35,7 +35,7 @@ bash scripts/gen-jwt-secret.sh
 可选：不装 Rust 也能生成 hash：
 
 ```sh
-docker compose run --rm --entrypoint /app/relay-server relay-server -- --hash-password '你的密码'
+docker compose run --rm --entrypoint /app/relay-server relay-server --hash-password '你的密码'
 ```
 
 ### 2) 启动
@@ -85,3 +85,13 @@ bash scripts/package-client.sh
 ./install-hostd-systemd-user.sh --server http://<你的VPS>:8787 --host-token <token>
 systemctl --user status relay-hostd
 ```
+
+### 方式 C：一键安装（Linux，推荐）
+
+面向 Arch Linux / 其他基于 systemd 的发行版，使用交互式一键脚本：
+
+```sh
+./client-init.sh --server http://<你的VPS>:8787
+```
+
+该脚本会校验 `/health`，提示输入 host token，并默认安装为 user service；也可用 `--mode system` 安装为系统级服务。

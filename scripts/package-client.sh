@@ -54,6 +54,294 @@ run cp "$ROOT/target/release/relay" "$BIN_DIR/"
 
 run cp "$ROOT/scripts/install-shims.sh" "$PKG_DIR/install-shims.sh"
 
+cat >"$PKG_DIR/client-init.sh" <<'CLIENT_INIT_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+usage() {
+  cat <<'USAGE'
+relay client init (Linux)
+
+One-shot installer for relay-hostd + relay CLI on a client machine.
+Supports:
+  - systemd user service (default)
+  - system-wide systemd service (--mode system)
+
+Usage:
+  ./client-init.sh
+  ./client-init.sh --server http://<vps>:8787 --mode user
+  sudo ./client-init.sh --mode system
+
+Options:
+  --server <url>     relay-server base URL (http(s)://...) for health check and WS base.
+  --host-id <id>     Host identifier (default: host-<hostname>).
+  --host-token <t>   Host token (if omitted, prompted; never required in argv for --mode system).
+  --mode <m>         user|system (default: user).
+  --sock <path>      Local unix socket path (default: user->~/.relay/relay-hostd.sock, system->/run/relay/relay-hostd.sock).
+  --install-shims    Run ./install-shims.sh --auto-path after install (optional).
+  --force            Overwrite existing installed binaries/units (use carefully).
+USAGE
+}
+
+MODE="user"
+SERVER_HTTP=""
+HOST_ID=""
+HOST_TOKEN="${HOST_TOKEN:-}"
+SOCK_PATH=""
+INSTALL_SHIMS="0"
+FORCE="0"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --server) SERVER_HTTP="${2:-}"; shift 2 ;;
+    --host-id) HOST_ID="${2:-}"; shift 2 ;;
+    --host-token) HOST_TOKEN="${2:-}"; shift 2 ;;
+    --mode) MODE="${2:-}"; shift 2 ;;
+    --sock) SOCK_PATH="${2:-}"; shift 2 ;;
+    --install-shims) INSTALL_SHIMS="1"; shift ;;
+    --force) FORCE="1"; shift ;;
+    *) echo "unknown arg: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+fail() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || fail "missing dependency: $1"
+}
+
+prompt() {
+  local var="$1"
+  local label="$2"
+  local default="${3:-}"
+  local val=""
+  if [[ -n "$default" ]]; then
+    read -r -p "$label [$default]: " val
+    val="${val:-$default}"
+  else
+    read -r -p "$label: " val
+  fi
+  printf -v "$var" '%s' "$val"
+}
+
+prompt_secret() {
+  local var="$1"
+  local label="$2"
+  local val=""
+  read -r -s -p "$label: " val
+  echo ""
+  printf -v "$var" '%s' "$val"
+}
+
+as_ws_base() {
+  local u="$1"
+  case "$u" in
+    https://*) printf 'wss://%s' "${u#https://}" ;;
+    http://*) printf 'ws://%s' "${u#http://}" ;;
+    ws://*|wss://*) printf '%s' "$u" ;;
+    *) return 1 ;;
+  esac
+}
+
+check_health() {
+  local u="$1"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "[client-init] warning: curl not found; skipping server health check" >&2
+    return 0
+  fi
+  if ! curl -fsS "$u/health" >/dev/null 2>&1; then
+    fail "server not reachable: $u/health (check URL, firewall, or reverse proxy)"
+  fi
+}
+
+install_file() {
+  local src="$1"
+  local dst="$2"
+  local mode="${3:-0755}"
+  if [[ -e "$dst" && "$FORCE" != "1" ]]; then
+    fail "destination exists: $dst (use --force to overwrite)"
+  fi
+  install -m "$mode" "$src" "$dst"
+}
+
+need bash
+need install
+need awk
+need systemctl
+
+case "$MODE" in
+  user|system) ;;
+  *) fail "--mode must be user|system (got: $MODE)" ;;
+esac
+
+if [[ -z "$SERVER_HTTP" ]]; then
+  prompt SERVER_HTTP "relay-server URL (http(s)://host:port)" ""
+fi
+case "$SERVER_HTTP" in
+  http://*|https://*) ;;
+  *) fail "invalid --server: $SERVER_HTTP (expected http(s)://...)" ;;
+esac
+
+check_health "$SERVER_HTTP"
+
+if [[ -z "$HOST_ID" ]]; then
+  HOST_ID="host-$(hostname -s 2>/dev/null || hostname)"
+fi
+
+SERVER_BASE_URL="$(as_ws_base "$SERVER_HTTP")" || fail "failed to convert server URL to ws/wss: $SERVER_HTTP"
+
+if [[ ! -x "$ROOT/bin/relay-hostd" ]]; then
+  fail "missing binary: $ROOT/bin/relay-hostd"
+fi
+if [[ ! -x "$ROOT/bin/relay" ]]; then
+  fail "missing binary: $ROOT/bin/relay"
+fi
+
+if [[ "$MODE" == "system" && "$(id -u)" -ne 0 ]]; then
+  # Avoid passing HOST_TOKEN on the command line (process list). Re-run as root and prompt there.
+  exec sudo -k --preserve-env=PATH bash "$0" --mode system --server "$SERVER_HTTP" --host-id "$HOST_ID" ${SOCK_PATH:+--sock "$SOCK_PATH"} ${INSTALL_SHIMS:+--install-shims} ${FORCE:+--force}
+fi
+
+if [[ "$MODE" == "user" ]]; then
+  if ! systemctl --user show-environment >/dev/null 2>&1; then
+    fail "systemctl --user is not available (no user systemd session). Use '--mode system' or enable lingering."
+  fi
+
+  DATA_DIR="${HOME}/.relay"
+  BIN_DIR="$DATA_DIR/bin"
+  UNIT_DIR="${HOME}/.config/systemd/user"
+  mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
+
+  SOCK_PATH="${SOCK_PATH:-$DATA_DIR/relay-hostd.sock}"
+  SPOOL_DB_PATH="${SPOOL_DB_PATH:-$DATA_DIR/hostd-spool.db}"
+  HOSTD_LOG_PATH="${HOSTD_LOG_PATH:-$DATA_DIR/hostd.log}"
+  RUST_LOG_LEVEL="${RUST_LOG:-warn}"
+
+  install_file "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd" 0755
+  install_file "$ROOT/bin/relay" "$BIN_DIR/relay" 0755
+
+  if [[ -z "$HOST_TOKEN" ]]; then
+    prompt_secret HOST_TOKEN "Host token"
+  fi
+  [[ -n "$HOST_TOKEN" ]] || fail "empty host token"
+
+  cat >"$DATA_DIR/hostd.env" <<EOF
+SERVER_BASE_URL=$SERVER_BASE_URL
+HOST_ID=$HOST_ID
+HOST_TOKEN=$HOST_TOKEN
+LOCAL_UNIX_SOCKET=$SOCK_PATH
+SPOOL_DB_PATH=$SPOOL_DB_PATH
+HOSTD_LOG_PATH=$HOSTD_LOG_PATH
+RUST_LOG=$RUST_LOG_LEVEL
+EOF
+  chmod 0600 "$DATA_DIR/hostd.env"
+
+  cat >"$UNIT_DIR/relay-hostd.service" <<EOF
+[Unit]
+Description=relay-hostd (user)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.relay/hostd.env
+ExecStart=%h/.relay/bin/relay-hostd
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=%h/.relay
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now relay-hostd
+
+  echo "[ok] installed (user service)"
+  echo "status: systemctl --user status relay-hostd"
+  echo "logs:   journalctl --user -u relay-hostd -f"
+  echo "sock:   $SOCK_PATH"
+else
+  # system mode (root)
+  DATA_DIR="/var/lib/relay"
+  RUN_DIR="/run/relay"
+  ENV_DIR="/etc/relay"
+  BIN_DIR="/usr/local/bin"
+  UNIT_PATH="/etc/systemd/system/relay-hostd.service"
+  mkdir -p "$DATA_DIR" "$RUN_DIR" "$ENV_DIR"
+
+  SOCK_PATH="${SOCK_PATH:-$RUN_DIR/relay-hostd.sock}"
+  SPOOL_DB_PATH="${SPOOL_DB_PATH:-$DATA_DIR/hostd-spool.db}"
+  HOSTD_LOG_PATH="${HOSTD_LOG_PATH:-$DATA_DIR/hostd.log}"
+  RUST_LOG_LEVEL="${RUST_LOG:-warn}"
+
+  install_file "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd" 0755
+  install_file "$ROOT/bin/relay" "$BIN_DIR/relay" 0755
+
+  if [[ -z "$HOST_TOKEN" ]]; then
+    prompt_secret HOST_TOKEN "Host token"
+  fi
+  [[ -n "$HOST_TOKEN" ]] || fail "empty host token"
+
+  cat >"$ENV_DIR/hostd.env" <<EOF
+SERVER_BASE_URL=$SERVER_BASE_URL
+HOST_ID=$HOST_ID
+HOST_TOKEN=$HOST_TOKEN
+LOCAL_UNIX_SOCKET=$SOCK_PATH
+SPOOL_DB_PATH=$SPOOL_DB_PATH
+HOSTD_LOG_PATH=$HOSTD_LOG_PATH
+RUST_LOG=$RUST_LOG_LEVEL
+EOF
+  chmod 0600 "$ENV_DIR/hostd.env"
+
+  cat >"$UNIT_PATH" <<EOF
+[Unit]
+Description=relay-hostd (system)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=$ENV_DIR/hostd.env
+ExecStart=$BIN_DIR/relay-hostd
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now relay-hostd
+
+  echo "[ok] installed (system service)"
+  echo "status: systemctl status relay-hostd"
+  echo "logs:   journalctl -u relay-hostd -f"
+  echo "sock:   $SOCK_PATH"
+fi
+
+if [[ "$INSTALL_SHIMS" == "1" ]]; then
+  if [[ -x "$ROOT/install-shims.sh" ]]; then
+    bash "$ROOT/install-shims.sh" --auto-path
+  else
+    echo "[client-init] warning: install-shims.sh not found; skipping" >&2
+  fi
+fi
+CLIENT_INIT_EOF
+
 cat >"$PKG_DIR/hostd-up.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -269,6 +557,7 @@ echo "sock: $SOCK_PATH"
 EOF
 
 run chmod +x \
+  "$PKG_DIR/client-init.sh" \
   "$PKG_DIR/hostd-up.sh" \
   "$PKG_DIR/install-shims.sh" \
   "$PKG_DIR/install-hostd-systemd-user.sh"
@@ -279,6 +568,7 @@ relay client package
 Contents:
   - bin/relay-hostd : host daemon (run on the machine that runs codex/claude/iflow)
   - bin/relay       : local CLI (talks to hostd via unix socket)
+  - client-init.sh  : one-shot installer (Linux, systemd user/system)
   - hostd-up.sh     : start hostd and connect to a remote relay-server
   - install-hostd-systemd-user.sh: install hostd as a Linux systemd user service
   - install-shims.sh: install codex/claude/iflow command shims to run via relay
@@ -289,6 +579,9 @@ Quick start:
 
   2) Start a run (example):
      ./bin/relay codex --cwd /path/to/project
+
+  3) Optional (Linux): one-shot install (recommended):
+     ./client-init.sh --server http://<your-vps>:8787
 
   3) Optional (Linux): install hostd as a user service:
      ./install-hostd-systemd-user.sh --server http://<your-vps>:8787 --host-token <token>

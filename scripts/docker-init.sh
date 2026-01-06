@@ -125,7 +125,7 @@ echo "[docker-init] building image (needed to hash password)..."
 compose build relay-server
 
 ADMIN_PASSWORD_HASH="$(
-  compose run --rm --entrypoint /app/relay-server relay-server -- --hash-password "$ADMIN_PASSWORD"
+  compose run --rm --entrypoint /app/relay-server relay-server --hash-password "$ADMIN_PASSWORD"
 )"
 if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
   echo "error: failed to derive ADMIN_PASSWORD_HASH" >&2
@@ -147,4 +147,3 @@ if [[ "$DO_UP" == "1" ]]; then
   compose up -d --build
   echo "[docker-init] ok"
 fi
-

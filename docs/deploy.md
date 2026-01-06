@@ -35,7 +35,7 @@ bash scripts/gen-jwt-secret.sh
 Optional: generate the password hash without installing Rust:
 
 ```sh
-docker compose run --rm --entrypoint /app/relay-server relay-server -- --hash-password 'your-password'
+docker compose run --rm --entrypoint /app/relay-server relay-server --hash-password 'your-password'
 ```
 
 ### 2) Start
@@ -90,3 +90,13 @@ Then check:
 ```sh
 systemctl --user status relay-hostd
 ```
+
+### Option C: one-shot client installer (Linux, recommended)
+
+For Arch Linux / systemd-based distros, use the interactive installer:
+
+```sh
+./client-init.sh --server http://<your-vps>:8787
+```
+
+It validates `/health`, prompts for the host token, and installs either a user service (default) or a system service (`--mode system`).
