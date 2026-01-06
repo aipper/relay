@@ -29,6 +29,8 @@ Options:
   --rust-log <level> Set RUST_LOG (default: info)
   --no-ports        Do not publish 8787 to the host (internal Docker networking only; recommended with --network)
   --publish-ports   Publish 8787:8787 to the host (default if no --network is set)
+  --reset-password  Prompt for a new admin password and overwrite ADMIN_PASSWORD_HASH
+  --rotate-jwt      Generate a new JWT_SECRET (will invalidate existing tokens)
 EOF
 }
 
@@ -41,6 +43,8 @@ EXTERNAL_NET_NAME=""
 CREATE_NET_IF_MISSING="1"
 RUST_LOG_LEVEL="${RUST_LOG_LEVEL:-info}"
 PUBLISH_PORTS=""
+RESET_PASSWORD="0"
+ROTATE_JWT="0"
 ADMIN_USERNAME_SET="0"
 CONTAINER_NAME_SET="0"
 EXTERNAL_NET_NAME_SET="0"
@@ -61,6 +65,8 @@ while [[ $# -gt 0 ]]; do
     --rust-log) RUST_LOG_LEVEL="${2:-}"; RUST_LOG_SET="1"; shift 2 ;;
     --publish-ports) PUBLISH_PORTS="1"; PUBLISH_PORTS_SET="1"; shift ;;
     --no-ports) PUBLISH_PORTS="0"; PUBLISH_PORTS_SET="1"; shift ;;
+    --reset-password) RESET_PASSWORD="1"; shift ;;
+    --rotate-jwt) ROTATE_JWT="1"; shift ;;
     *) echo "unknown arg: $1" >&2; usage; exit 2 ;;
   esac
 done
@@ -144,6 +150,13 @@ prompt_secret_confirm() {
   printf -v "$var" '%s' "$v1"
 }
 
+read_env_value() {
+  local key="$1"
+  local file="$2"
+  [[ -f "$file" ]] || return 1
+  awk -v k="$key" -F= '$0 ~ ("^"k"=") {sub("^"k"=",""); print; exit}' "$file"
+}
+
 mask_line() {
   local k="$1"
   local v="$2"
@@ -174,11 +187,21 @@ echo "[docker-init] env: $ENV_PATH"
 need bash
 need awk
 
+EXISTING_JWT_SECRET="$(read_env_value "JWT_SECRET" "$ENV_PATH" || true)"
+EXISTING_ADMIN_USERNAME="$(read_env_value "ADMIN_USERNAME" "$ENV_PATH" || true)"
+EXISTING_ADMIN_PASSWORD_HASH="$(read_env_value "ADMIN_PASSWORD_HASH" "$ENV_PATH" || true)"
+EXISTING_RUST_LOG="$(read_env_value "RUST_LOG" "$ENV_PATH" || true)"
+
+HAS_EXISTING_PASSWORD_HASH="0"
+if [[ -n "$EXISTING_ADMIN_PASSWORD_HASH" ]]; then
+  HAS_EXISTING_PASSWORD_HASH="1"
+fi
+
 if [[ "$ADMIN_USERNAME_SET" != "1" ]]; then
-  prompt ADMIN_USERNAME "Admin username" "$ADMIN_USERNAME"
+  prompt ADMIN_USERNAME "Admin username" "${EXISTING_ADMIN_USERNAME:-$ADMIN_USERNAME}"
 fi
 if [[ "$RUST_LOG_SET" != "1" ]]; then
-  prompt RUST_LOG_LEVEL "RUST_LOG" "$RUST_LOG_LEVEL"
+  prompt RUST_LOG_LEVEL "RUST_LOG" "${EXISTING_RUST_LOG:-$RUST_LOG_LEVEL}"
 fi
 if [[ "$EXTERNAL_NET_NAME_SET" != "1" ]]; then
   prompt EXTERNAL_NET_NAME "External docker network name (blank to skip)" "$EXTERNAL_NET_NAME"
@@ -218,8 +241,20 @@ if [[ "$PUBLISH_PORTS" != "0" && "$PUBLISH_PORTS" != "1" ]]; then
   exit 2
 fi
 
-echo "[docker-init] enter a new admin password to generate ADMIN_PASSWORD_HASH"
-prompt_secret_confirm ADMIN_PASSWORD "Admin password"
+WILL_ROTATE_JWT="0"
+if [[ "$ROTATE_JWT" == "1" || -z "$EXISTING_JWT_SECRET" ]]; then
+  WILL_ROTATE_JWT="1"
+fi
+
+WILL_RESET_PASSWORD_HASH="0"
+if [[ "$RESET_PASSWORD" == "1" || "$HAS_EXISTING_PASSWORD_HASH" != "1" ]]; then
+  WILL_RESET_PASSWORD_HASH="1"
+fi
+
+if [[ "$WILL_RESET_PASSWORD_HASH" == "1" ]]; then
+  echo "[docker-init] enter a new admin password to generate ADMIN_PASSWORD_HASH"
+  prompt_secret_confirm ADMIN_PASSWORD "Admin password"
+fi
 
 if [[ -z "${EXTERNAL_NET_NAME}" && "$PUBLISH_PORTS" == "0" ]]; then
   echo "error: internal-only mode requires an external network (e.g. your caddy network)" >&2
@@ -244,31 +279,45 @@ if [[ "$DO_UP" == "1" ]]; then
 else
   echo "  up:             no"
 fi
+if [[ "$WILL_ROTATE_JWT" == "1" ]]; then
+  echo "  JWT_SECRET:     generate new"
+else
+  echo "  JWT_SECRET:     keep existing"
+fi
+if [[ "$WILL_RESET_PASSWORD_HASH" == "1" ]]; then
+  echo "  admin password: set/update"
+else
+  echo "  admin password: keep existing hash"
+fi
 prompt_yn CONFIRM "Proceed?" "y"
 [[ "$CONFIRM" == "1" ]] || fail "aborted"
 
-JWT_SECRET="$(bash "$ROOT/scripts/gen-jwt-secret.sh")"
-set_kv "JWT_SECRET" "$JWT_SECRET"
+if [[ "$WILL_ROTATE_JWT" == "1" ]]; then
+  JWT_SECRET="$(bash "$ROOT/scripts/gen-jwt-secret.sh")"
+  set_kv "JWT_SECRET" "$JWT_SECRET"
+fi
 set_kv "ADMIN_USERNAME" "$ADMIN_USERNAME"
 set_kv "RUST_LOG" "$RUST_LOG_LEVEL"
 
-echo "[docker-init] building image (needed to hash password)..."
-compose build relay-server
+if [[ "$WILL_RESET_PASSWORD_HASH" == "1" ]]; then
+  echo "[docker-init] building image (needed to hash password)..."
+  compose build relay-server
 
-ADMIN_PASSWORD_HASH="$(
-  compose run --rm --entrypoint /app/relay-server relay-server --hash-password "$ADMIN_PASSWORD"
-)"
-[[ -n "$ADMIN_PASSWORD_HASH" ]] || fail "failed to derive ADMIN_PASSWORD_HASH"
+  ADMIN_PASSWORD_HASH="$(
+    compose run --rm --entrypoint /app/relay-server relay-server --hash-password "$ADMIN_PASSWORD"
+  )"
+  [[ -n "$ADMIN_PASSWORD_HASH" ]] || fail "failed to derive ADMIN_PASSWORD_HASH"
 
-set_kv "ADMIN_PASSWORD_HASH" "$ADMIN_PASSWORD_HASH"
+  set_kv "ADMIN_PASSWORD_HASH" "$ADMIN_PASSWORD_HASH"
 
-# Best-effort: remove any plaintext ADMIN_PASSWORD line if present.
-tmp="$(mktemp)"
-awk 'BEGIN{FS="="} $0 ~ "^ADMIN_PASSWORD[=]" {next} {print}' "$ENV_PATH" >"$tmp"
-install -m 0600 "$tmp" "$ENV_PATH"
-rm -f "$tmp"
+  # Best-effort: remove any plaintext ADMIN_PASSWORD line if present.
+  tmp="$(mktemp)"
+  awk 'BEGIN{FS="="} $0 ~ "^ADMIN_PASSWORD[=]" {next} {print}' "$ENV_PATH" >"$tmp"
+  install -m 0600 "$tmp" "$ENV_PATH"
+  rm -f "$tmp"
 
-echo "[docker-init] wrote ADMIN_PASSWORD_HASH (removed ADMIN_PASSWORD if present)"
+  echo "[docker-init] wrote ADMIN_PASSWORD_HASH (removed ADMIN_PASSWORD if present)"
+fi
 
 if [[ -n "$EXTERNAL_NET_NAME" ]]; then
   if ! docker network inspect "$EXTERNAL_NET_NAME" >/dev/null 2>&1; then
