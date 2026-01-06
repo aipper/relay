@@ -154,7 +154,16 @@ read_env_value() {
   local key="$1"
   local file="$2"
   [[ -f "$file" ]] || return 1
-  awk -v k="$key" -F= '$0 ~ ("^"k"=") {sub("^"k"=",""); print; exit}' "$file"
+  awk -v k="$key" -F= '
+    $0 ~ ("^[[:space:]]*(export[[:space:]]+)?" k "=") {
+      sub("^[[:space:]]*(export[[:space:]]+)?" k "=", "");
+      # Strip surrounding quotes if present.
+      if ($0 ~ /^".*"$/) { sub(/^"/, ""); sub(/"$/, ""); }
+      if ($0 ~ /^\x27.*\x27$/) { sub(/^\x27/, ""); sub(/\x27$/, ""); }
+      print;
+      exit
+    }
+  ' "$file"
 }
 
 mask_line() {
@@ -169,8 +178,11 @@ set_kv() {
   local tmp
   tmp="$(mktemp)"
   if [[ -f "$ENV_PATH" ]]; then
-    # Remove existing key lines (KEY=... or KEY: ...), keep others.
-    awk -v k="$key" 'BEGIN{FS="="} $0 ~ "^"k"[=]" {next} {print}' "$ENV_PATH" >"$tmp"
+    # Remove existing key lines (KEY=... or export KEY=...), keep others.
+    awk -v k="$key" '
+      $0 ~ ("^[[:space:]]*(export[[:space:]]+)?" k "=") {next}
+      {print}
+    ' "$ENV_PATH" >"$tmp"
   else
     cp "$ROOT/docker/server.env.example" "$tmp"
   fi
@@ -195,6 +207,20 @@ EXISTING_RUST_LOG="$(read_env_value "RUST_LOG" "$ENV_PATH" || true)"
 HAS_EXISTING_PASSWORD_HASH="0"
 if [[ -n "$EXISTING_ADMIN_PASSWORD_HASH" ]]; then
   HAS_EXISTING_PASSWORD_HASH="1"
+fi
+
+if [[ -f "$ENV_PATH" ]]; then
+  echo "[docker-init] detected existing env:"
+  if [[ -n "$EXISTING_JWT_SECRET" ]]; then
+    echo "  JWT_SECRET: yes"
+  else
+    echo "  JWT_SECRET: no"
+  fi
+  if [[ -n "$EXISTING_ADMIN_PASSWORD_HASH" ]]; then
+    echo "  ADMIN_PASSWORD_HASH: yes"
+  else
+    echo "  ADMIN_PASSWORD_HASH: no"
+  fi
 fi
 
 if [[ "$ADMIN_USERNAME_SET" != "1" ]]; then

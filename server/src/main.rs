@@ -780,6 +780,19 @@ async fn http_static_fallback(
     let mut resp = axum::response::Response::new(axum::body::Body::from(data));
     resp.headers_mut()
         .insert(axum::http::header::CONTENT_TYPE, mime.parse().unwrap());
+    // Avoid caching index.html so that deploys pick up new hashed asset URLs.
+    // Cache hashed assets aggressively for performance.
+    let cache_control = if served_path == "index.html" {
+        "no-store"
+    } else if served_path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=3600"
+    };
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        cache_control.parse().unwrap(),
+    );
     resp
 }
 
