@@ -15,6 +15,12 @@ Quick init (generates JWT_SECRET + ADMIN_PASSWORD_HASH):
 bash scripts/docker-init.sh
 ```
 
+If you use Caddy (or another reverse proxy) in the same Docker network, you can also configure an external network and a stable container name:
+
+```sh
+bash scripts/docker-init.sh --network caddy --container-name relay-server --no-ports
+```
+
 ```sh
 cp docker/server.env.example docker/server.env
 ```

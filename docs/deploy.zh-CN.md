@@ -15,6 +15,12 @@
 bash scripts/docker-init.sh
 ```
 
+如果你使用 Caddy（或其他反代）并希望和它在同一个 Docker 网络，可以在初始化时指定外部网络和固定的容器名：
+
+```sh
+bash scripts/docker-init.sh --network caddy --container-name relay-server --no-ports
+```
+
 ```sh
 cp docker/server.env.example docker/server.env
 ```

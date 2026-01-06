@@ -21,6 +21,12 @@
 bash scripts/docker-init.sh
 ```
 
+如果你使用 Caddy 并希望和它在同一个 Docker 网络：
+
+```sh
+bash scripts/docker-init.sh --network caddy --container-name relay-server --no-ports
+```
+
 1) 准备配置：
 
 ```sh

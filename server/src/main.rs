@@ -830,6 +830,14 @@ async fn main() -> anyhow::Result<()> {
         state.web_dist_dir = Some(std::path::PathBuf::from(web_dist_dir));
     }
 
+    tracing::info!(
+        bind_addr = %state.cfg.bind_addr,
+        database_url = %state.cfg.database_url,
+        admin_username = %state.cfg.admin_username,
+        web_dist_dir = ?state.web_dist_dir,
+        "relay-server starting"
+    );
+
     // Background cleanup: keep 3 days of finished runs/events (MVP: only events table).
     let cleanup_db = state.db.clone();
     tokio::spawn(async move {

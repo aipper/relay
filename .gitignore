@@ -3,6 +3,7 @@ conf/env
 .env
 .env.*
 docker/server.env
+docker-compose.override.yml
 
 # Rust
 /target
