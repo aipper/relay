@@ -162,6 +162,12 @@ This deploys the central `relay-server` and serves the PWA (static assets) from 
 
 See `docs/deploy.md` for a full VPS + client guide.
 
+Quick init (generates JWT_SECRET + ADMIN_PASSWORD_HASH):
+
+```sh
+bash scripts/docker-init.sh
+```
+
 1) Create env file:
 
 ```sh
@@ -170,11 +176,7 @@ cp docker/server.env.example docker/server.env
 
 2) Edit `docker/server.env` (set a strong `JWT_SECRET`; set `ADMIN_PASSWORD` or `ADMIN_PASSWORD_HASH`).
 
-Tip: generate a random JWT secret:
-
-```sh
-bash scripts/gen-jwt-secret.sh
-```
+Tip: generate a random JWT secret: `bash scripts/gen-jwt-secret.sh`
 
 3) Start:
 

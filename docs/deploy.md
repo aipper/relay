@@ -9,6 +9,12 @@ This system has two roles:
 
 ### 1) Configure env
 
+Quick init (generates JWT_SECRET + ADMIN_PASSWORD_HASH):
+
+```sh
+bash scripts/docker-init.sh
+```
+
 ```sh
 cp docker/server.env.example docker/server.env
 ```

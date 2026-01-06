@@ -9,6 +9,12 @@
 
 ### 1) 配置 env
 
+快速初始化（自动生成 `JWT_SECRET` + `ADMIN_PASSWORD_HASH`）：
+
+```sh
+bash scripts/docker-init.sh
+```
+
 ```sh
 cp docker/server.env.example docker/server.env
 ```

@@ -6,7 +6,6 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY relay-cli/Cargo.toml relay-cli/Cargo.toml
 COPY relay-cli/src relay-cli/src
-COPY relay-cli/README.md relay-cli/README.md
 COPY hostd/Cargo.toml hostd/Cargo.toml
 COPY hostd/src hostd/src
 COPY protocol/Cargo.toml protocol/Cargo.toml

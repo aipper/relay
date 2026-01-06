@@ -15,6 +15,12 @@
 
 ## VPS 部署（Docker，包含 PWA）
 
+快速初始化（自动生成 `JWT_SECRET` + `ADMIN_PASSWORD_HASH`）：
+
+```sh
+bash scripts/docker-init.sh
+```
+
 1) 准备配置：
 
 ```sh
