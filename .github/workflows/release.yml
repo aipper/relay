@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*.*.*"
+    branches-ignore:
+      - "**"
   workflow_dispatch:
     inputs:
       version:
@@ -67,7 +69,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             os_id: linux
             arch_id: x64
-          - runner: macos-13
+          - runner: macos-15-intel
             target: x86_64-apple-darwin
             os_id: darwin
             arch_id: x64
@@ -128,7 +130,8 @@ jobs:
   npm-publish:
     runs-on: ubuntu-latest
     needs: [meta, github-release]
-    if: ${{ secrets.NPM_TOKEN != '' }}
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -136,7 +139,9 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
       - name: Publish @aipper/relay-cli
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
         working-directory: cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
+      - name: Skip npm publish (no NPM_TOKEN)
+        if: ${{ env.NODE_AUTH_TOKEN == '' }}
+        run: echo "NPM_TOKEN is not configured; skipping npm publish."
