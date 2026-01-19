@@ -230,7 +230,7 @@ if [[ "$MODE" == "user" ]]; then
   DATA_DIR="${HOME}/.relay"
   CONFIG_PATH="${DATA_DIR}/hostd.json"
   BIN_DIR="$DATA_DIR/bin"
-  UNIT_DIR="${HOME}/.config/systemd/user"
+  UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
   mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
 
   SOCK_PATH="${SOCK_PATH:-$DATA_DIR/relay-hostd.sock}"
@@ -275,8 +275,9 @@ ReadWritePaths=%h/.relay
 WantedBy=default.target
 EOF
 
+  [[ -f "$UNIT_DIR/relay-hostd.service" ]] || fail "unit file not found: $UNIT_DIR/relay-hostd.service"
   systemctl --user daemon-reload
-  systemctl --user enable --now relay-hostd
+  systemctl --user enable --now relay-hostd.service
 
   echo "[ok] installed (user service)"
   echo "status: systemctl --user status relay-hostd"
@@ -463,7 +464,7 @@ Usage:
 Notes:
   - Requires: systemd user sessions (systemctl --user).
   - Stores env at: ~/.relay/hostd.env
-  - Installs unit at: ~/.config/systemd/user/relay-hostd.service
+  - Installs unit at: $XDG_CONFIG_HOME/systemd/user/relay-hostd.service (default: ~/.config/systemd/user/relay-hostd.service)
 USAGE
 }
 
@@ -511,7 +512,8 @@ esac
 
 DATA_DIR="${HOME}/.relay"
 BIN_DIR="$DATA_DIR/bin"
-mkdir -p "$DATA_DIR" "$BIN_DIR" "${HOME}/.config/systemd/user"
+UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
 
 install -m 0755 "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd"
 install -m 0755 "$ROOT/bin/relay" "$BIN_DIR/relay"
@@ -534,7 +536,7 @@ RUST_LOG_LEVEL="${RUST_LOG:-warn}"
 } >"$DATA_DIR/hostd.env"
 chmod 0600 "$DATA_DIR/hostd.env"
 
-cat >"${HOME}/.config/systemd/user/relay-hostd.service" <<EOF
+cat >"$UNIT_DIR/relay-hostd.service" <<EOF
 [Unit]
 Description=relay-hostd (runs local CLI sessions and connects to relay-server)
 After=network-online.target
@@ -556,8 +558,9 @@ ReadWritePaths=%h/.relay
 WantedBy=default.target
 EOF
 
+[[ -f "$UNIT_DIR/relay-hostd.service" ]] || { echo "unit file not found: $UNIT_DIR/relay-hostd.service" >&2; exit 1; }
 systemctl --user daemon-reload
-systemctl --user enable --now relay-hostd
+systemctl --user enable --now relay-hostd.service
 
 echo "[ok] relay-hostd installed and started"
 echo "logs: journalctl --user -u relay-hostd -f"
