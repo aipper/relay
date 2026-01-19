@@ -41,6 +41,10 @@ Notes:
 
 - Browsers cannot set custom WS headers; the app uses query params for auth in MVP.
 - The host connection is outbound from `hostd` to `server` (works behind NAT).
+- Host authentication uses **TOFU (Trust On First Use)**:
+  - On first successful connection for a given `host_id`, the server stores `sha256(host_token)` in the DB.
+  - Subsequent connections for the same `host_id` must present the same `host_token` (token rotation requires a new `host_id` or deleting the host record).
+  - `host_token` is never stored in plaintext.
 
 ## HTTP Endpoints (MVP)
 
@@ -133,6 +137,9 @@ Emitted when a run needs an explicit user decision (approve/deny) to proceed.
 - `request_id`: UUID (stable identifier for the request)
 - `reason`: `permission | choice | prompt | unknown`
 - `prompt`: short prompt text for UI display
+- `op_tool`: optional operation tool name for UI/risk hints (e.g. `rpc.fs.read`, `rpc.fs.write`, `bash`)
+- `op_args`: optional full operation args (JSON object/value) for “view full args” UI; should be redacted/truncated as needed
+- `op_args_summary`: optional short args summary for list/cards (recommended max 80 chars)
 - `approve_text`: suggested text to write to PTY on approve (e.g. `"y\n"`)
 - `deny_text`: suggested text to write to PTY on deny (e.g. `"n\n"`)
 
@@ -215,6 +222,35 @@ Response `result`:
 
 - `path`: same as request (string)
 - `entries`: array of `{ name, is_dir, size_bytes }` (size is only populated for regular files)
+
+### `rpc.fs.write` (web/cli → server → hostd)
+
+Write a UTF-8 file relative to the run's `cwd`.
+
+Notes:
+
+- This operation is **permission-gated**: hostd emits `run.permission_requested` and waits for `run.permission.approve` / `run.permission.deny`.
+- For safety/UI, `run.permission_requested.data.op_args` may contain only a redacted/truncated preview rather than full content.
+
+`data`:
+
+- `request_id`: UUID
+- `path`: relative file path (e.g. `"README.md"`)
+- `content`: UTF-8 content to write (hostd may truncate to a max size)
+
+### `rpc.bash` (web/cli → server → hostd)
+
+Execute a shell command (`bash -lc`) under the run's `cwd`.
+
+Notes:
+
+- This operation is **permission-gated**: hostd emits `run.permission_requested` and waits for `run.permission.approve` / `run.permission.deny`.
+- Outputs are truncated for UI/storage.
+
+`data`:
+
+- `request_id`: UUID
+- `cmd`: command string to execute
 - `truncated`: boolean (when entry count hits max)
 
 ### `rpc.git.status` / `rpc.git.diff` (web/cli → server → hostd)

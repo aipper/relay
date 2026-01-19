@@ -453,6 +453,54 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
     Some(v.to_string())
 }
 
+fn sha256_hex(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+async fn tofu_register_or_verify_host(
+    db: &db::Db,
+    host_id: &str,
+    host_token: &str,
+) -> anyhow::Result<bool> {
+    let host_id = host_id.trim();
+    let host_token = host_token.trim();
+    anyhow::ensure!(!host_id.is_empty(), "empty host_id");
+    anyhow::ensure!(!host_token.is_empty(), "empty host_token");
+
+    let token_hash = sha256_hex(host_token);
+    let now = Utc::now().to_rfc3339();
+
+    // TOFU: first connection "claims" host_id by inserting token_hash.
+    // Subsequent connections must match the stored token_hash.
+    let inserted = sqlx::query(
+        r#"
+INSERT INTO hosts (id, token_hash, last_seen_at) VALUES (?1, ?2, ?3)
+ON CONFLICT(id) DO NOTHING
+"#,
+    )
+    .bind(host_id)
+    .bind(&token_hash)
+    .bind(&now)
+    .execute(db)
+    .await?
+    .rows_affected()
+        == 1;
+
+    let stored_hash = sqlx::query_scalar::<_, String>("SELECT token_hash FROM hosts WHERE id=?1")
+        .bind(host_id)
+        .fetch_optional(db)
+        .await?;
+    let Some(stored_hash) = stored_hash else {
+        anyhow::bail!("missing host record after TOFU insert");
+    };
+
+    anyhow::ensure!(stored_hash == token_hash, "host_token mismatch");
+    Ok(inserted)
+}
+
 async fn ws_app(
     State(state): State<AppState>,
     Query(q): Query<WsAuthQuery>,
@@ -482,8 +530,28 @@ async fn ws_host(
             .into_response();
     };
 
-    // MVP: accept any host_id/host_token without registration flow; store token hash later.
-    tracing::info!(%host_id, "host connected");
+    let inserted = match tofu_register_or_verify_host(&state.db, &host_id, &host_token).await {
+        Ok(inserted) => inserted,
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("mismatch") {
+                tracing::warn!(%host_id, "host auth failed: token mismatch");
+                return (StatusCode::UNAUTHORIZED, "invalid host_id/host_token").into_response();
+            }
+            tracing::error!(%host_id, error=?e, "host auth failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "host auth failed".to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    if inserted {
+        tracing::info!(%host_id, "host registered (TOFU)");
+    } else {
+        tracing::info!(%host_id, "host authenticated");
+    }
 
     ws.on_upgrade(move |socket| handle_host_socket(state, socket, host_id, host_token))
 }
@@ -599,16 +667,11 @@ async fn handle_host_socket(
     // Basic last_seen update loop.
     let update_seen = async {
         let now = Utc::now().to_rfc3339();
-        let token_hash = {
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(host_token.as_bytes());
-            format!("{:x}", hasher.finalize())
-        };
+        let token_hash = { sha256_hex(&host_token) };
         let _ = sqlx::query(
             r#"
 INSERT INTO hosts (id, token_hash, last_seen_at) VALUES (?1, ?2, ?3)
-ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash, last_seen_at=excluded.last_seen_at
+ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at
 "#,
         )
         .bind(&host_id)
@@ -646,7 +709,49 @@ ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash, last_seen_at=exclu
                     let _ = db::upsert_run_started(&state.db, &run_id, &host_id, tool, cwd, env.ts)
                         .await;
                 } else if env.r#type == "run.awaiting_input" {
-                    let _ = db::mark_run_awaiting_input(&state.db, &run_id).await;
+                    let has_request_id = env
+                        .data
+                        .get("request_id")
+                        .and_then(|v| v.as_str())
+                        .is_some();
+                    if has_request_id {
+                        let _ = db::mark_run_awaiting_approval(&state.db, &run_id, env.ts).await;
+                    } else {
+                        let _ = db::mark_run_awaiting_input(&state.db, &run_id, env.ts).await;
+                    }
+                } else if env.r#type == "run.permission_requested" {
+                    let request_id = env.data.get("request_id").and_then(|v| v.as_str());
+                    if let Some(request_id) = request_id {
+                        let reason = env.data.get("reason").and_then(|v| v.as_str());
+                        let prompt = env.data.get("prompt").and_then(|v| v.as_str());
+                        let op_tool = env.data.get("op_tool").and_then(|v| v.as_str());
+                        let mut op_args_summary = env
+                            .data
+                            .get("op_args_summary")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        if op_args_summary.is_none() {
+                            if let Some(op_args) = env.data.get("op_args") {
+                                if !op_args.is_null() {
+                                    let s = truncate_text(&json_compact(op_args), 80);
+                                    if s != "null" && !s.is_empty() {
+                                        op_args_summary = Some(s);
+                                    }
+                                }
+                            }
+                        }
+                        let _ = db::set_run_pending_permission(
+                            &state.db,
+                            &run_id,
+                            env.ts,
+                            request_id,
+                            reason,
+                            prompt,
+                            op_tool,
+                            op_args_summary.as_deref(),
+                        )
+                        .await;
+                    }
                 } else if env.r#type == "run.exited" {
                     let exit_code = env
                         .data
@@ -654,9 +759,22 @@ ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash, last_seen_at=exclu
                         .and_then(|v| v.as_i64())
                         .unwrap_or(-1);
                     let _ = db::finish_run(&state.db, &run_id, env.ts, exit_code).await;
+                } else if env.r#type == "run.input" {
+                    let _ = db::mark_run_running(&state.db, &run_id, env.ts).await;
+                } else if env.r#type == "tool.result" {
+                    if let Some(request_id) = env.data.get("request_id").and_then(|v| v.as_str()) {
+                        let _ = db::clear_run_pending_permission_by_request_id(
+                            &state.db, &run_id, env.ts, request_id,
+                        )
+                        .await;
+                    }
                 } else if env.r#type == "rpc.response" && run_id != "unknown" {
                     let mut map = state.run_to_host.write().await;
                     map.insert(run_id.clone(), host_id.clone());
+                }
+
+                if run_id != "unknown" {
+                    let _ = db::touch_run_last_active(&state.db, &run_id, env.ts).await;
                 }
 
                 // Persist minimal event. Skip RPC responses that don't belong to any run to avoid polluting
@@ -890,4 +1008,38 @@ async fn main() -> anyhow::Result<()> {
 
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn tofu_registers_then_verifies() {
+        let db = db::connect("sqlite::memory:").await.unwrap();
+        db::init(&db).await.unwrap();
+
+        let inserted = tofu_register_or_verify_host(&db, "host-1", "token-1")
+            .await
+            .unwrap();
+        assert!(inserted);
+
+        let inserted_again = tofu_register_or_verify_host(&db, "host-1", "token-1")
+            .await
+            .unwrap();
+        assert!(!inserted_again);
+
+        let stored_hash =
+            sqlx::query_scalar::<_, String>("SELECT token_hash FROM hosts WHERE id=?1")
+                .bind("host-1")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(stored_hash, sha256_hex("token-1"));
+
+        let err = tofu_register_or_verify_host(&db, "host-1", "token-2")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("mismatch"));
+    }
 }

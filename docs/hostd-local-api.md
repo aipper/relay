@@ -53,6 +53,22 @@ curl --unix-socket /tmp/relay-hostd.sock \
   "http://localhost/runs/<run_id>/fs/search?q=TODO"
 ```
 
+Write file (UTF-8, max 1MiB, requires approval):
+
+```sh
+curl --unix-socket /tmp/relay-hostd.sock http://localhost/runs/<run_id>/fs/write \
+  -H 'content-type: application/json' \
+  -d '{"path":"README.md","content":"hello\\n","actor":"cli"}'
+```
+
+Run shell command (requires approval):
+
+```sh
+curl --unix-socket /tmp/relay-hostd.sock http://localhost/runs/<run_id>/bash \
+  -H 'content-type: application/json' \
+  -d '{"cmd":"git status --porcelain=v1 -b","actor":"cli"}'
+```
+
 ## Git (scoped to run cwd)
 
 Status:

@@ -1,15 +1,31 @@
 {
-  "name": "relay-cli",
-  "private": true,
-  "version": "0.1.0",
+  "name": "@aipper/relay-cli",
+  "private": false,
+  "version": "0.1.1",
+  "description": "Relay CLI: a thin control layer for relay hostd/server.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:aipper/relay.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
-    "relay": "./src/index.ts"
+    "relay": "./bin/relay"
   },
   "scripts": {
     "dev": "bun run src/index.ts",
+    "postinstall": "node scripts/postinstall.cjs",
     "lint": "bunx eslint .",
     "fmt": "bunx prettier -w ."
   },
+  "files": [
+    "bin",
+    "scripts",
+    "src",
+    "README.md"
+  ],
   "dependencies": {}
 }

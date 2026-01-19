@@ -169,7 +169,16 @@ read_env_value() {
 mask_line() {
   local k="$1"
   local v="$2"
-  printf '%s=%s\n' "$k" "$v"
+  # docker compose uses a dotenv-style parser for env_file. Values containing '$' may be interpreted
+  # by some parsers or tooling; single-quoting keeps argon2 PHC hashes intact.
+  if [[ "$v" == *"'"* ]]; then
+    fail "value for $k contains a single quote, cannot safely write dotenv"
+  fi
+  if [[ "$v" =~ ^[A-Za-z0-9_./:-]+$ ]]; then
+    printf '%s=%s\n' "$k" "$v"
+    return
+  fi
+  printf "%s='%s'\n" "$k" "$v"
 }
 
 set_kv() {

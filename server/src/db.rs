@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS runs (
   cwd TEXT NOT NULL,
   status TEXT NOT NULL,
   started_at TEXT NOT NULL,
+  last_active_at TEXT,
+  pending_request_id TEXT,
+  pending_reason TEXT,
+  pending_prompt TEXT,
+  pending_op_tool TEXT,
+  pending_op_args_summary TEXT,
   ended_at TEXT,
   exit_code INTEGER
 );
@@ -110,11 +116,33 @@ CREATE TABLE IF NOT EXISTS events (
     let _ = sqlx::query("ALTER TABLE events ADD COLUMN data_json TEXT;")
         .execute(pool)
         .await;
+    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN last_active_at TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN pending_request_id TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN pending_reason TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN pending_prompt TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN pending_op_tool TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN pending_op_args_summary TEXT;")
+        .execute(pool)
+        .await;
     let _ = sqlx::query(
         "CREATE UNIQUE INDEX IF NOT EXISTS events_run_seq_uq ON events(run_id, seq) WHERE seq IS NOT NULL;",
     )
     .execute(pool)
     .await;
+    let _ =
+        sqlx::query("UPDATE runs SET last_active_at = started_at WHERE last_active_at IS NULL;")
+            .execute(pool)
+            .await;
 
     Ok(())
 }
@@ -165,14 +193,37 @@ pub async fn upsert_run_started(
 ) -> anyhow::Result<()> {
     sqlx::query(
         r#"
-INSERT INTO runs (id, host_id, tool, cwd, status, started_at)
-VALUES (?1, ?2, ?3, ?4, 'running', ?5)
+INSERT INTO runs (
+  id,
+  host_id,
+  tool,
+  cwd,
+  status,
+  started_at,
+  last_active_at,
+  pending_request_id,
+  pending_reason,
+  pending_prompt,
+  pending_op_tool,
+  pending_op_args_summary,
+  ended_at,
+  exit_code
+)
+VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?5, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
 ON CONFLICT(id) DO UPDATE SET
   host_id=excluded.host_id,
   tool=excluded.tool,
   cwd=excluded.cwd,
   status='running',
-  started_at=excluded.started_at
+  started_at=excluded.started_at,
+  last_active_at=excluded.last_active_at,
+  ended_at=NULL,
+  exit_code=NULL,
+  pending_request_id=NULL,
+  pending_reason=NULL,
+  pending_prompt=NULL,
+  pending_op_tool=NULL,
+  pending_op_args_summary=NULL
 "#,
     )
     .bind(run_id)
@@ -185,11 +236,169 @@ ON CONFLICT(id) DO UPDATE SET
     Ok(())
 }
 
-pub async fn mark_run_awaiting_input(pool: &Db, run_id: &str) -> anyhow::Result<()> {
-    sqlx::query("UPDATE runs SET status='awaiting_input' WHERE id=?1")
-        .bind(run_id)
-        .execute(pool)
-        .await?;
+pub async fn touch_run_last_active(
+    pool: &Db,
+    run_id: &str,
+    ts: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let ts = ts.to_rfc3339();
+    sqlx::query(
+        r#"
+UPDATE runs
+SET last_active_at = CASE
+  WHEN last_active_at IS NULL OR last_active_at < ?2 THEN ?2
+  ELSE last_active_at
+END
+WHERE id=?1
+"#,
+    )
+    .bind(run_id)
+    .bind(ts)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn mark_run_awaiting_input(
+    pool: &Db,
+    run_id: &str,
+    ts: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let ts = ts.to_rfc3339();
+    sqlx::query(
+        r#"
+UPDATE runs
+SET status='awaiting_input',
+    last_active_at = CASE
+      WHEN last_active_at IS NULL OR last_active_at < ?2 THEN ?2
+      ELSE last_active_at
+    END
+WHERE id=?1
+"#,
+    )
+    .bind(run_id)
+    .bind(ts)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn mark_run_awaiting_approval(
+    pool: &Db,
+    run_id: &str,
+    ts: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let ts = ts.to_rfc3339();
+    sqlx::query(
+        r#"
+UPDATE runs
+SET status='awaiting_approval',
+    last_active_at = CASE
+      WHEN last_active_at IS NULL OR last_active_at < ?2 THEN ?2
+      ELSE last_active_at
+    END
+WHERE id=?1
+"#,
+    )
+    .bind(run_id)
+    .bind(ts)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_run_pending_permission(
+    pool: &Db,
+    run_id: &str,
+    ts: DateTime<Utc>,
+    request_id: &str,
+    reason: Option<&str>,
+    prompt: Option<&str>,
+    op_tool: Option<&str>,
+    op_args_summary: Option<&str>,
+) -> anyhow::Result<()> {
+    let ts = ts.to_rfc3339();
+    sqlx::query(
+        r#"
+UPDATE runs
+SET status='awaiting_approval',
+    last_active_at = CASE
+      WHEN last_active_at IS NULL OR last_active_at < ?2 THEN ?2
+      ELSE last_active_at
+    END,
+    pending_request_id=?3,
+    pending_reason=?4,
+    pending_prompt=?5,
+    pending_op_tool=?6,
+    pending_op_args_summary=?7
+WHERE id=?1
+"#,
+    )
+    .bind(run_id)
+    .bind(ts)
+    .bind(request_id)
+    .bind(reason)
+    .bind(prompt)
+    .bind(op_tool)
+    .bind(op_args_summary)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn mark_run_running(pool: &Db, run_id: &str, ts: DateTime<Utc>) -> anyhow::Result<()> {
+    let ts = ts.to_rfc3339();
+    sqlx::query(
+        r#"
+UPDATE runs
+SET status='running',
+    last_active_at = CASE
+      WHEN last_active_at IS NULL OR last_active_at < ?2 THEN ?2
+      ELSE last_active_at
+    END,
+    pending_request_id=NULL,
+    pending_reason=NULL,
+    pending_prompt=NULL,
+    pending_op_tool=NULL,
+    pending_op_args_summary=NULL
+WHERE id=?1
+"#,
+    )
+    .bind(run_id)
+    .bind(ts)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn clear_run_pending_permission_by_request_id(
+    pool: &Db,
+    run_id: &str,
+    ts: DateTime<Utc>,
+    request_id: &str,
+) -> anyhow::Result<()> {
+    let ts = ts.to_rfc3339();
+    sqlx::query(
+        r#"
+UPDATE runs
+SET status='running',
+    last_active_at = CASE
+      WHEN last_active_at IS NULL OR last_active_at < ?2 THEN ?2
+      ELSE last_active_at
+    END,
+    pending_request_id=NULL,
+    pending_reason=NULL,
+    pending_prompt=NULL,
+    pending_op_tool=NULL,
+    pending_op_args_summary=NULL
+WHERE id=?1 AND pending_request_id=?3
+"#,
+    )
+    .bind(run_id)
+    .bind(ts)
+    .bind(request_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -199,6 +408,7 @@ pub async fn finish_run(
     ended_at: DateTime<Utc>,
     exit_code: i64,
 ) -> anyhow::Result<()> {
+    let ended_at_str = ended_at.to_rfc3339();
     sqlx::query(
         r#"
 UPDATE runs
@@ -207,10 +417,29 @@ WHERE id=?1
 "#,
     )
     .bind(run_id)
-    .bind(ended_at.to_rfc3339())
+    .bind(&ended_at_str)
     .bind(exit_code)
     .execute(pool)
     .await?;
+    let _ = sqlx::query(
+        r#"
+UPDATE runs
+SET last_active_at = CASE
+  WHEN last_active_at IS NULL OR last_active_at < ?2 THEN ?2
+  ELSE last_active_at
+END,
+pending_request_id=NULL,
+pending_reason=NULL,
+pending_prompt=NULL,
+pending_op_tool=NULL,
+pending_op_args_summary=NULL
+WHERE id=?1
+"#,
+    )
+    .bind(run_id)
+    .bind(&ended_at_str)
+    .execute(pool)
+    .await;
     Ok(())
 }
 
@@ -222,6 +451,12 @@ pub struct RunRow {
     pub cwd: String,
     pub status: String,
     pub started_at: String,
+    pub last_active_at: Option<String>,
+    pub pending_request_id: Option<String>,
+    pub pending_reason: Option<String>,
+    pub pending_prompt: Option<String>,
+    pub pending_op_tool: Option<String>,
+    pub pending_op_args_summary: Option<String>,
     pub ended_at: Option<String>,
     pub exit_code: Option<i64>,
 }
@@ -229,9 +464,23 @@ pub struct RunRow {
 pub async fn list_runs(pool: &Db) -> anyhow::Result<Vec<RunRow>> {
     let rows = sqlx::query_as::<_, RunRow>(
         r#"
-SELECT id, host_id, tool, cwd, status, started_at, ended_at, exit_code
+SELECT
+  id,
+  host_id,
+  tool,
+  cwd,
+  status,
+  started_at,
+  last_active_at,
+  pending_request_id,
+  pending_reason,
+  pending_prompt,
+  pending_op_tool,
+  pending_op_args_summary,
+  ended_at,
+  exit_code
 FROM runs
-ORDER BY started_at DESC
+ORDER BY COALESCE(last_active_at, started_at) DESC
 LIMIT 200
 "#,
     )
@@ -243,7 +492,21 @@ LIMIT 200
 pub async fn get_run(pool: &Db, run_id: &str) -> anyhow::Result<Option<RunRow>> {
     let row = sqlx::query_as::<_, RunRow>(
         r#"
-SELECT id, host_id, tool, cwd, status, started_at, ended_at, exit_code
+SELECT
+  id,
+  host_id,
+  tool,
+  cwd,
+  status,
+  started_at,
+  last_active_at,
+  pending_request_id,
+  pending_reason,
+  pending_prompt,
+  pending_op_tool,
+  pending_op_args_summary,
+  ended_at,
+  exit_code
 FROM runs
 WHERE id = ?1
 LIMIT 1
@@ -259,9 +522,23 @@ pub async fn list_recent_runs(pool: &Db, limit: i64) -> anyhow::Result<Vec<RunRo
     let limit = limit.clamp(1, 200);
     let rows = sqlx::query_as::<_, RunRow>(
         r#"
-SELECT id, host_id, tool, cwd, status, started_at, ended_at, exit_code
+SELECT
+  id,
+  host_id,
+  tool,
+  cwd,
+  status,
+  started_at,
+  last_active_at,
+  pending_request_id,
+  pending_reason,
+  pending_prompt,
+  pending_op_tool,
+  pending_op_args_summary,
+  ended_at,
+  exit_code
 FROM runs
-ORDER BY started_at DESC
+ORDER BY COALESCE(last_active_at, started_at) DESC
 LIMIT ?1
 "#,
     )

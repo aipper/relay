@@ -1,0 +1,124 @@
+# Requirements Changelog
+
+## 2026-01-17
+- Add PWA interaction MVP requirements for session list, approval modal, and input modal behavior.
+- Add execution contract `requirements/requirements-issues.csv` for the new web interaction items.
+- Add PWA session list grouping, status display, pagination, and WS fallback polling requirements.
+- Add session detail tabbed output view and auto-scroll behavior.
+- Add responsive breakpoints and output buffer sizing rules.
+- Add output jump-to-latest control.
+- Add output auto-scroll pause/resume control.
+- Add approval request card in message stream.
+- Add full-args expand area in approval modal.
+- Add risk hint in approval modal.
+- Add static tool-name mapping for risk type.
+- Add quick action buttons in input modal.
+- Clarify input modal does not persist history.
+- Add stop session control in session detail.
+- Add confirmation for stop session.
+- Add host_id and cwd metadata in session detail.
+- Add run_id and status metadata in session detail.
+- Clarify session detail does not show start/end timestamps.
+- Add session list search/filter requirement.
+- Scope session search/filter to title/summary only.
+- Allow session search fallback to run_id when no title/summary.
+- Clarify no unread indicators in session list.
+- Clarify no copy shortcuts for run_id/cwd in session detail.
+- Add manual refresh controls for messages/output.
+- Add offline banner in session detail when WS disconnected.
+- Add reconnect/refresh control in offline banner.
+- Add error summary in session detail.
+- Specify error summary uses exit_code + last stderr snippet.
+- Add stderr truncation length (200 chars) for error summary.
+- Add last activity time in session detail.
+- Set last activity display to relative time.
+- Add permission mode metadata in session detail.
+- Clarify permission mode is read-only in session detail.
+- Add tool/model metadata in session detail.
+- Add tool/model icon badge in session detail.
+- Specify tool/model icon as simple SVG.
+- Add brand color usage for tool/model icons.
+- Add tool/model icon in list when awaiting approval.
+- Clarify tool/model icons are non-interactive.
+- Add optional session title display when provided by server.
+- Add optional session summary display when provided by server.
+- Add summary truncation length (60 chars).
+- Hide summary when awaiting approval.
+- Clarify no separate awaiting-input prompt in session list.
+- Clarify session list does not display run_id.
+- Add last activity display in session list.
+- Specify last activity placement under summary.
+- Add collapse/expand for machine groups.
+- Persist machine group collapse state.
+- Clarify no bulk collapse/expand controls.
+- Add selected session highlight in list.
+- Specify highlight style (background + left accent).
+- Add warning colors for awaiting approval.
+- Add red color for error state.
+- Add green color for running state.
+- Add gray color for exited state.
+- Add orange color for awaiting input state.
+- Align detail status colors with list.
+- Add host online status in session detail metadata.
+- Specify host online display as dot+text.
+- Clarify host name not shown in session detail.
+- Add host_id fallback for machine name in group header.
+- Clarify no tooltip on machine online dot.
+- Clarify no tooltip on status labels.
+- Add back-to-list control for mobile detail view.
+- Add output fullscreen control.
+- Specify output fullscreen as in-page overlay.
+- Add exit control for output fullscreen.
+- Clarify no ESC/gesture close for fullscreen overlay.
+- Keep top status and tabs visible in fullscreen overlay.
+- Add loading indicator for session pagination.
+- Clarify session list empty state shows no copy.
+- Clarify session detail empty message state shows no copy.
+- Clarify output empty state shows no copy.
+- Add visual distinction for message roles.
+- Specify message alignment per role.
+- Make system messages smaller and muted.
+- Add bubble backgrounds for user/assistant messages.
+- Set user bubble to brand color and assistant to neutral gray.
+- Add timestamps to message bubbles.
+- Set timestamps to absolute time format.
+- Place timestamps below message bubbles.
+- Add system message timestamps.
+- Make system messages text-only (no bubbles) with muted style.
+- Set message bubble max-width to 70%.
+- Add wrap and preserve newlines for message bubbles.
+- Add copy-all control in output view.
+- Add toast on copy success in output view.
+- Clarify output view has no download-as-file.
+- Add in-page output search (no backend).
+- Add highlight for output search matches.
+- Add prev/next navigation for output search.
+- Make output search case-insensitive with no toggle.
+- Clarify output search does not support regex.
+- Add hit count display for output search.
+- Place output search field at top.
+- Add clear button for output search.
+- Clarify output search has no Enter-to-next.
+- Clarify output search has no placeholder text.
+- Set output search highlight color to orange.
+- Add darker emphasis for current match.
+- Clarify clearing search does not auto-scroll to top.
+- Clarify output search is manual trigger (no live matching).
+- Allow manual trigger via button or Enter.
+- Keep Enter from jumping to next match (Enter only triggers search).
+- Add keyboard shortcuts for output search prev/next.
+- Set output search shortcuts to Up/Down arrow keys.
+- Override arrow behavior in search field to navigate matches.
+- Auto-focus output search field on entry.
+- Apply output search auto-focus on mobile as well.
+- Keep auto-scroll enabled when search auto-focuses.
+- Auto-resume output auto-scroll after 10s idle.
+- Measure auto-resume from last manual scroll.
+- Apply auto-resume even when paused via button.
+- Clarify no toast on auto-resume.
+- Set output auto-scroll default to on.
+- Make jump-to-latest resume auto-scroll.
+- Add paused status label for output auto-scroll.
+- Place paused label at top-right of output area.
+- Make paused label clickable to resume auto-scroll.
+- Show run.tool + op_tool in pending approval UI.

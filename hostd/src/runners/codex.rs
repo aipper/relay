@@ -5,6 +5,59 @@ use super::{
 
 pub struct CodexRunner;
 
+fn escape_toml_basic_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\"', "\\\"")
+}
+
+fn resolve_relay_mcp_command() -> String {
+    if let Ok(v) = std::env::var("RELAY_MCP_COMMAND") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return v;
+        }
+    }
+
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return "relay".to_string(),
+    };
+    let Some(dir) = exe.parent() else {
+        return "relay".to_string();
+    };
+
+    #[cfg(windows)]
+    let candidate = dir.join("relay.exe");
+    #[cfg(not(windows))]
+    let candidate = dir.join("relay");
+
+    if candidate.is_file() {
+        return candidate.to_string_lossy().to_string();
+    }
+    "relay".to_string()
+}
+
+fn env_truthy(name: &str) -> bool {
+    let v = match std::env::var(name) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    match v.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "y" | "on" => true,
+        _ => false,
+    }
+}
+
+fn env_falsy(name: &str) -> bool {
+    let v = match std::env::var(name) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    match v.trim().to_ascii_lowercase().as_str() {
+        "0" | "false" | "no" | "n" | "off" => true,
+        _ => false,
+    }
+}
+
 impl Runner for CodexRunner {
     fn build(&self, cmd: &str, cwd: &str) -> anyhow::Result<RunnerSpec> {
         // Default to launching `codex` directly in a PTY (closest to "type `codex` in terminal").
@@ -33,7 +86,28 @@ impl Runner for CodexRunner {
         let command = if looks_like_shell(&final_cmd) {
             command_from_shell(&final_cmd, cwd)
         } else {
-            command_from_cmdline(&final_cmd, cwd)
+            let mut command = command_from_cmdline(&final_cmd, cwd);
+
+            // Happy-alignment (A): make Codex aware of `relay mcp` tools so it can use them for
+            // file ops / shell execution, with approvals handled by relay PWA via hostd.
+            //
+            // Default: enabled. Set `RELAY_CODEX_DISABLE_RELAY_MCP=1` to opt out.
+            if !env_falsy("RELAY_CODEX_ENABLE_RELAY_MCP")
+                && !env_truthy("RELAY_CODEX_DISABLE_RELAY_MCP")
+            {
+                let relay_cmd = escape_toml_basic_string(&resolve_relay_mcp_command());
+
+                command.arg("--config");
+                command.arg(format!(
+                    r#"mcp_servers.relay={{command="{relay_cmd}", args=["mcp"], startup_timeout_sec=20, tool_timeout_sec=600, enabled=true}}"#,
+                ));
+                command.arg("--config");
+                command.arg(
+                    r#"mcp_servers.relay.env={RELAY_RUN_ID="${RELAY_RUN_ID}", RELAY_HOSTD_SOCK="${RELAY_HOSTD_SOCK}", RELAY_TOOL="${RELAY_TOOL}"}"#,
+                );
+            }
+
+            command
         };
 
         Ok(RunnerSpec {

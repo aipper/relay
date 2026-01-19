@@ -39,6 +39,23 @@ cargo run -p relay-server
 SERVER_BASE_URL=ws://127.0.0.1:8787 HOST_ID=host-dev HOST_TOKEN=dev-token LOCAL_UNIX_SOCKET=/tmp/relay-hostd.sock cargo run -p relay-hostd
 ```
 
+Alternatively, you can put hostd config in a file (recommended for packaged clients):
+
+- Default: `~/.config/abrelay/hostd.json` (or `$XDG_CONFIG_HOME/abrelay/hostd.json`)
+- Override path: `ABRELAY_CONFIG=/path/to/hostd.json`
+ - If the file does not exist, `relay-hostd` will create a default one on first start.
+
+Example:
+
+```json
+{
+  "server_base_url": "wss://your-domain",
+  "host_id": "host-dev",
+  "host_token": "change-me",
+  "local_unix_socket": "/tmp/relay-hostd.sock"
+}
+```
+
 ### Web (Svelte PWA skeleton)
 
 ```sh

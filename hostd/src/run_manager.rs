@@ -2,6 +2,7 @@ use anyhow::Context;
 use portable_pty::{CommandBuilder, PtySize};
 use regex::Regex;
 use relay_protocol::{WsEnvelope, redaction::Redactor};
+use serde_json::Value as JsonValue;
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -17,6 +18,7 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 #[derive(Clone)]
 pub struct RunManager {
     host_id: String,
+    local_unix_socket: String,
     redactor: Arc<Redactor>,
     events: broadcast::Sender<WsEnvelope>,
     runs: Arc<RwLock<HashMap<String, Arc<Run>>>>,
@@ -53,11 +55,13 @@ impl Run {
 impl RunManager {
     pub fn new(
         host_id: String,
+        local_unix_socket: String,
         redactor: Arc<Redactor>,
         events: broadcast::Sender<WsEnvelope>,
     ) -> Self {
         Self {
             host_id,
+            local_unix_socket,
             redactor,
             events,
             runs: Arc::new(RwLock::new(HashMap::new())),
@@ -70,6 +74,28 @@ impl RunManager {
 
     pub fn host_id_value(&self) -> String {
         self.host_id.clone()
+    }
+
+    pub fn redact_string(&self, raw: &str) -> String {
+        self.redactor.redact(raw).text_redacted
+    }
+
+    pub fn redact_json_value(&self, v: &JsonValue) -> JsonValue {
+        fn walk(redactor: &Redactor, v: &JsonValue) -> JsonValue {
+            match v {
+                JsonValue::String(s) => JsonValue::String(redactor.redact(s).text_redacted),
+                JsonValue::Array(arr) => {
+                    JsonValue::Array(arr.iter().map(|x| walk(redactor, x)).collect())
+                }
+                JsonValue::Object(map) => JsonValue::Object(
+                    map.iter()
+                        .map(|(k, val)| (k.clone(), walk(redactor, val)))
+                        .collect(),
+                ),
+                _ => v.clone(),
+            }
+        }
+        walk(&self.redactor, v)
     }
 
     pub async fn start_run(
@@ -100,7 +126,11 @@ impl RunManager {
         let spec = crate::runners::for_tool(&tool)
             .build(&cmd, &resolved_cwd)
             .context("build runner command")?;
-        let command: CommandBuilder = spec.command;
+        let mut command: CommandBuilder = spec.command;
+        command.env("RELAY_RUN_ID", &run_id);
+        command.env("RELAY_TOOL", &tool);
+        command.env("RELAY_HOSTD_SOCK", &self.local_unix_socket);
+        command.env("RELAY_CWD", &resolved_cwd);
 
         let mut child = pair.slave.spawn_command(command).context("spawn_command")?;
 

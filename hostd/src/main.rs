@@ -7,13 +7,32 @@ mod spool;
 
 use futures_util::{SinkExt, StreamExt};
 use relay_protocol::WsEnvelope;
-use std::sync::Arc;
-use tokio::sync::broadcast;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 
 use crate::config::Config;
 use crate::run_manager::RunManager;
 use crate::spool::Spool;
 use serde_json::json;
+
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut out = String::with_capacity(std::cmp::min(s.len(), max_chars));
+    for (i, ch) in s.chars().enumerate() {
+        if i >= max_chars {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn rpc_requires_permission(rpc_type: &str) -> bool {
+    matches!(rpc_type, "rpc.fs.write" | "rpc.bash")
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -21,7 +40,18 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let cfg = Config::from_env();
+    let (cfg, cfg_path) = Config::from_env_and_file()?;
+    if let Some(p) = cfg_path.as_ref() {
+        tracing::info!(config_path=%p.display(), "loaded hostd config");
+    }
+    if cfg.host_token == "dev-token"
+        && !cfg.server_base_url.contains("127.0.0.1")
+        && !cfg.server_base_url.contains("localhost")
+    {
+        tracing::warn!(
+            "HOST_TOKEN is using the default 'dev-token'; set it in ~/.config/abrelay/hostd.json or HOST_TOKEN for production use"
+        );
+    }
     tracing::info!(host_id=%cfg.host_id, server_base=%cfg.server_base_url, sock=%cfg.local_unix_socket, "hostd starting");
 
     let spool = Spool::new(cfg.spool_db_path.clone());
@@ -51,7 +81,12 @@ async fn main() -> anyhow::Result<()> {
         &cfg.redaction_extra_regex,
     )?);
     let (events_tx, _) = broadcast::channel::<WsEnvelope>(2048);
-    let rm = RunManager::new(cfg.host_id.clone(), redactor, events_tx.clone());
+    let rm = RunManager::new(
+        cfg.host_id.clone(),
+        cfg.local_unix_socket.clone(),
+        redactor,
+        events_tx.clone(),
+    );
 
     // Persist outgoing events to spool for offline replay.
     {
@@ -74,8 +109,14 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    let pending_tool_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     // Local unix API server.
-    let local = Arc::new(local_api::LocalState { rm: rm.clone() });
+    let local = Arc::new(local_api::LocalState {
+        rm: rm.clone(),
+        pending_tool_permissions: pending_tool_permissions.clone(),
+    });
     let local_app = local_api::router(local);
     let sock_path = cfg.local_unix_socket.clone();
     tokio::spawn(async move {
@@ -102,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
             rm.clone(),
             events_tx.subscribe(),
             spool.clone(),
+            pending_tool_permissions.clone(),
         )
         .await
         {
@@ -139,18 +181,28 @@ async fn connect_and_run(
     rm: RunManager,
     mut events_rx: broadcast::Receiver<WsEnvelope>,
     spool: Spool,
+    pending_tool_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
 ) -> anyhow::Result<()> {
     let (ws, _) = tokio_tungstenite::connect_async(ws_url.to_string()).await?;
     tracing::info!("connected to server ws");
 
-    let (mut ws_sender, mut ws_receiver) = ws.split();
+    let (ws_sender, mut ws_receiver) = ws.split();
+    let (out_tx, mut out_rx) = mpsc::channel::<tokio_tungstenite::tungstenite::Message>(2048);
+    let _send_task = tokio::spawn(async move {
+        let mut ws_sender = ws_sender;
+        while let Some(msg) = out_rx.recv().await {
+            if ws_sender.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
 
-    async fn flush_spool<S>(ws_sender: &mut S, spool: &Spool, limit: usize) -> anyhow::Result<()>
-    where
-        S: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
-        S::Error: std::fmt::Display,
-    {
+    async fn flush_spool(
+        out_tx: &mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
+        spool: &Spool,
+        limit: usize,
+    ) -> anyhow::Result<()> {
         let pending = tokio::task::spawn_blocking({
             let spool = spool.clone();
             move || spool.pending_events(limit)
@@ -158,33 +210,46 @@ async fn connect_and_run(
         .await??;
         for env in pending {
             let text = serde_json::to_string(&env)?;
-            ws_sender
+            out_tx
                 .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
                 .await
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                .map_err(|_| anyhow::anyhow!("ws sender closed"))?;
         }
         Ok(())
     }
 
     // Replay pending events first (best-effort).
-    let _ = flush_spool(&mut ws_sender, &spool, 10_000).await;
+    let _ = flush_spool(&out_tx, &spool, 10_000).await;
+
+    let mut task_set = tokio::task::JoinSet::<()>::new();
 
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
                 let msg = serde_json::to_string(&WsEnvelope::new("host.heartbeat", serde_json::json!({})))?;
-                ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(msg.into())).await?;
+                out_tx
+                    .send(tokio_tungstenite::tungstenite::Message::Text(msg.into()))
+                    .await
+                    .map_err(|_| anyhow::anyhow!("ws sender closed"))?;
                 // Periodically try to drain any remaining spool backlog.
-                let _ = flush_spool(&mut ws_sender, &spool, 500).await;
+                let _ = flush_spool(&out_tx, &spool, 500).await;
             }
             ev = events_rx.recv() => {
                 match ev {
                     Ok(env) => {
                         let text = serde_json::to_string(&env)?;
-                        ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(text.into())).await?;
+                        out_tx
+                            .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+                            .await
+                            .map_err(|_| anyhow::anyhow!("ws sender closed"))?;
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,
+                }
+            }
+            res = task_set.join_next(), if task_set.len() > 0 => {
+                if let Some(Err(err)) = res {
+                    tracing::warn!(error=%err, "rpc task join error");
                 }
             }
             incoming = ws_receiver.next() => {
@@ -276,7 +341,7 @@ async fn connect_and_run(
                                     "result": result
                                 }),
                             );
-                            let _ = ws_sender
+                            let _ = out_tx
                                 .send(tokio_tungstenite::tungstenite::Message::Text(
                                     serde_json::to_string(&resp)?.into(),
                                 ))
@@ -323,8 +388,10 @@ async fn connect_and_run(
                                     "rpc.fs.read",
                                     "rpc.fs.search",
                                     "rpc.fs.list",
+                                    "rpc.fs.write",
                                     "rpc.git.status",
                                     "rpc.git.diff",
+                                    "rpc.bash",
                                     "rpc.run.stop",
                                     "rpc.runs.list",
                                     "rpc.host.info",
@@ -348,7 +415,7 @@ async fn connect_and_run(
                                     "result": result
                                 }),
                             );
-                            let _ = ws_sender
+                            let _ = out_tx
                                 .send(tokio_tungstenite::tungstenite::Message::Text(
                                     serde_json::to_string(&resp)?.into(),
                                 ))
@@ -385,7 +452,7 @@ async fn connect_and_run(
                                         "error": "HOSTD_LOG_PATH is not set on this host"
                                     }),
                                 );
-                                let _ = ws_sender
+                                let _ = out_tx
                                     .send(tokio_tungstenite::tungstenite::Message::Text(
                                         serde_json::to_string(&resp)?.into(),
                                     ))
@@ -404,7 +471,7 @@ async fn connect_and_run(
                                         "error": format!("failed to read log file: {path}")
                                     }),
                                 );
-                                let _ = ws_sender
+                                let _ = out_tx
                                     .send(tokio_tungstenite::tungstenite::Message::Text(
                                         serde_json::to_string(&resp)?.into(),
                                     ))
@@ -431,7 +498,7 @@ async fn connect_and_run(
                                     "result": { "path": path, "text": out_text, "truncated": truncated }
                                 }),
                             );
-                            let _ = ws_sender
+                            let _ = out_tx
                                 .send(tokio_tungstenite::tungstenite::Message::Text(
                                     serde_json::to_string(&resp)?.into(),
                                 ))
@@ -449,7 +516,7 @@ async fn connect_and_run(
                                 let _ = tokio::task::spawn_blocking(move || spool.apply_ack(&run_id, last_seq)).await;
                             }
                             // After ack, attempt to flush more pending data.
-                            let _ = flush_spool(&mut ws_sender, &spool, 500).await;
+                            let _ = flush_spool(&out_tx, &spool, 500).await;
                         } else if env.r#type == "run.send_input" {
                             let Some(run_id) = env.run_id.as_deref() else { continue; };
                             let actor = env.data.get("actor").and_then(|v| v.as_str()).unwrap_or("web");
@@ -463,8 +530,18 @@ async fn connect_and_run(
                             if request_id.is_empty() {
                                 continue;
                             }
-                            let decision = if env.r#type == "run.permission.approve" { "approve" } else { "deny" };
-                            let _ = rm.decide_permission(run_id, actor, request_id, decision).await;
+                            let approved = env.r#type == "run.permission.approve";
+                            let key = format!("{run_id}:{request_id}");
+                            let tx = {
+                                let mut map = pending_tool_permissions.lock().await;
+                                map.remove(&key)
+                            };
+                            if let Some(tx) = tx {
+                                let _ = tx.send(approved);
+                            } else {
+                                let decision = if approved { "approve" } else { "deny" };
+                                let _ = rm.decide_permission(run_id, actor, request_id, decision).await;
+                            }
                         } else if env.r#type == "run.stop" {
                             let Some(run_id) = env.run_id.as_deref() else { continue; };
                             let signal = env.data.get("signal").and_then(|v| v.as_str()).unwrap_or("term");
@@ -496,7 +573,7 @@ async fn connect_and_run(
                                             "error": err.to_string()
                                         }),
                                     );
-                                    let _ = ws_sender
+                                    let _ = out_tx
                                         .send(tokio_tungstenite::tungstenite::Message::Text(
                                             serde_json::to_string(&resp)?.into(),
                                         ))
@@ -515,7 +592,7 @@ async fn connect_and_run(
                                 }),
                             );
                             resp.run_id = resp.data.get("result").and_then(|v| v.get("run_id")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                            let _ = ws_sender
+                            let _ = out_tx
                                 .send(tokio_tungstenite::tungstenite::Message::Text(
                                     serde_json::to_string(&resp)?.into(),
                                 ))
@@ -540,7 +617,7 @@ async fn connect_and_run(
                                         }),
                                     );
                                     resp.run_id = Some(run_id.to_string());
-                                    let _ = ws_sender
+                                    let _ = out_tx
                                         .send(tokio_tungstenite::tungstenite::Message::Text(
                                             serde_json::to_string(&resp)?.into(),
                                         ))
@@ -559,6 +636,29 @@ async fn connect_and_run(
                             let data = env.data.clone();
                             let started = std::time::Instant::now();
 
+                            let args_for_event = match rpc_type_for_exec.as_str() {
+                                "rpc.fs.write" => {
+                                    let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                                    let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                    let bytes = content.as_bytes().len() as i64;
+                                    let preview_limit = 2000;
+                                    let preview_raw = truncate_chars(content, preview_limit);
+                                    let preview_redacted = rm.redact_string(&preview_raw);
+                                    let content_truncated = content.chars().count() > preview_limit;
+                                    json!({
+                                        "path": path,
+                                        "bytes": bytes,
+                                        "content_preview": preview_redacted,
+                                        "content_truncated": content_truncated
+                                    })
+                                }
+                                "rpc.bash" => {
+                                    let cmd = data.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+                                    json!({ "cmd": rm.redact_string(cmd) })
+                                }
+                                _ => rm.redact_json_value(&data),
+                            };
+
                             let _ = rm
                                 .emit_run_event(
                                     run_id,
@@ -567,10 +667,150 @@ async fn connect_and_run(
                                         "request_id": request_id,
                                         "tool": rpc_type.clone(),
                                         "actor": actor,
-                                        "args": data.clone()
+                                        "args": args_for_event.clone()
                                     }),
                                 )
                                 .await;
+
+                            if rpc_requires_permission(rpc_type_for_exec.as_str()) {
+                                let (tx, rx) = oneshot::channel::<bool>();
+                                let key = format!("{run_id}:{request_id}");
+                                {
+                                    let mut map = pending_tool_permissions.lock().await;
+                                    map.insert(key.clone(), tx);
+                                }
+
+                                let (op_tool, op_args, op_args_summary) = match rpc_type_for_exec.as_str() {
+                                    "rpc.fs.write" => {
+                                        let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                                        let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                        let bytes = content.as_bytes().len() as i64;
+                                        let summary = truncate_chars(&format!("path={path} bytes={bytes}"), 80);
+                                        (rpc_type_for_exec.as_str(), args_for_event, summary)
+                                    }
+                                    "rpc.bash" => {
+                                        let cmd = data.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+                                        let cmd = rm.redact_string(cmd);
+                                        let summary = truncate_chars(&format!("cmd={cmd}"), 80);
+                                        ("bash", json!({ "cmd": cmd }), summary)
+                                    }
+                                    _ => {
+                                        let summary = truncate_chars(&serde_json::to_string(&args_for_event).unwrap_or_default(), 80);
+                                        (rpc_type_for_exec.as_str(), args_for_event, summary)
+                                    }
+                                };
+
+                                let prompt = if op_args_summary.trim().is_empty() {
+                                    format!("需要审批：{op_tool}")
+                                } else {
+                                    format!("需要审批：{op_tool} {op_args_summary}")
+                                };
+                                let _ = rm
+                                    .emit_run_event(
+                                        run_id,
+                                        "run.permission_requested",
+                                        json!({
+                                            "request_id": request_id,
+                                            "reason": "permission",
+                                            "prompt": prompt,
+                                            "op_tool": op_tool,
+                                            "op_args": op_args,
+                                            "op_args_summary": op_args_summary,
+                                            "approve_text": "",
+                                            "deny_text": ""
+                                        }),
+                                    )
+                                    .await;
+
+                                let rm_task = rm.clone();
+                                let out_tx_task = out_tx.clone();
+                                let run_id_task = run_id.to_string();
+                                let request_id_task = request_id.to_string();
+                                let actor_task = actor.to_string();
+                                let rpc_type_task = rpc_type.clone();
+                                let rpc_type_for_exec_task = rpc_type_for_exec.clone();
+                                let data_task = data.clone();
+                                let cwd_task = cwd.clone();
+
+                                task_set.spawn(async move {
+                                    let approved = rx.await.unwrap_or(false);
+
+                                    let (ok, payload) = if !approved {
+                                        (false, json!({ "error": "denied" }))
+                                    } else {
+                                        let exec_started = std::time::Instant::now();
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            match rpc_type_for_exec_task.as_str() {
+                                                "rpc.fs.write" => {
+                                                    let path = data_task.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                                                    let content = data_task.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                                    let (bytes_written, truncated) = crate::fs_git::write_utf8_file(&cwd_task, path, content, 1024 * 1024)?;
+                                                    Ok(json!({ "path": path, "bytes_written": bytes_written, "truncated": truncated }))
+                                                }
+                                                "rpc.bash" => {
+                                                    let cmd = data_task.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+                                                    let (stdout, stderr, exit_code, truncated) =
+                                                        crate::fs_git::bash_exec(&cwd_task, cmd, 200_000, 200_000)?;
+                                                    Ok(json!({ "stdout": stdout, "stderr": stderr, "exit_code": exit_code, "truncated": truncated }))
+                                                }
+                                                _ => Err((axum::http::StatusCode::NOT_IMPLEMENTED, "unknown rpc type".into())),
+                                            }
+                                        })
+                                        .await
+                                        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+
+                                        match result {
+                                            Ok(Ok(v)) => (true, json!({ "result": v, "duration_ms": exec_started.elapsed().as_millis() as i64 })),
+                                            Ok(Err((_, msg))) => (false, json!({ "error": msg, "duration_ms": exec_started.elapsed().as_millis() as i64 })),
+                                            Err((_, msg)) => (false, json!({ "error": msg, "duration_ms": exec_started.elapsed().as_millis() as i64 })),
+                                        }
+                                    };
+
+                                    let duration_ms = payload.get("duration_ms").and_then(|v| v.as_i64()).unwrap_or(0);
+                                    let result_value = payload.get("result").cloned().unwrap_or(serde_json::Value::Null);
+                                    let error_value = payload.get("error").cloned().unwrap_or(serde_json::Value::Null);
+                                    let request_id_for_event = request_id_task.clone();
+                                    let rpc_type_for_event = rpc_type_task.clone();
+                                    let actor_for_event = actor_task.clone();
+                                    let result_for_event = result_value.clone();
+                                    let error_for_event = error_value.clone();
+                                    let _ = rm_task
+                                        .emit_run_event(
+                                            &run_id_task,
+                                            "tool.result",
+                                            json!({
+                                                "request_id": request_id_for_event,
+                                                "tool": rpc_type_for_event,
+                                                "actor": actor_for_event,
+                                                "ok": ok,
+                                                "duration_ms": duration_ms,
+                                                "result": result_for_event,
+                                                "error": error_for_event
+                                            }),
+                                        )
+                                        .await;
+
+                                    let mut resp_data = json!({
+                                        "request_id": request_id_task,
+                                        "ok": ok,
+                                        "rpc_type": rpc_type_task,
+                                    });
+                                    if ok {
+                                        resp_data["result"] = result_value;
+                                    } else {
+                                        resp_data["error"] = error_value;
+                                    }
+                                    let mut resp = WsEnvelope::new("rpc.response", resp_data);
+                                    resp.run_id = Some(run_id_task);
+                                    if let Ok(text) = serde_json::to_string(&resp) {
+                                        let _ = out_tx_task
+                                            .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+                                            .await;
+                                    }
+                                });
+
+                                continue;
+                            }
 
                             let result = if rpc_type_for_exec == "rpc.run.stop" {
                                 let signal = data.get("signal").and_then(|v| v.as_str()).unwrap_or("term");
@@ -671,7 +911,7 @@ async fn connect_and_run(
 
                             let mut resp = WsEnvelope::new("rpc.response", resp_data);
                             resp.run_id = Some(run_id.to_string());
-                            let _ = ws_sender
+                            let _ = out_tx
                                 .send(tokio_tungstenite::tungstenite::Message::Text(
                                     serde_json::to_string(&resp)?.into(),
                                 ))
@@ -679,7 +919,7 @@ async fn connect_and_run(
                         }
                     }
                     tokio_tungstenite::tungstenite::Message::Ping(p) => {
-                        ws_sender.send(tokio_tungstenite::tungstenite::Message::Pong(p)).await?;
+                        let _ = out_tx.send(tokio_tungstenite::tungstenite::Message::Pong(p)).await;
                     }
                     tokio_tungstenite::tungstenite::Message::Close(_) => break,
                     _ => {}

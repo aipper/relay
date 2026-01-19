@@ -6,17 +6,23 @@ function usage(): never {
   console.log(`relay (skeleton)
 
 Usage:
+  relay init [--server http://127.0.0.1:8787] [--yes] [--force]
+
   relay auth status
   relay auth login --server http://127.0.0.1:8787 --username admin --password '...' [--save]
   relay auth logout
 
-  relay codex  --sock /tmp/relay-hostd.sock [--cmd "codex ..."] [--cwd .]    (default: codex)
-  relay claude --sock /tmp/relay-hostd.sock [--cmd "claude ..."] [--cwd .]   (default: claude)
-  relay iflow  --sock /tmp/relay-hostd.sock [--cmd "iflow ..."] [--cwd .]    (default: iflow)
-  relay gemini --sock /tmp/relay-hostd.sock [--cmd "gemini ..."] [--cwd .]   (default: gemini)
+  relay hostd install [--version 0.1.0] [--base-url <url>] [--dir ~/.relay/bin] [--yes] [--force] [--dry-run]
+  relay hostd uninstall [--dir ~/.relay/bin] [--yes]
 
-  relay daemon start [--server http://127.0.0.1:8787] [--host-id host-dev] [--host-token devtoken]
-                    [--sock /tmp/relay-hostd.sock] [--spool ~/.relay/hostd-spool.db] [--log ~/.relay/logs/hostd.log]
+  relay codex  [--sock /tmp/relay-hostd.sock] [--cmd "codex ..."] [--cwd .]    (default: codex)
+  relay claude [--sock /tmp/relay-hostd.sock] [--cmd "claude ..."] [--cwd .]   (default: claude)
+  relay iflow  [--sock /tmp/relay-hostd.sock] [--cmd "iflow ..."] [--cwd .]    (default: iflow)
+  relay gemini [--sock /tmp/relay-hostd.sock] [--cmd "gemini ..."] [--cwd .]   (default: gemini)
+
+  relay daemon start [--server http://127.0.0.1:8787] [--host-id <id>] [--host-token <token>]
+                    [--sock ~/.relay/relay-hostd.sock] [--spool ~/.relay/hostd-spool.db] [--log ~/.relay/hostd.log]
+                    [--hostd-config ~/.config/abrelay/hostd.json]
   relay daemon status
   relay daemon stop
   relay daemon logs
@@ -41,8 +47,10 @@ Usage:
   relay ws-rpc-fs-read   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --path relative/file.txt
   relay ws-rpc-fs-search --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --q "needle"
   relay ws-rpc-fs-list   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> [--path .]
+  relay ws-rpc-fs-write  --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --path relative/file.txt --content "hello"
   relay ws-rpc-git-status --server http://127.0.0.1:8787 --token <jwt> --run <run_id>
   relay ws-rpc-git-diff   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> [--path relative/file.txt]
+  relay ws-rpc-bash       --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --cmd "ls -la"
   relay ws-rpc-run-stop   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> [--signal term|kill]
   relay ws-rpc-runs-list  --server http://127.0.0.1:8787 --token <jwt> --run <run_id>
   relay ws-rpc-host-info   --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id>
@@ -54,7 +62,9 @@ Notes:
   - This CLI is a thin control layer. The long-running tool processes should be owned by hostd.
   - local commands use curl --unix-socket (requires curl in PATH).
   - auth token source priority: RELAY_TOKEN env > ~/.relay/settings.json
-  - daemon is a local helper for starting relay-hostd in background (dev-oriented).
+  - local commands auto-start relay-hostd if the unix socket is missing (requires server config via 'relay init' or '--server ...').
+  - to auto-confirm downloads/prompts: pass --yes/-y or set RELAY_YES=1 (also used by runtime auto-install).
+  - npm install (macOS/Linux): best-effort downloads relay-hostd into ~/.relay/bin; if it failed, run: relay hostd install.
 `);
   process.exit(1);
 }
@@ -84,6 +94,25 @@ function envOrUndefined(name: string): string | undefined {
   return v;
 }
 
+function envTruthy(name: string): boolean {
+  const v = envOrUndefined(name);
+  if (!v) return false;
+  switch (v.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "y":
+    case "on":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isInteractive(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
 function settingsPath(): string {
   const home = envOrUndefined("HOME");
   if (!home) throw new Error("HOME is not set; cannot read ~/.relay/settings.json");
@@ -94,6 +123,27 @@ function relayHomeDir(): string {
   const home = envOrUndefined("HOME");
   if (!home) throw new Error("HOME is not set; cannot use ~/.relay");
   return `${home.replace(/\/$/, "")}/.relay`;
+}
+
+function xdgConfigHomeDir(): string | null {
+  const raw = envOrUndefined("XDG_CONFIG_HOME");
+  if (raw && raw.trim()) return raw.trim().replace(/\/$/, "");
+  const home = envOrUndefined("HOME");
+  if (!home || !home.trim()) return null;
+  return `${home.trim().replace(/\/$/, "")}/.config`;
+}
+
+function defaultHostdConfigPath(): string {
+  const base = xdgConfigHomeDir();
+  if (!base) throw new Error("cannot resolve hostd config path (missing HOME/XDG_CONFIG_HOME)");
+  return `${base}/abrelay/hostd.json`;
+}
+
+async function defaultHostId(): Promise<string> {
+  const os = await import("node:os");
+  const raw = os.hostname();
+  const short = raw.split(".")[0]?.trim() || raw.trim() || "unknown";
+  return `host-${short}`;
 }
 
 function daemonStatePath(): string {
@@ -167,6 +217,165 @@ function toWsBaseFromHttp(httpBase: string): string {
   return stripTrailingSlash(httpBase).replace(/^http:/, "ws:").replace(/^https:/, "wss:");
 }
 
+function isValidServerUrl(u: string): boolean {
+  const s = u.trim();
+  return s.startsWith("http://") || s.startsWith("https://") || s.startsWith("ws://") || s.startsWith("wss://");
+}
+
+async function promptLine(label: string, def?: string): Promise<string> {
+  const rl = (await import("node:readline/promises")).createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const q = def && def.trim() ? `${label} [${def.trim()}]: ` : `${label}: `;
+    const out = (await rl.question(q)).trim();
+    return out || (def ?? "");
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmYesNo(label: string, defYes: boolean): Promise<boolean> {
+  const def = defYes ? "Y/n" : "y/N";
+  const v = (await promptLine(`${label} (${def})`)).trim().toLowerCase();
+  if (!v) return defYes;
+  return v === "y" || v === "yes";
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(16);
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("crypto.getRandomValues is not available; cannot generate host token");
+  }
+  globalThis.crypto.getRandomValues(bytes);
+
+  // RFC 4122 v4
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex
+    .slice(8, 10)
+    .join("")}-${hex.slice(10, 16).join("")}`;
+}
+
+async function readJsonFileIfExists(path: string): Promise<Record<string, unknown> | null> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) return null;
+  const raw = await file.text();
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object") return null;
+  return parsed as Record<string, unknown>;
+}
+
+async function writeJsonFile(path: string, obj: Record<string, unknown>): Promise<void> {
+  const fs = await import("node:fs/promises");
+  const p = await import("node:path");
+  await fs.mkdir(p.dirname(path), { recursive: true, mode: 0o700 });
+  await Bun.write(path, JSON.stringify(obj, null, 2) + "\n");
+  try {
+    await fs.chmod(path, 0o600);
+  } catch {
+    // ignore (e.g. non-posix)
+  }
+}
+
+function fileIsExecutable(path: string): boolean {
+  return (
+    Bun.spawnSync(["bash", "-lc", `test -x ${JSON.stringify(path)}`], {
+      stdout: "ignore",
+      stderr: "ignore",
+    }).exitCode === 0
+  );
+}
+
+function platformId(): { os: "darwin" | "linux"; arch: "x64" | "arm64" } {
+  const os = process.platform;
+  const arch = process.arch;
+  if (os !== "darwin" && os !== "linux") throw new Error(`unsupported platform: ${os} (expected darwin/linux)`);
+  if (arch !== "x64" && arch !== "arm64") throw new Error(`unsupported arch: ${arch} (expected x64/arm64)`);
+  return { os, arch };
+}
+
+async function packageVersion(): Promise<string | null> {
+  try {
+    const pkgUrl = new URL("../package.json", import.meta.url);
+    const raw = await Bun.file(pkgUrl).text();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const obj = parsed as Record<string, unknown>;
+    return typeof obj.version === "string" && obj.version.trim() ? obj.version.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function packageRepositoryUrl(): Promise<string | null> {
+  try {
+    const pkgUrl = new URL("../package.json", import.meta.url);
+    const raw = await Bun.file(pkgUrl).text();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const obj = parsed as Record<string, unknown>;
+    const repo = obj.repository;
+    if (!repo || typeof repo !== "object") return null;
+    const url = (repo as Record<string, unknown>).url;
+    return typeof url === "string" && url.trim() ? url.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRepositoryHttpUrl(raw: string): string | null {
+  const u = raw.trim();
+  if (!u) return null;
+  // npm supports `git+https://...`
+  const cleaned = u.replace(/^git\+/, "").replace(/\.git$/, "").replace(/\/$/, "");
+  if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) return cleaned;
+
+  if (cleaned.startsWith("ssh://")) {
+    try {
+      const url = new URL(cleaned);
+      const host = url.hostname;
+      const pathname = url.pathname.replace(/^\/+/, "").replace(/\/$/, "");
+      if (!host || !pathname) return null;
+      return `https://${host}/${pathname}`;
+    } catch {
+      return null;
+    }
+  }
+
+  // scp-like git URL: git@github.com:owner/repo
+  const scp = cleaned.match(/^(?:[^@]+@)?([^:/]+):(.+)$/);
+  if (scp) {
+    const host = (scp[1] ?? "").trim();
+    const pathname = (scp[2] ?? "").replace(/^\/+/, "").replace(/\/$/, "");
+    if (!host || !pathname) return null;
+    return `https://${host}/${pathname}`;
+  }
+
+  return null;
+}
+
+async function defaultReleaseBaseUrl(version: string): Promise<string> {
+  const repo = await packageRepositoryUrl();
+  const http = repo ? normalizeRepositoryHttpUrl(repo) : null;
+  if (http) return `${http}/releases/download/v${version}`;
+  // Fallback: legacy default (can always be overridden via RELAY_RELEASE_BASE_URL / --base-url).
+  return `https://github.com/aipper/relay/releases/download/v${version}`;
+}
+
+async function downloadToFile(url: string, dst: string): Promise<void> {
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`download failed: ${res.status} ${res.statusText} ${body}`.trim());
+  }
+  const buf = await res.arrayBuffer();
+  await Bun.write(dst, buf);
+}
+
 function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -206,6 +415,14 @@ function resolveHostdBin(): string {
   const env = envOrUndefined("RELAY_HOSTD_BIN");
   if (env) return env;
 
+  // Prefer a user-local install (relay hostd install).
+  try {
+    const installed = `${relayHomeDir()}/bin/relay-hostd`;
+    if (fileIsExecutable(installed)) return installed;
+  } catch {
+    // ignore
+  }
+
   // Prefer installed binary in PATH (production-style).
   const which = Bun.spawnSync(["bash", "-lc", "command -v relay-hostd 2>/dev/null || true"], {
     stdout: "pipe",
@@ -217,6 +434,242 @@ function resolveHostdBin(): string {
   // Dev fallback: workspace binary path if present.
   const dev = `${process.cwd()}/target/debug/relay-hostd`;
   return dev;
+}
+
+function wantsYes(): boolean {
+  return hasFlag("--yes") || hasFlag("-y") || envTruthy("RELAY_YES");
+}
+
+async function pathIsSocket(p: string): Promise<boolean> {
+  const fs = await import("node:fs/promises");
+  try {
+    const st = await fs.lstat(p);
+    return st.isSocket();
+  } catch {
+    return false;
+  }
+}
+
+async function waitForSocket(p: string, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await pathIsSocket(p)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return await pathIsSocket(p);
+}
+
+async function ensureHostdInstalled(): Promise<void> {
+  const env = envOrUndefined("RELAY_HOSTD_BIN");
+  if (env) {
+    if (!fileIsExecutable(env)) throw new Error(`RELAY_HOSTD_BIN is set but not executable: ${env}`);
+    return;
+  }
+
+  // Fast path: already installed.
+  const installedHostd = `${relayHomeDir()}/bin/relay-hostd`;
+  if (fileIsExecutable(installedHostd)) return;
+
+  const inPath = Bun.spawnSync(["bash", "-lc", "command -v relay-hostd 2>/dev/null || true"], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const found = (inPath.stdout ? new TextDecoder().decode(inPath.stdout).trim() : "").trim();
+  if (found && fileIsExecutable(found)) return;
+
+  const dev = `${process.cwd()}/target/debug/relay-hostd`;
+  if (fileIsExecutable(dev)) return;
+
+  if (!isInteractive() && !wantsYes()) {
+    throw new Error("relay-hostd is not installed; run `relay hostd install` (or set RELAY_HOSTD_BIN)");
+  }
+
+  const ver = envOrUndefined("RELAY_RELEASE_VERSION") ?? (await packageVersion());
+  if (!ver) throw new Error("relay-hostd is not installed and package version is unavailable; run `relay hostd install --version <ver>`");
+
+  const { os, arch } = platformId();
+  const baseUrl = envOrUndefined("RELAY_RELEASE_BASE_URL") ?? (await defaultReleaseBaseUrl(ver));
+  const dir = `${relayHomeDir()}/bin`;
+  const hostdUrl = `${baseUrl.replace(/\/$/, "")}/relay-hostd-${os}-${arch}`;
+  const relayUrl = `${baseUrl.replace(/\/$/, "")}/relay-${os}-${arch}`;
+
+  if (!wantsYes()) {
+    const ok = await confirmYesNo(`relay-hostd is not installed. Install now?\n  ${hostdUrl}\n  ${relayUrl}\n-> ${dir}`, true);
+    if (!ok) throw new Error("hostd install aborted");
+  }
+
+  const fs = await import("node:fs/promises");
+  const p = await import("node:path");
+  const hostdDst = p.join(dir, "relay-hostd");
+  const relayDst = p.join(dir, "relay");
+  const needsHostd = !fileIsExecutable(hostdDst);
+  const needsRelay = !fileIsExecutable(relayDst);
+  if (!needsHostd && !needsRelay) return;
+
+  await fs.mkdir(relayHomeDir(), { recursive: true, mode: 0o700 });
+  const tmpDir = await fs.mkdtemp(p.join(relayHomeDir(), "tmp-install-"));
+  const hostdTmp = p.join(tmpDir, `relay-hostd-${os}-${arch}`);
+  const relayTmp = p.join(tmpDir, `relay-${os}-${arch}`);
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+
+  try {
+    if (needsHostd) {
+      await downloadToFile(hostdUrl, hostdTmp);
+      await fs.chmod(hostdTmp, 0o755);
+      await fs.rename(hostdTmp, hostdDst);
+    }
+    if (needsRelay) {
+      await downloadToFile(relayUrl, relayTmp);
+      await fs.chmod(relayTmp, 0o755);
+      await fs.rename(relayTmp, relayDst);
+    }
+  } finally {
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!fileIsExecutable(hostdDst)) throw new Error("hostd install failed (relay-hostd not executable after install)");
+}
+
+type StartDaemonResult =
+  | { started: true; pid: number; sock: string; log: string }
+  | { started: false; reason: "already_running"; pid: number; sock: string; log: string };
+
+async function startDaemonDetached(args?: {
+  serverHttp?: string;
+  hostIdOverride?: string;
+  hostTokenOverride?: string;
+  sockOverride?: string;
+  spoolOverride?: string;
+  logOverride?: string;
+  hostdConfigOverride?: string;
+}): Promise<StartDaemonResult> {
+  await ensureHostdInstalled();
+
+  const serverHttp = args?.serverHttp ?? (await resolveServer()).server;
+  const serverWs =
+    serverHttp.startsWith("ws://") || serverHttp.startsWith("wss://") ? stripTrailingSlash(serverHttp) : toWsBaseFromHttp(serverHttp);
+
+  const hostdConfig = args?.hostdConfigOverride ?? envOrUndefined("ABRELAY_CONFIG") ?? defaultHostdConfigPath();
+  const hostdCfg = await readJsonFileIfExists(hostdConfig);
+  const cfgSock = hostdCfg && typeof hostdCfg.local_unix_socket === "string" ? String(hostdCfg.local_unix_socket) : "";
+  const cfgSpool = hostdCfg && typeof hostdCfg.spool_db_path === "string" ? String(hostdCfg.spool_db_path) : "";
+  const cfgLog = hostdCfg && typeof hostdCfg.log_path === "string" ? String(hostdCfg.log_path) : "";
+  const cfgHostId = hostdCfg && typeof hostdCfg.host_id === "string" ? String(hostdCfg.host_id) : "";
+  const cfgHostToken = hostdCfg && typeof hostdCfg.host_token === "string" ? String(hostdCfg.host_token) : "";
+
+  const hostIdOverride = args?.hostIdOverride ?? envOrUndefined("RELAY_HOST_ID");
+  const hostTokenOverride = args?.hostTokenOverride ?? envOrUndefined("RELAY_HOST_TOKEN");
+
+  const sockArg = args?.sockOverride ?? envOrUndefined("RELAY_HOSTD_SOCK");
+  const sock = sockArg && sockArg.trim() ? sockArg.trim() : cfgSock.trim() ? cfgSock.trim() : `${relayHomeDir()}/relay-hostd.sock`;
+
+  const spoolArg = args?.spoolOverride ?? envOrUndefined("RELAY_SPOOL_DB");
+  const spool = spoolArg && spoolArg.trim() ? spoolArg.trim() : cfgSpool.trim() ? cfgSpool.trim() : `${relayHomeDir()}/hostd-spool.db`;
+
+  const logArg = args?.logOverride ?? envOrUndefined("RELAY_HOSTD_LOG");
+  const log = logArg && logArg.trim() ? logArg.trim() : cfgLog.trim() ? cfgLog.trim() : `${relayHomeDir()}/hostd.log`;
+
+  const hostdBin = resolveHostdBin();
+  if (!fileIsExecutable(hostdBin)) throw new Error(`relay-hostd is not executable: ${hostdBin}`);
+
+  const fs = await import("node:fs/promises");
+  const p = await import("node:path");
+  await fs.mkdir(p.dirname(log), { recursive: true });
+  await fs.mkdir(p.dirname(sock), { recursive: true });
+  await fs.mkdir(p.dirname(spool), { recursive: true });
+
+  const existing = await readDaemonState();
+  if (existing && isProcessRunning(existing.pid)) {
+    return { started: false, reason: "already_running", pid: existing.pid, sock: existing.sock, log: existing.log };
+  }
+  if (existing && !isProcessRunning(existing.pid)) await clearDaemonState();
+
+  // Best-effort: clear stale socket file.
+  try {
+    await fs.unlink(sock);
+  } catch {
+    // ignore
+  }
+
+  // Spawn detached hostd.
+  const out = await fs.open(log, "a");
+  try {
+    const hostId = hostIdOverride ?? (cfgHostId.trim() ? cfgHostId.trim() : await defaultHostId());
+    const child = Bun.spawn([hostdBin], {
+      env: {
+        ...process.env,
+        ABRELAY_CONFIG: hostdConfig,
+        SERVER_BASE_URL: serverWs,
+        LOCAL_UNIX_SOCKET: sock,
+        SPOOL_DB_PATH: spool,
+        HOSTD_LOG_PATH: log,
+        ...(hostIdOverride || !cfgHostId.trim() ? { HOST_ID: hostId } : {}),
+        ...(hostTokenOverride ? { HOST_TOKEN: hostTokenOverride } : {}),
+      },
+      stdout: out.fd,
+      stderr: out.fd,
+      detached: true,
+    });
+    child.unref();
+
+    const pid = child.pid;
+    if (!pid) throw new Error("failed to spawn hostd (missing pid)");
+
+    const state: DaemonState = {
+      pid,
+      started_at: new Date().toISOString(),
+      server: serverHttp,
+      server_ws: serverWs,
+      host_id: hostId,
+      host_token: hostTokenOverride ?? cfgHostToken.trim() ?? "",
+      sock,
+      spool,
+      log,
+      hostd_bin: hostdBin,
+    };
+    await writeDaemonState(state);
+
+    return { started: true, pid, sock, log };
+  } finally {
+    try {
+      await out.close();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function ensureDaemonRunning(sock: string): Promise<void> {
+  if (await pathIsSocket(sock)) return;
+
+  const existing = await readDaemonState();
+  if (existing && isProcessRunning(existing.pid)) {
+    if (existing.sock !== sock) {
+      if (await pathIsSocket(existing.sock)) {
+        throw new Error(`relay-hostd is running, but sock mismatch: running=${existing.sock} requested=${sock}`);
+      }
+    } else {
+      // Give hostd a moment to create the socket after spawn.
+      if (await waitForSocket(sock, 5000)) return;
+      throw new Error(`relay-hostd is running (pid=${existing.pid}) but unix socket not ready: ${sock} (log: ${existing.log})`);
+    }
+  }
+
+  const res = await startDaemonDetached({ sockOverride: sock });
+  const pid = res.pid;
+  const log = res.log;
+  if (res.started === false && res.reason === "already_running") {
+    if (res.sock !== sock) {
+      throw new Error(`relay-hostd is running, but sock mismatch: running=${res.sock} requested=${sock}`);
+    }
+  }
+
+  const ok = await waitForSocket(sock, 5000);
+  if (!ok) throw new Error(`relay-hostd started (pid=${pid}) but unix socket not ready: ${sock} (log: ${log})`);
 }
 
 async function postJson(url: string, body: Record<string, JsonValue>) {
@@ -401,10 +854,245 @@ async function wsRpc(
 async function main() {
   const cmd = requireCmd(process.argv[2]);
 
+  if (cmd === "init") {
+    const yes = hasFlag("--yes") || hasFlag("-y");
+    const force = hasFlag("--force");
+
+    const prev = await readSettings();
+    const serverDefault = prev.server;
+    let serverHttp = getArg("--server") ?? envOrUndefined("RELAY_SERVER") ?? serverDefault ?? "";
+    if (!serverHttp.trim()) {
+      serverHttp = await promptLine("relay-server URL (http(s)://host:port)", "");
+    }
+    serverHttp = stripTrailingSlash(serverHttp.trim());
+    if (!isValidServerUrl(serverHttp)) {
+      throw new Error("invalid --server (expected http(s)://... or ws(s)://...)");
+    }
+
+    if (!yes) {
+      const ok = await confirmYesNo(`Save server to ${settingsPath()}?`, true);
+      if (!ok) {
+        console.log(JSON.stringify({ saved: false, reason: "user_aborted" }, null, 2));
+        return;
+      }
+    }
+
+    await writeSettings({ ...prev, server: serverHttp });
+
+    const hostdPath = getArg("--hostd-config") ?? defaultHostdConfigPath();
+    const existing = await readJsonFileIfExists(hostdPath);
+
+    const next: Record<string, unknown> = existing ? { ...existing } : {};
+    const serverWs =
+      serverHttp.startsWith("ws://") || serverHttp.startsWith("wss://") ? serverHttp : toWsBaseFromHttp(serverHttp);
+    next.server_base_url = serverWs;
+
+    const hostIdArg = getArg("--host-id") ?? envOrUndefined("RELAY_HOST_ID");
+    const existingHostId = typeof next.host_id === "string" ? (next.host_id as string) : "";
+    {
+      const hostId = (hostIdArg ?? existingHostId ?? "").trim();
+      next.host_id = hostId || (await defaultHostId());
+    }
+
+    const rotateToken = hasFlag("--rotate-token");
+    const existingToken = typeof next.host_token === "string" ? (next.host_token as string) : "";
+    if (!existingToken || rotateToken) {
+      if (rotateToken && existing && !yes) {
+        const ok = await confirmYesNo(
+          "Rotate host token? (This will break TOFU on an existing server unless you also change host_id or delete the host record)",
+          false,
+        );
+        if (!ok) {
+          console.log(
+            JSON.stringify({ saved: true, hostd_config: { updated: false, reason: "token_rotation_aborted" } }, null, 2),
+          );
+          return;
+        }
+      }
+      next.host_token = randomToken();
+    }
+
+    const relayHome = relayHomeDir();
+    const sockDefault = `${relayHome}/relay-hostd.sock`;
+    const spoolDefault = `${relayHome}/hostd-spool.db`;
+    const logDefault = `${relayHome}/hostd.log`;
+
+    if (next.local_unix_socket === undefined) next.local_unix_socket = sockDefault;
+    if (next.spool_db_path === undefined) next.spool_db_path = spoolDefault;
+    if (next.log_path === undefined) next.log_path = logDefault;
+    if (next.redaction_extra_regex === undefined) next.redaction_extra_regex = [];
+
+    if (existing && !force) {
+      // Default behavior: update server only and keep existing identity to avoid breaking TOFU.
+      const safe: Record<string, unknown> = {
+        ...existing,
+        server_base_url: next.server_base_url,
+      };
+      await writeJsonFile(hostdPath, safe);
+    } else {
+      await writeJsonFile(hostdPath, next);
+    }
+
+    console.log(
+      JSON.stringify(
+        {
+          saved: true,
+          settings: { path: settingsPath(), server: serverHttp },
+          hostd: { config_path: hostdPath, server_base_url: serverWs, host_id: next.host_id },
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (cmd === "hostd") {
+    const sub = requireCmd(process.argv[3]);
+
+    if (sub === "install") {
+      const yes = hasFlag("--yes") || hasFlag("-y");
+      const force = hasFlag("--force");
+      const dryRun = hasFlag("--dry-run");
+
+      const ver = getArg("--version") ?? envOrUndefined("RELAY_RELEASE_VERSION") ?? (await packageVersion());
+      if (!ver) throw new Error("missing --version and package version is unavailable");
+
+      const { os, arch } = platformId();
+      const baseUrl =
+        getArg("--base-url") ?? envOrUndefined("RELAY_RELEASE_BASE_URL") ?? (await defaultReleaseBaseUrl(ver));
+
+      const dir = getArg("--dir") ?? `${relayHomeDir()}/bin`;
+      const hostdUrl = `${baseUrl.replace(/\/$/, "")}/relay-hostd-${os}-${arch}`;
+      const relayUrl = `${baseUrl.replace(/\/$/, "")}/relay-${os}-${arch}`;
+
+      const fs = await import("node:fs/promises");
+      const p = await import("node:path");
+
+      const hostdDst = p.join(dir, "relay-hostd");
+      const relayDst = p.join(dir, "relay");
+
+      if (!force) {
+        if (fileIsExecutable(hostdDst) || fileIsExecutable(relayDst)) {
+          throw new Error(`already installed at ${dir} (use --force to overwrite)`);
+        }
+      }
+
+      if (!yes && !dryRun) {
+        const ok = await confirmYesNo(
+          `Download and install native binaries?\n  ${hostdUrl}\n  ${relayUrl}\n-> ${dir}`,
+          true,
+        );
+        if (!ok) {
+          console.log(JSON.stringify({ installed: false, reason: "user_aborted" }, null, 2));
+          return;
+        }
+      }
+
+      if (dryRun) {
+        console.log(
+          JSON.stringify(
+            {
+              dry_run: true,
+              version: ver,
+              platform: { os, arch },
+              urls: { relay_hostd: hostdUrl, relay: relayUrl },
+              install_dir: dir,
+              dest: { relay_hostd: hostdDst, relay: relayDst },
+            },
+            null,
+            2,
+          ),
+        );
+        return;
+      }
+
+      await fs.mkdir(relayHomeDir(), { recursive: true, mode: 0o700 });
+      const tmpDir = await fs.mkdtemp(p.join(relayHomeDir(), "tmp-install-"));
+      const hostdTmp = p.join(tmpDir, `relay-hostd-${os}-${arch}`);
+      const relayTmp = p.join(tmpDir, `relay-${os}-${arch}`);
+
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+
+      await downloadToFile(hostdUrl, hostdTmp);
+      await downloadToFile(relayUrl, relayTmp);
+      await fs.chmod(hostdTmp, 0o755);
+      await fs.chmod(relayTmp, 0o755);
+
+      if (force) {
+        try {
+          await fs.unlink(hostdDst);
+        } catch {
+          // ignore
+        }
+        try {
+          await fs.unlink(relayDst);
+        } catch {
+          // ignore
+        }
+      }
+
+      await fs.rename(hostdTmp, hostdDst);
+      await fs.rename(relayTmp, relayDst);
+
+      try {
+        await fs.rmdir(tmpDir);
+      } catch {
+        // ignore
+      }
+
+      console.log(
+        JSON.stringify(
+          {
+            installed: true,
+            dir,
+            binaries: { relay_hostd: hostdDst, relay: relayDst },
+            next: ["relay init --server http://<your-vps>:8787", "relay daemon start"],
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    if (sub === "uninstall") {
+      const yes = hasFlag("--yes") || hasFlag("-y");
+      const dir = getArg("--dir") ?? `${relayHomeDir()}/bin`;
+      const p = await import("node:path");
+      const fs = await import("node:fs/promises");
+      const hostdDst = p.join(dir, "relay-hostd");
+      const relayDst = p.join(dir, "relay");
+
+      if (!yes) {
+        const ok = await confirmYesNo(`Remove installed binaries?\n  ${hostdDst}\n  ${relayDst}`, false);
+        if (!ok) {
+          console.log(JSON.stringify({ removed: false, reason: "user_aborted" }, null, 2));
+          return;
+        }
+      }
+
+      let removed = 0;
+      for (const f of [hostdDst, relayDst]) {
+        try {
+          await fs.unlink(f);
+          removed += 1;
+        } catch {
+          // ignore
+        }
+      }
+      console.log(JSON.stringify({ removed: true, count: removed, dir }, null, 2));
+      return;
+    }
+
+    usage();
+  }
+
   if (cmd === "runs") {
     const sub = requireCmd(process.argv[3]);
-    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK");
+    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK") ?? `${relayHomeDir()}/relay-hostd.sock`;
     if (!sock) usage();
+    await ensureDaemonRunning(sock);
 
     if (sub === "list") {
       const data = await localGetJson(sock, "http://localhost/runs");
@@ -427,9 +1115,10 @@ async function main() {
 
   if (cmd === "fs") {
     const sub = requireCmd(process.argv[3]);
-    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK");
+    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK") ?? `${relayHomeDir()}/relay-hostd.sock`;
     const runId = getArg("--run");
     if (!sock || !runId) usage();
+    await ensureDaemonRunning(sock);
 
     if (sub === "read") {
       const path = getArg("--path");
@@ -454,9 +1143,10 @@ async function main() {
 
   if (cmd === "git") {
     const sub = requireCmd(process.argv[3]);
-    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK");
+    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK") ?? `${relayHomeDir()}/relay-hostd.sock`;
     const runId = getArg("--run");
     if (!sock || !runId) usage();
+    await ensureDaemonRunning(sock);
 
     if (sub === "status") {
       const url = `http://localhost/runs/${encodeURIComponent(runId)}/git/status`;
@@ -523,69 +1213,29 @@ async function main() {
     }
 
     if (sub === "start") {
-      const serverHttp = getArg("--server") ?? (await resolveServer()).server;
-      const serverWs = toWsBaseFromHttp(serverHttp);
-      const hostId = getArg("--host-id") ?? envOrUndefined("RELAY_HOST_ID") ?? "host-dev";
-      const hostToken = getArg("--host-token") ?? envOrUndefined("RELAY_HOST_TOKEN") ?? "devtoken";
+      const serverHttp = getArg("--server");
+      const hostIdOverride = getArg("--host-id");
+      const hostTokenOverride = getArg("--host-token");
+      const sockOverride = getArg("--sock");
+      const spoolOverride = getArg("--spool");
+      const logOverride = getArg("--log");
+      const hostdConfigOverride = getArg("--hostd-config");
 
-      const sock =
-        getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK") ?? `${relayHomeDir()}/relay-hostd.sock`;
-      const spool =
-        getArg("--spool") ?? envOrUndefined("RELAY_SPOOL_DB") ?? `${relayHomeDir()}/hostd-spool.db`;
-      const log = getArg("--log") ?? envOrUndefined("RELAY_HOSTD_LOG") ?? `${relayHomeDir()}/logs/hostd.log`;
+      const res = await startDaemonDetached({
+        ...(serverHttp ? { serverHttp } : {}),
+        ...(hostIdOverride ? { hostIdOverride } : {}),
+        ...(hostTokenOverride ? { hostTokenOverride } : {}),
+        ...(sockOverride ? { sockOverride } : {}),
+        ...(spoolOverride ? { spoolOverride } : {}),
+        ...(logOverride ? { logOverride } : {}),
+        ...(hostdConfigOverride ? { hostdConfigOverride } : {}),
+      });
 
-      const hostdBin = resolveHostdBin();
-      const fs = await import("node:fs/promises");
-      await fs.mkdir(`${relayHomeDir()}/logs`, { recursive: true });
-
-      const existing = await readDaemonState();
-      if (existing && isProcessRunning(existing.pid)) {
-        console.log(JSON.stringify({ started: false, reason: "already_running", pid: existing.pid }, null, 2));
+      if (res.started === false) {
+        console.log(JSON.stringify({ started: false, reason: res.reason, pid: res.pid, sock: res.sock, log: res.log }, null, 2));
         return;
       }
-
-      // Best-effort: clear stale socket file.
-      try {
-        await fs.unlink(sock);
-      } catch {
-        // ignore
-      }
-
-      // Spawn detached hostd.
-      const out = await fs.open(log, "a");
-      const child = Bun.spawn([hostdBin], {
-        env: {
-          ...process.env,
-          SERVER_BASE_URL: serverWs,
-          HOST_ID: hostId,
-          HOST_TOKEN: hostToken,
-          LOCAL_UNIX_SOCKET: sock,
-          SPOOL_DB_PATH: spool,
-        },
-        stdout: out,
-        stderr: out,
-        detached: true,
-      });
-      child.unref();
-
-      const pid = child.pid;
-      if (!pid) throw new Error("failed to spawn hostd (missing pid)");
-
-      const state: DaemonState = {
-        pid,
-        started_at: new Date().toISOString(),
-        server: serverHttp,
-        server_ws: serverWs,
-        host_id: hostId,
-        host_token: hostToken,
-        sock,
-        spool,
-        log,
-        hostd_bin: hostdBin,
-      };
-      await writeDaemonState(state);
-
-      console.log(JSON.stringify({ started: true, pid, sock, log }, null, 2));
+      console.log(JSON.stringify({ started: true, pid: res.pid, sock: res.sock, log: res.log }, null, 2));
       return;
     }
 
@@ -609,17 +1259,24 @@ async function main() {
 
     const hostdBin = resolveHostdBin();
     const hostdExists =
-      Bun.spawnSync(["bash", "-lc", `test -x ${JSON.stringify(hostdBin)} && echo ok || true`], {
+      Bun.spawnSync(["bash", "-lc", `test -x ${JSON.stringify(hostdBin)}`], {
         stdout: "pipe",
         stderr: "ignore",
       }).exitCode === 0;
     checks.push({ name: "relay-hostd", ok: hostdExists, detail: hostdBin });
+    try {
+      const p = await import("node:path");
+      const relayBin = p.join(p.dirname(hostdBin), "relay");
+      checks.push({ name: "relay (mcp)", ok: fileIsExecutable(relayBin), detail: relayBin });
+    } catch {
+      // ignore
+    }
 
     const state = await readDaemonState();
     if (state) {
       checks.push({ name: "daemon.running", ok: isProcessRunning(state.pid), detail: `pid=${state.pid}` });
       const sockOk =
-        Bun.spawnSync(["bash", "-lc", `test -S ${JSON.stringify(state.sock)} && echo ok || true`], {
+        Bun.spawnSync(["bash", "-lc", `test -S ${JSON.stringify(state.sock)}`], {
           stdout: "pipe",
           stderr: "ignore",
         }).exitCode === 0;
@@ -724,10 +1381,11 @@ async function main() {
   }
 
   if (cmd === "codex" || cmd === "claude" || cmd === "iflow" || cmd === "gemini") {
-    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK");
+    const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK") ?? `${relayHomeDir()}/relay-hostd.sock`;
     const runCmd = cmdOrDefault(getArg("--cmd"), cmd);
     const cwd = getArg("--cwd");
     if (!sock) usage();
+    await ensureDaemonRunning(sock);
     const { out } = await localStartRun(sock, cmd, runCmd, cwd);
     console.log(out.trim());
     return;
@@ -753,6 +1411,7 @@ async function main() {
 
     const sock = getArg("--sock");
     if (!sock) usage();
+    await ensureDaemonRunning(sock);
 
     if (sub === "start") {
       const tool = getArg("--tool");
@@ -900,8 +1559,10 @@ async function main() {
     cmd === "ws-rpc-fs-read" ||
     cmd === "ws-rpc-fs-search" ||
     cmd === "ws-rpc-fs-list" ||
+    cmd === "ws-rpc-fs-write" ||
     cmd === "ws-rpc-git-status" ||
-    cmd === "ws-rpc-git-diff"
+    cmd === "ws-rpc-git-diff" ||
+    cmd === "ws-rpc-bash"
   ) {
     const server = getArg("--server") ?? (await resolveServer()).server;
     const token = getArg("--token") ?? (await resolveToken()).token;
@@ -916,9 +1577,13 @@ async function main() {
           ? "rpc.fs.search"
           : cmd === "ws-rpc-fs-list"
             ? "rpc.fs.list"
-          : cmd === "ws-rpc-git-status"
-            ? "rpc.git.status"
-            : "rpc.git.diff";
+            : cmd === "ws-rpc-fs-write"
+              ? "rpc.fs.write"
+              : cmd === "ws-rpc-git-status"
+                ? "rpc.git.status"
+                : cmd === "ws-rpc-bash"
+                  ? "rpc.bash"
+                  : "rpc.git.diff";
 
     const data: Record<string, JsonValue> = { request_id: requestId, actor: "cli" };
     if (rpcType === "rpc.fs.read") {
@@ -935,9 +1600,21 @@ async function main() {
       const path = getArg("--path");
       if (path) data.path = path;
     }
+    if (rpcType === "rpc.fs.write") {
+      const path = getArg("--path");
+      const content = getArg("--content");
+      if (!path || content === undefined) usage();
+      data.path = path;
+      data.content = content;
+    }
     if (rpcType === "rpc.git.diff") {
       const path = getArg("--path");
       if (path) data.path = path;
+    }
+    if (rpcType === "rpc.bash") {
+      const cmdline = getArg("--cmd");
+      if (!cmdline) usage();
+      data.cmd = cmdline;
     }
 
     const env: Record<string, JsonValue> = {
@@ -956,7 +1633,7 @@ async function main() {
         const respData = (m.data as Record<string, JsonValue> | undefined) ?? undefined;
         return Boolean(respData && respData.request_id === requestId);
       },
-      15_000,
+      rpcType === "rpc.fs.write" || rpcType === "rpc.bash" ? 600_000 : 15_000,
     );
     console.log(JSON.stringify(resp, null, 2));
     return;

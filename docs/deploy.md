@@ -31,6 +31,8 @@ Edit `docker/server.env`:
 - set **one** of:
   - `ADMIN_PASSWORD` (entrypoint will generate `ADMIN_PASSWORD_HASH` on boot)
   - `ADMIN_PASSWORD_HASH` (recommended for production)
+    - If you set the hash manually, wrap it in single quotes to avoid `$...` parsing issues in some dotenv/compose tooling:
+      - `ADMIN_PASSWORD_HASH='$argon2id$v=19$...'`
 
 Generate a random JWT secret:
 
@@ -80,7 +82,7 @@ Copy the generated directory `dist/relay-client-*/` to the client machine.
 Start hostd (foreground):
 
 ```sh
-./hostd-up.sh --server http://<your-vps>:8787 --host-token <token>
+./hostd-up.sh --server http://<your-vps>:8787
 ```
 
 Start a run (example):
@@ -94,7 +96,7 @@ Start a run (example):
 If the client machine has `systemctl --user`, use the helper in the packaged bundle:
 
 ```sh
-./install-hostd-systemd-user.sh --server http://<your-vps>:8787 --host-token <token>
+./install-hostd-systemd-user.sh --server http://<your-vps>:8787
 ```
 
 Then check:
@@ -111,4 +113,35 @@ For Arch Linux / systemd-based distros, use the interactive installer:
 ./client-init.sh --server http://<your-vps>:8787
 ```
 
-It validates `/health`, prompts for the host token, and installs either a user service (default) or a system service (`--mode system`).
+It validates `/health` and installs either a user service (default) or a system service (`--mode system`).
+
+Host auth note:
+- On first connection for a given `host_id`, the server stores `sha256(host_token)` (TOFU).
+- The host token is generated automatically and stored in the hostd config (by default in the packaged bundle: `~/.relay/hostd.json`).
+
+### Option D: npm install (macOS/Linux, requires Bun)
+
+If you prefer a simple CLI install (instead of a packaged bundle), you can use the npm package.
+
+Install:
+
+```sh
+npm i -g @aipper/relay-cli
+```
+
+Notes:
+- On macOS/Linux, `postinstall` will best-effort download `relay-hostd` + `relay` into `~/.relay/bin/`.
+- If the download is skipped/blocked, run: `relay hostd install`.
+- The download base is derived from `cli/package.json#repository.url` by default (override with `RELAY_RELEASE_BASE_URL`). See `docs/release.md`.
+
+Configure server (one-time):
+
+```sh
+relay init --server http://<your-vps>:8787
+```
+
+Start a run (hostd auto-starts if needed):
+
+```sh
+relay codex --cwd /path/to/project
+```

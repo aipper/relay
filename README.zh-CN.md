@@ -77,6 +77,27 @@ PWA 登录说明：
 
 `hostd` 必须跑在“真正运行 Codex/Claude/iFlow 的那台机器”上（需要访问本机项目目录与本机安装的 CLI 二进制）。
 
+### 推荐：配置文件（~/.config/abrelay）
+
+`hostd` 默认会尝试读取：
+
+- `~/.config/abrelay/hostd.json`（或 `$XDG_CONFIG_HOME/abrelay/hostd.json`）
+- 也可以用 `ABRELAY_CONFIG=/path/to/hostd.json` 覆盖配置文件路径
+- 如果配置文件不存在，`relay-hostd` 会在首次启动时自动生成一个默认配置文件（并尝试设置安全权限）。
+
+示例（注意 `host_token` 属于敏感信息，建议文件权限设为 0600）：
+
+```json
+{
+  "server_base_url": "wss://<你的域名>",
+  "host_id": "host-mac-1",
+  "host_token": "change-me",
+  "local_unix_socket": "/Users/<you>/.relay/relay-hostd.sock",
+  "spool_db_path": "/Users/<you>/.relay/hostd-spool.db",
+  "log_path": "/Users/<you>/.relay/hostd.log"
+}
+```
+
 ### 方式 A：打包客户端目录（推荐）
 
 在有 Rust 工具链的构建机上：
@@ -90,7 +111,7 @@ bash scripts/package-client.sh
 前台启动 hostd（连接到 VPS）：
 
 ```sh
-./hostd-up.sh --server http://<你的VPS>:8787 --host-token <token>
+./hostd-up.sh --server http://<你的VPS>:8787
 ```
 
 启动一次会话（示例）：
@@ -104,7 +125,7 @@ bash scripts/package-client.sh
 如果客户端机器支持 `systemctl --user`：
 
 ```sh
-./install-hostd-systemd-user.sh --server http://<你的VPS>:8787 --host-token <token>
+./install-hostd-systemd-user.sh --server http://<你的VPS>:8787
 systemctl --user status relay-hostd
 ```
 
@@ -116,7 +137,7 @@ systemctl --user status relay-hostd
 ./client-init.sh --server http://<你的VPS>:8787
 ```
 
-该脚本会校验 `/health`，提示输入 host token，并默认安装为 user service；也可用 `--mode system` 安装为系统级服务。
+该脚本会校验 `/health`，并默认安装为 user service；也可用 `--mode system` 安装为系统级服务。
 
 ## 可选：安装 codex/claude/iflow shims（在任意项目目录直接敲命令）
 

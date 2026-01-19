@@ -39,6 +39,11 @@ need node
 VERSION="$(cargo metadata --no-deps --format-version 1 | node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync(0,"utf8"));const p=m.packages.find((x)=>x.name==="relay-hostd");process.stdout.write(p?.version||"0.0.0");')"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
+ARCH_ID="$ARCH"
+case "$ARCH" in
+  x86_64|amd64) ARCH_ID="x64" ;;
+  aarch64|arm64) ARCH_ID="arm64" ;;
+esac
 
 PKG_DIR="$ROOT/dist/relay-client-$VERSION-$OS-$ARCH"
 BIN_DIR="$PKG_DIR/bin"
@@ -51,6 +56,10 @@ run cargo build --release -p relay-cli
 
 run cp "$ROOT/target/release/relay-hostd" "$BIN_DIR/"
 run cp "$ROOT/target/release/relay" "$BIN_DIR/"
+
+# Convenience: standalone artifacts for release hosting (used by `relay hostd install`).
+run cp "$ROOT/target/release/relay-hostd" "$PKG_DIR/relay-hostd-$OS-$ARCH_ID"
+run cp "$ROOT/target/release/relay" "$PKG_DIR/relay-$OS-$ARCH_ID"
 
 run cp "$ROOT/scripts/install-shims.sh" "$PKG_DIR/install-shims.sh"
 
@@ -78,7 +87,7 @@ Usage:
 Options:
   --server <url>     relay-server base URL (http(s)://...) for health check and WS base.
   --host-id <id>     Host identifier (default: host-<hostname>).
-  --host-token <t>   Host token (if omitted, prompted; never required in argv for --mode system).
+  --host-token <t>   Host token (optional; if omitted, generated and stored in the hostd config).
   --mode <m>         user|system (default: user).
   --sock <path>      Local unix socket path (default: user->~/.relay/relay-hostd.sock, system->/run/relay/relay-hostd.sock).
   --install-shims    Run ./install-shims.sh --auto-path after install (optional).
@@ -205,8 +214,12 @@ if [[ ! -x "$ROOT/bin/relay" ]]; then
 fi
 
 if [[ "$MODE" == "system" && "$(id -u)" -ne 0 ]]; then
-  # Avoid passing HOST_TOKEN on the command line (process list). Re-run as root and prompt there.
-  exec sudo -k --preserve-env=PATH bash "$0" --mode system --server "$SERVER_HTTP" --host-id "$HOST_ID" ${SOCK_PATH:+--sock "$SOCK_PATH"} ${INSTALL_SHIMS:+--install-shims} ${FORCE:+--force}
+  args=(--mode system --server "$SERVER_HTTP" --host-id "$HOST_ID")
+  [[ -n "$HOST_TOKEN" ]] && args+=(--host-token "$HOST_TOKEN")
+  [[ -n "$SOCK_PATH" ]] && args+=(--sock "$SOCK_PATH")
+  [[ "$INSTALL_SHIMS" == "1" ]] && args+=(--install-shims)
+  [[ "$FORCE" == "1" ]] && args+=(--force)
+  exec sudo -k --preserve-env=PATH bash "$0" "${args[@]}"
 fi
 
 if [[ "$MODE" == "user" ]]; then
@@ -215,6 +228,7 @@ if [[ "$MODE" == "user" ]]; then
   fi
 
   DATA_DIR="${HOME}/.relay"
+  CONFIG_PATH="${DATA_DIR}/hostd.json"
   BIN_DIR="$DATA_DIR/bin"
   UNIT_DIR="${HOME}/.config/systemd/user"
   mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
@@ -227,20 +241,16 @@ if [[ "$MODE" == "user" ]]; then
   install_file "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd" 0755
   install_file "$ROOT/bin/relay" "$BIN_DIR/relay" 0755
 
-  if [[ -z "$HOST_TOKEN" ]]; then
-    prompt_secret HOST_TOKEN "Host token"
-  fi
-  [[ -n "$HOST_TOKEN" ]] || fail "empty host token"
-
-  cat >"$DATA_DIR/hostd.env" <<EOF
-SERVER_BASE_URL=$SERVER_BASE_URL
-HOST_ID=$HOST_ID
-HOST_TOKEN=$HOST_TOKEN
-LOCAL_UNIX_SOCKET=$SOCK_PATH
-SPOOL_DB_PATH=$SPOOL_DB_PATH
-HOSTD_LOG_PATH=$HOSTD_LOG_PATH
-RUST_LOG=$RUST_LOG_LEVEL
-EOF
+  {
+    echo "ABRELAY_CONFIG=$CONFIG_PATH"
+    echo "SERVER_BASE_URL=$SERVER_BASE_URL"
+    echo "HOST_ID=$HOST_ID"
+    [[ -n "$HOST_TOKEN" ]] && echo "HOST_TOKEN=$HOST_TOKEN"
+    echo "LOCAL_UNIX_SOCKET=$SOCK_PATH"
+    echo "SPOOL_DB_PATH=$SPOOL_DB_PATH"
+    echo "HOSTD_LOG_PATH=$HOSTD_LOG_PATH"
+    echo "RUST_LOG=$RUST_LOG_LEVEL"
+  } >"$DATA_DIR/hostd.env"
   chmod 0600 "$DATA_DIR/hostd.env"
 
   cat >"$UNIT_DIR/relay-hostd.service" <<EOF
@@ -277,6 +287,7 @@ else
   DATA_DIR="/var/lib/relay"
   RUN_DIR="/run/relay"
   ENV_DIR="/etc/relay"
+  CONFIG_PATH="${DATA_DIR}/hostd.json"
   BIN_DIR="/usr/local/bin"
   UNIT_PATH="/etc/systemd/system/relay-hostd.service"
   mkdir -p "$DATA_DIR" "$RUN_DIR" "$ENV_DIR"
@@ -289,20 +300,16 @@ else
   install_file "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd" 0755
   install_file "$ROOT/bin/relay" "$BIN_DIR/relay" 0755
 
-  if [[ -z "$HOST_TOKEN" ]]; then
-    prompt_secret HOST_TOKEN "Host token"
-  fi
-  [[ -n "$HOST_TOKEN" ]] || fail "empty host token"
-
-  cat >"$ENV_DIR/hostd.env" <<EOF
-SERVER_BASE_URL=$SERVER_BASE_URL
-HOST_ID=$HOST_ID
-HOST_TOKEN=$HOST_TOKEN
-LOCAL_UNIX_SOCKET=$SOCK_PATH
-SPOOL_DB_PATH=$SPOOL_DB_PATH
-HOSTD_LOG_PATH=$HOSTD_LOG_PATH
-RUST_LOG=$RUST_LOG_LEVEL
-EOF
+  {
+    echo "ABRELAY_CONFIG=$CONFIG_PATH"
+    echo "SERVER_BASE_URL=$SERVER_BASE_URL"
+    echo "HOST_ID=$HOST_ID"
+    [[ -n "$HOST_TOKEN" ]] && echo "HOST_TOKEN=$HOST_TOKEN"
+    echo "LOCAL_UNIX_SOCKET=$SOCK_PATH"
+    echo "SPOOL_DB_PATH=$SPOOL_DB_PATH"
+    echo "HOSTD_LOG_PATH=$HOSTD_LOG_PATH"
+    echo "RUST_LOG=$RUST_LOG_LEVEL"
+  } >"$ENV_DIR/hostd.env"
   chmod 0600 "$ENV_DIR/hostd.env"
 
   cat >"$UNIT_PATH" <<EOF
@@ -391,11 +398,6 @@ if [[ -z "$HOST_ID" ]]; then
   HOST_ID="host-$(hostname -s 2>/dev/null || hostname)"
 fi
 
-if [[ -z "$HOST_TOKEN" ]]; then
-  HOST_TOKEN="devtoken"
-  echo "[hostd-up] warning: --host-token not set; using devtoken (change for production)" >&2
-fi
-
 case "$SERVER_HTTP" in
   https://*) SERVER_BASE_URL="wss://${SERVER_HTTP#https://}" ;;
   http://*) SERVER_BASE_URL="ws://${SERVER_HTTP#http://}" ;;
@@ -404,6 +406,7 @@ case "$SERVER_HTTP" in
 esac
 
 DATA_DIR="${HOME}/.relay"
+CONFIG_PATH="${DATA_DIR}/hostd.json"
 mkdir -p "$DATA_DIR" "$(dirname "$SOCK_PATH")"
 
 SPOOL_DB_PATH="${SPOOL_DB_PATH:-$DATA_DIR/hostd-spool.db}"
@@ -421,6 +424,8 @@ Host:
   token: (hidden)
 Local API:
   unix socket: $SOCK_PATH
+Config:
+  $CONFIG_PATH
 
 Logs:
   $HOSTD_LOG_PATH
@@ -429,9 +434,10 @@ Press Ctrl-C to stop.
 OUT
 
 (
+  export ABRELAY_CONFIG="$CONFIG_PATH"
   export SERVER_BASE_URL="$SERVER_BASE_URL"
   export HOST_ID="$HOST_ID"
-  export HOST_TOKEN="$HOST_TOKEN"
+  [[ -n "$HOST_TOKEN" ]] && export HOST_TOKEN="$HOST_TOKEN"
   export LOCAL_UNIX_SOCKET="$SOCK_PATH"
   export SPOOL_DB_PATH="$SPOOL_DB_PATH"
   export HOSTD_LOG_PATH="$HOSTD_LOG_PATH"
@@ -452,7 +458,7 @@ usage() {
 Install relay-hostd as a Linux systemd *user* service.
 
 Usage:
-  ./install-hostd-systemd-user.sh --server http://<server>:8787 --host-token <token> [--host-id <id>]
+  ./install-hostd-systemd-user.sh --server http://<server>:8787 [--host-id <id>] [--host-token <token>]
 
 Notes:
   - Requires: systemd user sessions (systemctl --user).
@@ -463,7 +469,7 @@ USAGE
 
 SERVER_HTTP=""
 HOST_ID=""
-HOST_TOKEN=""
+HOST_TOKEN="${HOST_TOKEN:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -475,8 +481,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$SERVER_HTTP" || -z "$HOST_TOKEN" ]]; then
-  echo "missing --server and/or --host-token" >&2
+if [[ -z "$SERVER_HTTP" ]]; then
+  echo "missing --server" >&2
   usage
   exit 2
 fi
@@ -510,20 +516,22 @@ mkdir -p "$DATA_DIR" "$BIN_DIR" "${HOME}/.config/systemd/user"
 install -m 0755 "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd"
 install -m 0755 "$ROOT/bin/relay" "$BIN_DIR/relay"
 
+CONFIG_PATH="${DATA_DIR}/hostd.json"
 SOCK_PATH="${LOCAL_UNIX_SOCKET:-$DATA_DIR/relay-hostd.sock}"
 SPOOL_DB_PATH="${SPOOL_DB_PATH:-$DATA_DIR/hostd-spool.db}"
 HOSTD_LOG_PATH="${HOSTD_LOG_PATH:-$DATA_DIR/hostd.log}"
 RUST_LOG_LEVEL="${RUST_LOG:-warn}"
 
-cat >"$DATA_DIR/hostd.env" <<EOF
-SERVER_BASE_URL=$SERVER_BASE_URL
-HOST_ID=$HOST_ID
-HOST_TOKEN=$HOST_TOKEN
-LOCAL_UNIX_SOCKET=$SOCK_PATH
-SPOOL_DB_PATH=$SPOOL_DB_PATH
-HOSTD_LOG_PATH=$HOSTD_LOG_PATH
-RUST_LOG=$RUST_LOG_LEVEL
-EOF
+{
+  echo "ABRELAY_CONFIG=$CONFIG_PATH"
+  echo "SERVER_BASE_URL=$SERVER_BASE_URL"
+  echo "HOST_ID=$HOST_ID"
+  [[ -n "$HOST_TOKEN" ]] && echo "HOST_TOKEN=$HOST_TOKEN"
+  echo "LOCAL_UNIX_SOCKET=$SOCK_PATH"
+  echo "SPOOL_DB_PATH=$SPOOL_DB_PATH"
+  echo "HOSTD_LOG_PATH=$HOSTD_LOG_PATH"
+  echo "RUST_LOG=$RUST_LOG_LEVEL"
+} >"$DATA_DIR/hostd.env"
 chmod 0600 "$DATA_DIR/hostd.env"
 
 cat >"${HOME}/.config/systemd/user/relay-hostd.service" <<EOF
@@ -575,7 +583,7 @@ Contents:
 
 Quick start:
   1) Start hostd:
-     ./hostd-up.sh --server http://<your-vps>:8787 --host-token <token>
+     ./hostd-up.sh --server http://<your-vps>:8787
 
   2) Start a run (example):
      ./bin/relay codex --cwd /path/to/project
@@ -584,7 +592,7 @@ Quick start:
      ./client-init.sh --server http://<your-vps>:8787
 
   3) Optional (Linux): install hostd as a user service:
-     ./install-hostd-systemd-user.sh --server http://<your-vps>:8787 --host-token <token>
+     ./install-hostd-systemd-user.sh --server http://<your-vps>:8787
 
   3) Optional: install shims so `codex` in any project dir uses relay:
      ./install-shims.sh --auto-path

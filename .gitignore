@@ -11,6 +11,7 @@ docker-compose.override.yml
 
 # Node/Bun
 **/node_modules
+**/.npm-cache/
 **/.DS_Store
 
 # Web
@@ -23,7 +24,13 @@ data/
 *.log
 
 # Local dev tmp
+.codex/
+.shared/
+.npm-cache/
+.tmp-home*/
+.tmp-npm-prefix/
 .relay-tmp/
 
 # Packaging output
 dist/
+cli/*.tgz

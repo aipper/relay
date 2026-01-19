@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount, tick } from "svelte";
+
   type Health = { name: string; version: string };
   type LoginResponse = { access_token: string };
   type RunRow = {
@@ -8,6 +10,12 @@
     cwd: string;
     status: string;
     started_at: string;
+    last_active_at?: string | null;
+    pending_request_id?: string | null;
+    pending_reason?: string | null;
+    pending_prompt?: string | null;
+    pending_op_tool?: string | null;
+    pending_op_args_summary?: string | null;
     ended_at?: string | null;
     exit_code?: number | null;
   };
@@ -77,12 +85,23 @@
   let hosts: HostInfo[] = [];
   let ws: WebSocket | null = null;
   let messagesByRun: Record<string, ChatMessage[]> = {};
+  let isMobile = false;
 
   let selectedRunId = "";
   let inputText = "";
   let lastError = "";
   let outputByRun: Record<string, string> = {};
-  let awaitingByRun: Record<string, { reason?: string; prompt?: string; request_id?: string } | undefined> = {};
+  let awaitingByRun: Record<
+    string,
+    | {
+        reason?: string;
+        prompt?: string;
+        request_id?: string;
+        op_tool?: string;
+        op_args_summary?: string;
+      }
+    | undefined
+  > = {};
   let filePath = "README.md";
   let fileContent = "";
   let fileError = "";
@@ -110,6 +129,30 @@
   let todos: TodoItem[] = [];
   let todoText = "";
 
+  let sessionDetailTab: "output" | "messages" = "output";
+  let outputAutoScroll = true;
+  let outputIsAtBottom = true;
+  let outputBufferLines = 400;
+  let outputFeedEl: HTMLDivElement | null = null;
+  let outputSearchInputEl: HTMLInputElement | null = null;
+
+  let outputSearchText = "";
+  let outputSearchActive = "";
+  let outputSearchCursor = 0;
+
+  type OutputMatch = {
+    id: string;
+    line: number;
+    start: number;
+    end: number;
+  };
+  let outputSearchMatches: OutputMatch[] = [];
+  let outputHtml = "";
+
+  let toastText = "";
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
+  let outputAutoResumeTimer: ReturnType<typeof setTimeout> | null = null;
+
   let startHostId = "host-dev";
   let startTool = "codex";
   let startCmd = "echo Proceed?; cat";
@@ -121,6 +164,20 @@
 
   type SearchMatch = { path: string; line: number; column: number; text: string };
 
+  let sessionSearch = "";
+  let hostGroupCollapsed: Record<string, boolean> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem("relay.hostGroupCollapsed.v1");
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === "object") hostGroupCollapsed = parsed as Record<string, boolean>;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   function persistServerPrefs() {
     if (typeof window === "undefined") return;
     localStorage.setItem("relay.useCustomServer", useCustomServer ? "1" : "0");
@@ -128,8 +185,304 @@
     else localStorage.removeItem("relay.baseUrl");
   }
 
+  function persistHostGroupCollapsed() {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("relay.hostGroupCollapsed.v1", JSON.stringify(hostGroupCollapsed));
+    } catch {
+      // ignore
+    }
+  }
+
   function isRecord(v: unknown): v is Record<string, unknown> {
     return Boolean(v) && typeof v === "object";
+  }
+
+  function basename(path: string): string {
+    const trimmed = path.trim();
+    if (!trimmed || trimmed === "." || trimmed === "/") return "";
+    const parts = trimmed.split(/[\\/]+/g).filter(Boolean);
+    return parts[parts.length - 1] ?? "";
+  }
+
+  function sessionTitle(r: RunRow): string {
+    return basename(r.cwd) || "";
+  }
+
+  function sessionSummary(r: RunRow): string {
+    const s = (r.cwd || "").trim();
+    if (!s || s === ".") return "";
+    return s.length > 60 ? `${s.slice(0, 60)}…` : s;
+  }
+
+  function compareTsDesc(a?: string | null, b?: string | null): number {
+    const ta = a ? Date.parse(a) : 0;
+    const tb = b ? Date.parse(b) : 0;
+    return tb - ta;
+  }
+
+  function formatRelativeTime(ts?: string | null): string {
+    if (!ts) return "";
+    const t = Date.parse(ts);
+    if (!Number.isFinite(t)) return "";
+    const now = Date.now();
+    const diffMs = Math.max(0, now - t);
+    const sec = Math.floor(diffMs / 1000);
+    if (sec < 10) return "刚刚";
+    if (sec < 60) return `${sec}秒前`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}分钟前`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}小时前`;
+    const day = Math.floor(hr / 24);
+    if (day < 7) return `${day}天前`;
+    return new Date(t).toLocaleDateString();
+  }
+
+  function formatAbsTime(ts: string): string {
+    const t = Date.parse(ts);
+    if (!Number.isFinite(t)) return ts;
+    return new Date(t).toLocaleString();
+  }
+
+  function setToast(text: string) {
+    toastText = text;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toastText = "";
+      toastTimer = null;
+    }, 1500);
+  }
+
+  function statusLabel(r: RunRow): { label: string; kind: "running" | "warning" | "error" | "done" } {
+    if (r.status === "awaiting_approval") return { label: "待审批", kind: "warning" };
+    if (r.status === "awaiting_input") return { label: "待输入", kind: "warning" };
+    if (r.status === "running") return { label: "运行中", kind: "running" };
+    if (r.status === "exited") {
+      if (typeof r.exit_code === "number" && r.exit_code !== 0) return { label: "错误", kind: "error" };
+      return { label: "已结束", kind: "done" };
+    }
+    return { label: r.status, kind: "done" };
+  }
+
+  function hostDisplayName(h: HostInfo | null | undefined, hostId: string): string {
+    const name = (h?.name ?? "").trim();
+    return name || hostId;
+  }
+
+  function toggleHostGroup(hostId: string) {
+    hostGroupCollapsed = { ...hostGroupCollapsed, [hostId]: !hostGroupCollapsed[hostId] };
+    persistHostGroupCollapsed();
+  }
+
+  async function focusOutputSearch() {
+    await tick();
+    updateOutputBufferLines();
+    if (outputFeedEl && outputAutoScroll) {
+      outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
+      outputIsAtBottom = true;
+    }
+    outputSearchInputEl?.focus();
+  }
+
+  async function selectSession(runId: string) {
+    selectedRunId = runId;
+    sessionDetailTab = "output";
+    outputAutoScroll = true;
+    outputSearchText = "";
+    outputSearchActive = "";
+    outputSearchCursor = 0;
+    await loadMessages(runId);
+    await focusOutputSearch();
+  }
+
+  function tailLines(text: string, maxLines: number): string {
+    const max = Math.max(1, maxLines | 0);
+    const lines = text.split(/\r?\n/);
+    if (lines.length <= max) return text;
+    return lines.slice(lines.length - max).join("\n");
+  }
+
+  function updateOutputBufferLines() {
+    const viewHeight = outputFeedEl?.clientHeight ?? 520;
+    const lineHeight = 18;
+    const visibleLines = Math.max(1, Math.floor(viewHeight / lineHeight));
+    outputBufferLines = Math.min(2000, Math.max(200, visibleLines * 4));
+  }
+
+  function outputAtBottom(el: HTMLDivElement): boolean {
+    const threshold = 8;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - threshold;
+  }
+
+  function scheduleOutputAutoResume() {
+    if (outputAutoResumeTimer) clearTimeout(outputAutoResumeTimer);
+    outputAutoResumeTimer = setTimeout(async () => {
+      outputAutoScroll = true;
+      await tick();
+      if (outputFeedEl) {
+        outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
+        outputIsAtBottom = true;
+      }
+    }, 10_000);
+  }
+
+  async function resumeOutputAutoScroll() {
+    outputAutoScroll = true;
+    if (outputAutoResumeTimer) {
+      clearTimeout(outputAutoResumeTimer);
+      outputAutoResumeTimer = null;
+    }
+    await tick();
+    if (outputFeedEl) {
+      outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
+      outputIsAtBottom = true;
+    }
+  }
+
+  function pauseOutputAutoScroll() {
+    outputAutoScroll = false;
+    scheduleOutputAutoResume();
+  }
+
+  function handleOutputScroll() {
+    if (!outputFeedEl) return;
+    const atBottom = outputAtBottom(outputFeedEl);
+    outputIsAtBottom = atBottom;
+    if (!atBottom) {
+      if (outputAutoScroll) pauseOutputAutoScroll();
+      else scheduleOutputAutoResume();
+    } else if (!outputAutoScroll) {
+      scheduleOutputAutoResume();
+    }
+  }
+
+  async function toggleOutputAutoScroll() {
+    if (outputAutoScroll) pauseOutputAutoScroll();
+    else await resumeOutputAutoScroll();
+  }
+
+  async function jumpToLatest() {
+    await resumeOutputAutoScroll();
+  }
+
+  function computeOutputMatches(lines: string[], q: string, runId: string): OutputMatch[] {
+    const query = q.trim().toLowerCase();
+    if (!query) return [];
+    const safeRunId = runId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const matches: OutputMatch[] = [];
+    let matchIndex = 0;
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex] ?? "";
+      const lower = line.toLowerCase();
+      let from = 0;
+      while (from <= lower.length) {
+        const idx = lower.indexOf(query, from);
+        if (idx === -1) break;
+        matches.push({
+          id: `out-match-${safeRunId}-${matchIndex}`,
+          line: lineIndex,
+          start: idx,
+          end: idx + query.length,
+        });
+        matchIndex++;
+        from = idx + Math.max(1, query.length);
+      }
+    }
+    return matches;
+  }
+
+  function renderOutputHtml(lines: string[], matches: OutputMatch[], cursor: number): string {
+    if (matches.length === 0) return escapeHtml(lines.join("\n"));
+    const byLine = new Map<number, OutputMatch[]>();
+    for (const m of matches) {
+      const arr = byLine.get(m.line) ?? [];
+      arr.push(m);
+      byLine.set(m.line, arr);
+    }
+    let out = "";
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex] ?? "";
+      const lineMatches = byLine.get(lineIndex) ?? [];
+      if (lineMatches.length === 0) {
+        out += escapeHtml(line);
+        if (lineIndex !== lines.length - 1) out += "\n";
+        continue;
+      }
+      let cursorPos = 0;
+      for (const m of lineMatches) {
+        out += escapeHtml(line.slice(cursorPos, m.start));
+        const cls = matches[cursor]?.id === m.id ? "out-mark current" : "out-mark";
+        out += `<mark id="${m.id}" class="${cls}">${escapeHtml(line.slice(m.start, m.end))}</mark>`;
+        cursorPos = m.end;
+      }
+      out += escapeHtml(line.slice(cursorPos));
+      if (lineIndex !== lines.length - 1) out += "\n";
+    }
+    return out;
+  }
+
+  async function scrollToCurrentOutputMatch() {
+    const m = outputSearchMatches[outputSearchCursor];
+    if (!m) return;
+    await tick();
+    const el = document.getElementById(m.id);
+    if (el) el.scrollIntoView({ block: "center" });
+  }
+
+  async function runOutputSearch() {
+    outputSearchActive = outputSearchText.trim();
+    outputSearchCursor = 0;
+    if (!outputSearchActive) return;
+    pauseOutputAutoScroll();
+    await scrollToCurrentOutputMatch();
+  }
+
+  async function nextOutputMatch() {
+    if (outputSearchMatches.length === 0) return;
+    outputSearchCursor = (outputSearchCursor + 1) % outputSearchMatches.length;
+    pauseOutputAutoScroll();
+    await scrollToCurrentOutputMatch();
+  }
+
+  async function prevOutputMatch() {
+    if (outputSearchMatches.length === 0) return;
+    outputSearchCursor = (outputSearchCursor - 1 + outputSearchMatches.length) % outputSearchMatches.length;
+    pauseOutputAutoScroll();
+    await scrollToCurrentOutputMatch();
+  }
+
+  function clearOutputSearch() {
+    outputSearchText = "";
+    outputSearchActive = "";
+    outputSearchCursor = 0;
+  }
+
+  function handleOutputSearchKeydown(ev: KeyboardEvent) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      runOutputSearch();
+      return;
+    }
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      nextOutputMatch();
+      return;
+    }
+    if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      prevOutputMatch();
+      return;
+    }
+  }
+
+  async function copyOutput() {
+    try {
+      await navigator.clipboard.writeText(selectedOutput || "");
+      setToast("已复制");
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "复制失败");
+    }
   }
 
   function escapeHtml(s: string): string {
@@ -573,12 +926,13 @@
             outputByRun = { ...outputByRun, [msg.run_id]: truncateTail(existing + text, 200_000) };
           }
           if (msg.run_id && msg.type === "run.awaiting_input") {
+            const reqId = dataString(msg, "request_id");
             awaitingByRun = {
               ...awaitingByRun,
               [msg.run_id]: {
                 reason: dataString(msg, "reason"),
                 prompt: dataString(msg, "prompt"),
-                request_id: dataString(msg, "request_id"),
+                request_id: reqId,
               },
             };
           }
@@ -589,6 +943,8 @@
                 reason: dataString(msg, "reason"),
                 prompt: dataString(msg, "prompt"),
                 request_id: dataString(msg, "request_id"),
+                op_tool: dataString(msg, "op_tool"),
+                op_args_summary: dataString(msg, "op_args_summary"),
               },
             };
           }
@@ -605,9 +961,67 @@
           // Best-effort local run status updates.
           if (msg.run_id) {
             const i = runs.findIndex((x) => x.id === msg.run_id);
+            const last_active_at = msg.ts;
+            const hasReqId = dataString(msg, "request_id");
+
+            if (i === -1 && msg.type === "run.started") {
+              runs = [
+                {
+                  id: msg.run_id,
+                  host_id: msg.host_id ?? "unknown",
+                  tool: dataString(msg, "tool") ?? "unknown",
+                  cwd: dataString(msg, "cwd") ?? ".",
+                  status: "running",
+                  started_at: msg.ts,
+                  last_active_at: msg.ts,
+                },
+                ...runs,
+              ];
+              return;
+            }
+
             if (i !== -1) {
-              if (msg.type === "run.awaiting_input") runs[i] = { ...runs[i], status: "awaiting_input" };
-              if (msg.type === "run.exited") runs[i] = { ...runs[i], status: "exited" };
+              const base: RunRow = { ...runs[i], last_active_at };
+              if (msg.type === "run.permission_requested") {
+                runs[i] = {
+                  ...base,
+                  status: "awaiting_approval",
+                  pending_request_id: dataString(msg, "request_id"),
+                  pending_reason: dataString(msg, "reason"),
+                  pending_prompt: dataString(msg, "prompt"),
+                  pending_op_tool: dataString(msg, "op_tool"),
+                  pending_op_args_summary: dataString(msg, "op_args_summary"),
+                };
+              } else if (msg.type === "run.awaiting_input") {
+                runs[i] = { ...base, status: hasReqId ? "awaiting_approval" : "awaiting_input" };
+              } else if (msg.type === "run.input") {
+                runs[i] = {
+                  ...base,
+                  status: "running",
+                  pending_request_id: null,
+                  pending_reason: null,
+                  pending_prompt: null,
+                  pending_op_tool: null,
+                  pending_op_args_summary: null,
+                };
+              } else if (msg.type === "run.exited") {
+                const exit_code = isRecord(msg.data) && typeof msg.data["exit_code"] === "number" ? msg.data["exit_code"] : base.exit_code;
+                runs[i] = {
+                  ...base,
+                  status: "exited",
+                  ended_at: msg.ts,
+                  exit_code,
+                  pending_request_id: null,
+                  pending_reason: null,
+                  pending_prompt: null,
+                  pending_op_tool: null,
+                  pending_op_args_summary: null,
+                };
+              } else if (msg.type === "run.started") {
+                runs[i] = { ...base, status: "running", started_at: msg.ts, ended_at: null, exit_code: null };
+              } else if (msg.type === "run.output" || msg.type === "tool.call" || msg.type === "tool.result") {
+                runs[i] = base;
+              }
               runs = [...runs];
             }
           }
@@ -902,10 +1316,61 @@
   }
 
   $: selectedRun = runs.find((r) => r.id === selectedRunId) ?? null;
-  $: awaitingRuns = runs.filter((r) => r.status === "awaiting_input");
+  $: awaitingRuns = runs.filter((r) => r.status === "awaiting_input" || r.status === "awaiting_approval");
   $: selectedOutput = selectedRunId ? outputByRun[selectedRunId] ?? "" : "";
   $: selectedAwaiting = selectedRunId ? awaitingByRun[selectedRunId] ?? null : null;
   $: selectedMessages = selectedRunId ? messagesByRun[selectedRunId] ?? [] : [];
+  $: hostsById = Object.fromEntries(hosts.map((h) => [h.id, h] as const)) as Record<string, HostInfo>;
+  $: filteredRuns = (() => {
+    const q = sessionSearch.trim().toLowerCase();
+    if (!q) return runs;
+    return runs.filter((r) => {
+      const title = sessionTitle(r);
+      const summary = sessionSummary(r);
+      const haystack = (title || summary ? `${title} ${summary}` : r.id).toLowerCase();
+      return haystack.includes(q);
+    });
+  })();
+  $: runGroups = (() => {
+    const map = new Map<string, RunRow[]>();
+    for (const r of filteredRuns) {
+      const arr = map.get(r.host_id) ?? [];
+      arr.push(r);
+      map.set(r.host_id, arr);
+    }
+    const groups = Array.from(map.entries()).map(([hostId, items]) => {
+      const h = hostsById[hostId] ?? null;
+      items.sort((a, b) => compareTsDesc(a.last_active_at ?? a.started_at, b.last_active_at ?? b.started_at));
+      return {
+        host_id: hostId,
+        host: h,
+        display_name: hostDisplayName(h, hostId),
+        online: Boolean(h?.online),
+        last_seen_at: h?.last_seen_at ?? null,
+        sessions: items,
+      };
+    });
+    groups.sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      return a.display_name.localeCompare(b.display_name);
+    });
+    return groups;
+  })();
+
+  $: outputDisplayText = tailLines(selectedOutput, outputBufferLines);
+  $: outputLines = outputDisplayText.split(/\r?\n/);
+  $: outputSearchMatches = outputSearchActive ? computeOutputMatches(outputLines, outputSearchActive, selectedRunId) : [];
+  $: if (outputSearchMatches.length === 0) outputSearchCursor = 0;
+  $: if (outputSearchCursor >= outputSearchMatches.length) outputSearchCursor = 0;
+  $: outputHtml = renderOutputHtml(outputLines, outputSearchMatches, outputSearchCursor);
+  $: if (sessionDetailTab === "output" && outputAutoScroll) {
+    tick().then(() => {
+      if (!outputFeedEl) return;
+      outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
+      outputIsAtBottom = true;
+    });
+  }
+
   $: displayMessages = (() => {
     const msgs = selectedMessages ?? [];
     const out: ChatMessage[] = [];
@@ -992,6 +1457,51 @@
   } else {
     todos = [];
   }
+
+  // Best-effort polling while disconnected (helps mobile background/resume).
+  onMount(() => {
+    let stopped = false;
+    let inFlight = false;
+    const timer = setInterval(async () => {
+      if (stopped) return;
+      if (!token) return;
+      if (status === "connected") return;
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        await Promise.all([refreshHosts(), refreshRuns()]);
+      } finally {
+        inFlight = false;
+      }
+    }, 10_000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  });
+
+  onMount(() => {
+    if (typeof window !== "undefined") {
+      const mq = window.matchMedia("(max-width: 640px)");
+      const apply = () => {
+        isMobile = mq.matches;
+      };
+      apply();
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    }
+    return;
+  });
+
+  onMount(() => {
+    const onResize = () => updateOutputBufferLines();
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (outputAutoResumeTimer) clearTimeout(outputAutoResumeTimer);
+      if (toastTimer) clearTimeout(toastTimer);
+    };
+  });
 </script>
 
 <main>
@@ -1007,7 +1517,10 @@
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-      <span class="status-pill" data-kind={status}>{status}</span>
+      <span class="conn-status" data-kind={status}>
+        <span class="conn-dot" aria-hidden="true"></span>
+        <span>{status}</span>
+      </span>
       {#if token}
         <span class="subtle"><code>{username}</code></span>
       {/if}
@@ -1138,185 +1651,274 @@
   {/if}
 
   {#if token && view === "sessions"}
-  <div class="sessions-layout">
+  <div class="sessions-layout" class:mobile-detail-open={isMobile && Boolean(selectedRunId)}>
   <section class="sessions-list">
-    <h2>会话</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button on:click={refreshRuns} disabled={!token}>Refresh all</button>
-      <button on:click={refreshRecentSessions} disabled={!token}>Refresh recent</button>
+    <div class="list-head">
+      <h2 style="margin:0">会话</h2>
+      <button
+        class="secondary"
+        on:click={async () => {
+          await Promise.all([refreshHosts(), refreshRuns()]);
+        }}
+        disabled={!token}
+      >
+        刷新
+      </button>
     </div>
-    {#if awaitingRuns.length > 0}
-      <div style="margin-top:8px;padding:8px;border:1px solid #f59e0b;background:#fffbeb">
-        <strong>Needs input:</strong>
-        {#each awaitingRuns as r (r.id)}
-          <div><code>{r.id}</code> <code>host={r.host_id}</code> <code>tool={r.tool}</code></div>
-        {/each}
+    <div class="list-search">
+      <input bind:value={sessionSearch} placeholder="搜索" />
+    </div>
+
+  {#each runGroups as g (g.host_id)}
+      <div class="host-group">
+        <button class="host-group-header" on:click={() => toggleHostGroup(g.host_id)} aria-expanded={!hostGroupCollapsed[g.host_id]}>
+          <span class="chevron">{hostGroupCollapsed[g.host_id] ? "▸" : "▾"}</span>
+          <span class="dot" data-online={g.online ? "1" : "0"} aria-hidden="true"></span>
+          <span class="host-name">{g.display_name}</span>
+          <span class="host-last-seen">{formatRelativeTime(g.last_seen_at)}</span>
+        </button>
+        {#if !hostGroupCollapsed[g.host_id]}
+          <div class="session-items">
+            {#each g.sessions as r (r.id)}
+              {@const st = statusLabel(r)}
+              {@const title = sessionTitle(r)}
+              {@const summary = sessionSummary(r)}
+              <button class="session-item" class:selected={selectedRunId === r.id} on:click={() => selectSession(r.id)}>
+                <div class="session-item-top">
+                  {#if title}
+                    <div class="session-title">{title}</div>
+                  {/if}
+                  <span class="session-status" data-kind={st.kind}>{st.label}</span>
+                </div>
+                {#if r.status === "awaiting_approval"}
+                  <div class="session-meta">
+                    <span class="session-tool">{r.tool}</span>
+                    {#if r.pending_op_tool}<span class="session-op">{r.pending_op_tool}</span>{/if}
+                    {#if r.pending_op_args_summary}<span class="session-op-args">{r.pending_op_args_summary}</span>{/if}
+                  </div>
+                {:else}
+                  {#if summary}
+                    <div class="session-summary">{summary}</div>
+                  {/if}
+                {/if}
+                <div class="session-time">{formatRelativeTime(r.last_active_at ?? r.started_at)}</div>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/each}
+  </section>
+
+  <section class="sessions-detail">
+    {#if !selectedRun}
+      <div class="subtle">(未选择会话)</div>
+    {:else}
+      {@const st = statusLabel(selectedRun)}
+      {@const host = hostsById[selectedRun.host_id] ?? null}
+      {@const title = sessionTitle(selectedRun)}
+      <div class="detail-head">
+        <div class="detail-title">
+          {#if title}
+            <div class="detail-title-main">{title}</div>
+          {/if}
+          <div class="detail-title-sub">
+            <span class="dot" data-online={host?.online ? "1" : "0"} aria-hidden="true"></span>
+            <span>{hostDisplayName(host, selectedRun.host_id)}</span>
+            <span class="subtle">{formatRelativeTime(host?.last_seen_at ?? null)}</span>
+          </div>
+        </div>
+        <div class="detail-actions">
+          {#if isMobile}
+            <button class="secondary" on:click={() => (selectedRunId = "")} type="button">返回</button>
+          {/if}
+          <span class="session-status" data-kind={st.kind}>{st.label}</span>
+          {#if selectedAwaiting}
+            <button on:click={() => sendDecision("approve")} disabled={!selectedRunId || status !== "connected"}>同意</button>
+            <button on:click={() => sendDecision("deny")} disabled={!selectedRunId || status !== "connected"}>拒绝</button>
+          {/if}
+          <button on:click={() => sendStop("term")} disabled={!selectedRunId || status !== "connected"}>停止</button>
+        </div>
+      </div>
+
+      <div class="detail-tabs" role="tablist" aria-label="session detail tabs">
+        <button
+          class:active={sessionDetailTab === "output"}
+          role="tab"
+          on:click={async () => {
+            sessionDetailTab = "output";
+            await focusOutputSearch();
+          }}
+        >
+          输出
+        </button>
+        <button class:active={sessionDetailTab === "messages"} role="tab" on:click={() => (sessionDetailTab = "messages")}>消息</button>
+        <button on:click={() => selectedRunId && loadMessages(selectedRunId)} disabled={!selectedRunId || !token} style="margin-left:auto">
+          刷新
+        </button>
+      </div>
+
+      {#if selectedAwaiting && (selectedAwaiting.op_tool || selectedAwaiting.op_args_summary || selectedAwaiting.prompt)}
+        <div class="awaiting-banner">
+          <div class="awaiting-banner-top">
+            {#if selectedAwaiting.op_tool}<span class="session-op">{selectedAwaiting.op_tool}</span>{/if}
+            {#if selectedAwaiting.op_args_summary}<span class="session-op-args">{selectedAwaiting.op_args_summary}</span>{/if}
+          </div>
+          {#if selectedAwaiting.prompt}
+            <div class="awaiting-banner-prompt">{selectedAwaiting.prompt}</div>
+          {/if}
+        </div>
+      {/if}
+
+      {#if sessionDetailTab === "messages"}
+        <div class="chat-feed">
+          {#if displayMessages.length === 0}
+            <div class="subtle"></div>
+          {:else}
+            {#each displayMessages as m, i (m.key)}
+              {#if m.kind === "tool.call" && displayMessages[i + 1]?.kind === "tool.result" && displayMessages[i + 1]?.request_id && displayMessages[i + 1]?.request_id === m.request_id}
+                {@const callMeta = toolMetaFromText(m.kind, m.text || "")}
+                {@const res = displayMessages[i + 1]}
+                {@const resMeta = toolMetaFromText(res.kind, res.text || "")}
+                <div class="chat-row" data-role="system">
+                  <details open class="tool-card">
+                    <summary>
+                      <code>{callMeta.label}</code>
+                      {#if m.actor}<code>actor={m.actor}</code>{/if}
+                      {#if (res.text || "").includes(" ok=true")}
+                        <span style="color:#065f46">ok</span>
+                      {:else if (res.text || "").includes(" ok=false")}
+                        <span style="color:#b91c1c">error</span>
+                      {/if}
+                    </summary>
+                    <div class="tool-card-body">
+                      <div class="tool-card-label">call</div>
+                      {@html renderMarkdownBasic(callMeta.details || "")}
+                      <div class="tool-card-label" style="margin-top:10px">result</div>
+                      {@html renderMarkdownBasic(resMeta.details || "")}
+                    </div>
+                  </details>
+                </div>
+              {:else if m.kind === "tool.result" && displayMessages[i - 1]?.kind === "tool.call" && displayMessages[i - 1]?.request_id && displayMessages[i - 1]?.request_id === m.request_id}
+                <!-- paired with previous tool.call; skip rendering -->
+              {:else}
+                <div class="chat-row" data-role={m.role}>
+                  {#if m.role === "system"}
+                    <div class="chat-system">
+                      {@html renderMarkdownBasic(m.text || "")}
+                    </div>
+                  {:else}
+                    <div class="chat-bubble" data-role={m.role}>
+                      {@html renderMarkdownBasic(m.text || "")}
+                    </div>
+                  {/if}
+                  <div class="chat-ts">{formatAbsTime(m.ts)}</div>
+                </div>
+              {/if}
+            {/each}
+          {/if}
+        </div>
+      {:else}
+        <div class="output-toolbar">
+          <div class="output-searchbar">
+            <input
+              bind:this={outputSearchInputEl}
+              bind:value={outputSearchText}
+              on:keydown={handleOutputSearchKeydown}
+              placeholder=""
+            />
+            <button on:click={runOutputSearch} disabled={!outputSearchText.trim()}>搜索</button>
+            <button on:click={prevOutputMatch} disabled={outputSearchMatches.length === 0}>↑</button>
+            <button on:click={nextOutputMatch} disabled={outputSearchMatches.length === 0}>↓</button>
+            {#if outputSearchActive}
+              <div class="output-count">
+                {outputSearchMatches.length === 0 ? "0/0" : `${outputSearchCursor + 1}/${outputSearchMatches.length}`}
+              </div>
+            {/if}
+            <button on:click={clearOutputSearch} disabled={!outputSearchText && !outputSearchActive}>清空</button>
+          </div>
+          <div class="output-actions">
+            <button on:click={toggleOutputAutoScroll} disabled={!selectedRunId}>
+              {outputAutoScroll ? "暂停" : "继续"}
+            </button>
+            {#if !outputAutoScroll && !outputIsAtBottom}
+              <button on:click={jumpToLatest} disabled={!selectedRunId}>跳到最新</button>
+            {/if}
+            <button on:click={copyOutput} disabled={!selectedOutput}>复制输出</button>
+          </div>
+        </div>
+        <div class="output-feed" bind:this={outputFeedEl} on:scroll={handleOutputScroll}>
+          {#if outputHtml}
+            <pre class="output-pre">{@html outputHtml}</pre>
+          {/if}
+          {#if !outputAutoScroll}
+            <button class="paused-badge" on:click={resumeOutputAutoScroll} type="button">已暂停</button>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="detail-input">
+        <input bind:value={inputText} placeholder="输入…" />
+        <button
+          on:click={() => {
+            sendInput(inputText);
+            inputText = "";
+          }}
+          disabled={!selectedRunId || status !== "connected"}
+        >
+          发送
+        </button>
       </div>
     {/if}
-    {#if runs.length === 0}
-      <div>No sessions loaded yet.</div>
-    {:else}
-      <ul>
-        {#each runs as r (r.id)}
-          <li>
-            <button
-              on:click={async () => {
-                selectedRunId = r.id;
-                await loadMessages(r.id);
-              }}
-              style="margin-right:8px"
-            >
-              Select
-            </button>
-            <code>{r.id}</code>
-            <strong style={r.status === "awaiting_input" ? "color:#b45309" : ""}>{r.status}</strong>
-            <code>host={r.host_id}</code>
-            <code>tool={r.tool}</code>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+  </section>
 
-    {#if recentSessions.length > 0}
-      <div style="margin-top:12px">
-        <strong>Recent sessions</strong>
+  <section class="sessions-todo">
+    <h2>待办</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <input bind:value={todoText} placeholder="Add a todo..." />
+      <button
+        on:click={() => {
+          addTodo(todoText);
+          todoText = "";
+        }}
+        disabled={!selectedRunId}
+      >
+        Add
+      </button>
+    </div>
+
+    {#if todoSuggestions.length > 0}
+      <div style="margin:8px 0;padding:8px;border:1px solid #e5e7eb;background:#f8fafc">
+        <strong>Suggestions (from output)</strong>
         <ul>
-          {#each recentSessions as r (r.id)}
+          {#each todoSuggestions as s (s)}
             <li>
-              <button
-                on:click={async () => {
-                  selectedRunId = r.id;
-                  await loadMessages(r.id);
-                }}
-                style="margin-right:8px"
-              >
-                Select
-              </button>
-              <code>{r.id}</code>
-              <strong style={r.status === "awaiting_input" ? "color:#b45309" : ""}>{r.status}</strong>
-              <code>host={r.host_id}</code>
-              <code>tool={r.tool}</code>
+              <button on:click={() => addTodo(s)} disabled={!selectedRunId} style="margin-right:8px">Add</button>
+              {s}
             </li>
           {/each}
         </ul>
       </div>
     {/if}
-  </section>
 
-  <section class="sessions-messages">
-    <h2>消息</h2>
-    <button on:click={() => selectedRunId && loadMessages(selectedRunId)} disabled={!selectedRunId || !token} style="margin-bottom:8px">
-      Refresh messages
-    </button>
-    <div style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;padding:12px;background:#fafafa">
-      {#if displayMessages.length === 0}
-        <div>(no messages yet)</div>
-      {:else}
-        {#each displayMessages as m, i (m.key)}
-          <div style="margin:8px 0;display:flex;flex-direction:column;gap:4px">
-            <div style="font-size:12px;color:#6b7280">
-              <code>{m.ts}</code> <code>{m.role}</code> <code>{m.kind}</code>
-              {#if m.request_id}<code> request_id={m.request_id}</code>{/if}
-            </div>
-            {#if m.kind === "tool.call" && displayMessages[i + 1]?.kind === "tool.result" && displayMessages[i + 1]?.request_id && displayMessages[i + 1]?.request_id === m.request_id}
-              {@const callMeta = toolMetaFromText(m.kind, m.text || "")}
-              {@const res = displayMessages[i + 1]}
-              {@const resMeta = toolMetaFromText(res.kind, res.text || "")}
-              <details open style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;background:#f8fafc">
-                <summary style="cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <code>{callMeta.label}</code>
-                  {#if m.actor}<code>actor={m.actor}</code>{/if}
-                  {#if (res.text || "").includes(" ok=true")}
-                    <span style="color:#065f46">ok</span>
-                  {:else if (res.text || "").includes(" ok=false")}
-                    <span style="color:#b91c1c">error</span>
-                  {/if}
-                </summary>
-                <div style="margin-top:8px">
-                  <div style="font-size:12px;color:#6b7280;margin-bottom:6px">call</div>
-                  {@html renderMarkdownBasic(callMeta.details || "")}
-                  <div style="font-size:12px;color:#6b7280;margin:10px 0 6px 0">result</div>
-                  {@html renderMarkdownBasic(resMeta.details || "")}
-                </div>
-              </details>
-            {:else if m.kind === "tool.result" && displayMessages[i - 1]?.kind === "tool.call" && displayMessages[i - 1]?.request_id && displayMessages[i - 1]?.request_id === m.request_id}
-              <!-- paired with previous tool.call; skip rendering -->
-            {:else if m.role === "assistant"}
-              <div style="margin:0;padding:10px;border-radius:10px;border:1px solid #e5e7eb;background:#eff6ff">
-                {@html renderMarkdownBasic(m.text || "")}
-              </div>
-            {:else if m.role === "system"}
-              <div style="margin:0;padding:10px;border-radius:10px;border:1px solid #e5e7eb;background:#fff7ed">
-                {@html renderMarkdownBasic(m.text || "")}
-              </div>
-            {:else}
-              <div style="margin:0;padding:10px;border-radius:10px;border:1px solid #e5e7eb;background:#ecfdf5">
-                {@html renderMarkdownBasic(m.text || "")}
-              </div>
-            {/if}
-          </div>
+    {#if todos.length === 0}
+      <div>(no todos)</div>
+    {:else}
+      <ul>
+        {#each todos as t (t.id)}
+          <li>
+            <label style="display:flex;gap:8px;align-items:center">
+              <input type="checkbox" checked={t.done} on:change={() => toggleTodo(t.id)} />
+              <span style={t.done ? "text-decoration:line-through;color:#6b7280" : ""}>{t.text}</span>
+            </label>
+            <button on:click={() => removeTodo(t.id)} style="margin-left:8px">Remove</button>
+          </li>
         {/each}
-      {/if}
-    </div>
-  </section>
-
-  <section class="sessions-input">
-    <h2>发送输入</h2>
-    <div style="margin:8px 0">
-      <strong>Selected:</strong>
-      {#if selectedRun}
-        <code>{selectedRun.id}</code> <code>{selectedRun.status}</code> <code>{selectedRun.tool}</code>
-      {:else}
-        <span>none</span>
-      {/if}
-    </div>
-    {#if selectedAwaiting}
-      <div style="margin:8px 0;padding:8px;border:1px solid #60a5fa;background:#eff6ff">
-        <strong>Awaiting input</strong>
-        {#if selectedAwaiting.reason}<code>reason={selectedAwaiting.reason}</code>{/if}
-        {#if selectedAwaiting.prompt}
-          <div style="margin-top:6px"><code>prompt</code> {selectedAwaiting.prompt}</div>
-        {/if}
-      </div>
+      </ul>
     {/if}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-      <button on:click={() => sendDecision("approve")} disabled={!selectedRunId || status !== "connected"}>Approve (y)</button>
-      <button on:click={() => sendDecision("deny")} disabled={!selectedRunId || status !== "connected"}>Deny (n)</button>
-      <button on:click={() => sendStop("term")} disabled={!selectedRunId || status !== "connected"}>Stop</button>
-    </div>
-    <label>
-      Text
-      <input bind:value={inputText} placeholder="e.g. y\n or your feedback" />
-    </label>
-    <button
-      on:click={() => {
-        sendInput(inputText);
-        inputText = "";
-      }}
-      disabled={!selectedRunId || status !== "connected"}
-    >
-      Send
-    </button>
   </section>
-
-  <section class="sessions-output">
-    <h2>输出</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-      <button
-        on:click={() => {
-          if (!selectedRunId) return;
-          outputByRun = { ...outputByRun, [selectedRunId]: "" };
-        }}
-        disabled={!selectedRunId}
-      >
-        Clear
-      </button>
-      <button on:click={refreshRuns} disabled={!token}>Refresh runs</button>
-    </div>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{selectedOutput || "(no output yet)"}</pre
-    >
-  </section>
+  </div>
+  {/if}
 
   <section class:hidden={!token || view !== "tools"}>
     <h2>文件（run cwd）</h2>
@@ -1357,6 +1959,29 @@
         {/each}
       </ul>
     {/if}
+  </section>
+
+  <section class:hidden={!token || view !== "tools"}>
+    <h2>Git（run cwd）</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button on:click={fetchGitStatus} disabled={!selectedRunId || status !== "connected"}>Status</button>
+      <button on:click={fetchGitDiff} disabled={!selectedRunId || status !== "connected"}>Diff</button>
+    </div>
+    <label>
+      Diff path (optional, relative)
+      <input bind:value={gitDiffPath} placeholder="src/main.rs" />
+    </label>
+    {#if gitError}
+      <div style="color:#b91c1c">{gitError}</div>
+    {/if}
+    <h3>status</h3>
+    <pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
+{gitStatus || "(empty)"}</pre
+    >
+    <h3>diff</h3>
+    <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
+{gitDiff || "(empty)"}</pre
+    >
   </section>
 
   <section class:hidden={!token || view !== "hosts"}>
@@ -1454,77 +2079,6 @@
     {/if}
   </section>
 
-  <section class:hidden={!token || view !== "tools"}>
-    <h2>Git（run cwd）</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button on:click={fetchGitStatus} disabled={!selectedRunId || status !== "connected"}>Status</button>
-      <button on:click={fetchGitDiff} disabled={!selectedRunId || status !== "connected"}>Diff</button>
-    </div>
-    <label>
-      Diff path (optional, relative)
-      <input bind:value={gitDiffPath} placeholder="src/main.rs" />
-    </label>
-    {#if gitError}
-      <div style="color:#b91c1c">{gitError}</div>
-    {/if}
-    <h3>status</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{gitStatus || "(empty)"}</pre
-    >
-    <h3>diff</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{gitDiff || "(empty)"}</pre
-    >
-  </section>
-
-  <section class="sessions-todo">
-    <h2>待办</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-      <input bind:value={todoText} placeholder="Add a todo..." />
-      <button
-        on:click={() => {
-          addTodo(todoText);
-          todoText = "";
-        }}
-        disabled={!selectedRunId}
-      >
-        Add
-      </button>
-    </div>
-
-    {#if todoSuggestions.length > 0}
-      <div style="margin:8px 0;padding:8px;border:1px solid #e5e7eb;background:#f8fafc">
-        <strong>Suggestions (from output)</strong>
-        <ul>
-          {#each todoSuggestions as s (s)}
-            <li>
-              <button on:click={() => addTodo(s)} disabled={!selectedRunId} style="margin-right:8px">Add</button>
-              {s}
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
-
-    {#if todos.length === 0}
-      <div>(no todos)</div>
-    {:else}
-      <ul>
-        {#each todos as t (t.id)}
-          <li>
-            <label style="display:flex;gap:8px;align-items:center">
-              <input type="checkbox" checked={t.done} on:change={() => toggleTodo(t.id)} />
-              <span style={t.done ? "text-decoration:line-through;color:#6b7280" : ""}>{t.text}</span>
-            </label>
-            <button on:click={() => removeTodo(t.id)} style="margin-left:8px">Remove</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
-  </div>
-  {/if}
-
   <section class:hidden={!token || view !== "settings"}>
     <h2>事件</h2>
     <pre>{JSON.stringify(events[0] ?? null, null, 2)}</pre>
@@ -1539,6 +2093,10 @@
       {/each}
     </ul>
   </section>
+
+  {#if toastText}
+    <div class="toast" role="status" aria-live="polite">{toastText}</div>
+  {/if}
 </main>
 
 <style>
@@ -1577,6 +2135,24 @@
     margin-top: 2px;
   }
 
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    padding: 10px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(17, 24, 39, 0.86);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 13px;
+    font-weight: 800;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      0 10px 30px rgba(0, 0, 0, 0.22);
+    z-index: 50;
+  }
+
   .segmented {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1601,9 +2177,10 @@
     border: 1px solid rgba(17, 24, 39, 0.08);
   }
 
-  .status-pill {
+  .conn-status {
     display: inline-flex;
     align-items: center;
+    gap: 6px;
     border-radius: 999px;
     padding: 6px 10px;
     font-size: 12px;
@@ -1611,23 +2188,43 @@
     background: rgba(255, 255, 255, 0.85);
   }
 
-  .status-pill[data-kind="connected"] {
+  .conn-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(107, 114, 128, 0.7);
+  }
+
+  .conn-status[data-kind="connected"] {
     background: rgba(52, 199, 89, 0.12);
     border-color: rgba(52, 199, 89, 0.28);
     color: #065f46;
   }
 
-  .status-pill[data-kind="checking"],
-  .status-pill[data-kind="connecting"] {
+  .conn-status[data-kind="connected"] .conn-dot {
+    background: rgba(52, 199, 89, 0.9);
+  }
+
+  .conn-status[data-kind="checking"],
+  .conn-status[data-kind="connecting"] {
     background: rgba(0, 122, 255, 0.12);
     border-color: rgba(0, 122, 255, 0.28);
     color: #1d4ed8;
   }
 
-  .status-pill[data-kind="error"] {
+  .conn-status[data-kind="checking"] .conn-dot,
+  .conn-status[data-kind="connecting"] .conn-dot {
+    background: rgba(0, 122, 255, 0.9);
+  }
+
+  .conn-status[data-kind="error"] {
     background: rgba(239, 68, 68, 0.1);
     border-color: rgba(239, 68, 68, 0.22);
     color: #991b1b;
+  }
+
+  .conn-status[data-kind="error"] .conn-dot {
+    background: rgba(239, 68, 68, 0.9);
   }
 
   .hidden {
@@ -1641,58 +2238,528 @@
     align-items: start;
   }
 
-  @media (max-width: 920px) {
+  @media (max-width: 1024px) {
     .sessions-layout {
-      grid-template-columns: 1fr;
+      grid-template-columns: 320px 1fr;
     }
   }
 
   .sessions-list {
     grid-column: 1;
-    grid-row: 1 / span 4;
+    grid-row: 1 / span 2;
   }
 
-  @media (max-width: 920px) {
+  @media (max-width: 640px) {
     .sessions-list {
       grid-row: auto;
     }
   }
 
-  .sessions-messages {
+  @media (max-width: 640px) {
+    .sessions-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .sessions-layout.mobile-detail-open .sessions-list {
+      display: none;
+    }
+
+    .sessions-layout:not(.mobile-detail-open) .sessions-detail,
+    .sessions-layout:not(.mobile-detail-open) .sessions-todo {
+      display: none;
+    }
+  }
+
+  .list-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .secondary {
+    background: rgba(255, 255, 255, 0.75);
+  }
+
+  .list-search {
+    margin: 10px 0 12px 0;
+  }
+
+  .list-search input {
+    border-radius: 999px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .host-group {
+    margin: 10px 0;
+  }
+
+  .host-group-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(255, 255, 255, 0.75);
+    text-align: left;
+  }
+
+  .host-group-header:hover {
+    border-color: rgba(17, 24, 39, 0.16);
+  }
+
+  .chevron {
+    width: 16px;
+    color: #6b7280;
+    flex: 0 0 auto;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #9ca3af;
+    flex: 0 0 auto;
+  }
+
+  .dot[data-online="1"] {
+    background: #22c55e;
+  }
+
+  .host-name {
+    font-weight: 800;
+    font-size: 13px;
+    flex: 1;
+  }
+
+  .host-last-seen {
+    font-size: 12px;
+    color: #6b7280;
+    flex: 0 0 auto;
+  }
+
+  .session-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .session-item {
+    width: 100%;
+    text-align: left;
+    position: relative;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(255, 255, 255, 0.86);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .session-item:hover {
+    border-color: rgba(17, 24, 39, 0.16);
+  }
+
+  .session-item.selected {
+    border-color: rgba(0, 122, 255, 0.35);
+    background: rgba(0, 122, 255, 0.08);
+  }
+
+  .session-item.selected::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 999px;
+    background: rgba(0, 122, 255, 0.9);
+  }
+
+  .session-item-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .session-title {
+    font-weight: 900;
+    font-size: 13px;
+    line-height: 1.2;
+    color: #111827;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .session-status {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 800;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(255, 255, 255, 0.85);
+    flex: 0 0 auto;
+  }
+
+  .session-status[data-kind="running"] {
+    background: rgba(52, 199, 89, 0.12);
+    border-color: rgba(52, 199, 89, 0.28);
+    color: #065f46;
+  }
+
+  .session-status[data-kind="warning"] {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.28);
+    color: #92400e;
+  }
+
+  .session-status[data-kind="error"] {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.22);
+    color: #991b1b;
+  }
+
+  .session-status[data-kind="done"] {
+    background: rgba(107, 114, 128, 0.12);
+    border-color: rgba(107, 114, 128, 0.22);
+    color: #374151;
+  }
+
+  .session-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 12px;
+    color: #374151;
+  }
+
+  .session-tool {
+    font-weight: 900;
+    color: #111827;
+  }
+
+  .session-op,
+  .session-op-args {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    background: rgba(243, 244, 246, 0.9);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    padding: 2px 6px;
+    border-radius: 8px;
+  }
+
+  .session-summary {
+    font-size: 12px;
+    color: #6b7280;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 1024px) {
+    .session-summary {
+      display: none;
+    }
+  }
+
+  .session-time {
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .sessions-detail {
     grid-column: 2;
     grid-row: 1;
   }
 
-  .sessions-input {
-    grid-column: 2;
-    grid-row: 2;
+  .detail-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
   }
 
-  .sessions-output {
-    grid-column: 2;
-    grid-row: 3;
+  .detail-title {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .detail-title-main {
+    font-weight: 900;
+    font-size: 15px;
+    line-height: 1.2;
+  }
+
+  .detail-title-sub {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .detail-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .detail-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 6px;
+    border-radius: 14px;
+    background: rgba(17, 24, 39, 0.06);
+  }
+
+  .detail-tabs button {
+    border: none;
+    background: transparent;
+    border-radius: 12px;
+    padding: 10px 10px;
+    font-weight: 800;
+    font-size: 13px;
+  }
+
+  .detail-tabs button.active {
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+  }
+
+  .awaiting-banner {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    background: rgba(255, 251, 235, 0.85);
+  }
+
+  .awaiting-banner-top {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .awaiting-banner-prompt {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #92400e;
+    word-break: break-word;
+  }
+
+  .chat-feed {
+    margin-top: 12px;
+    max-height: 520px;
+    overflow: auto;
+    border-radius: 16px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(250, 250, 250, 0.9);
+    padding: 12px;
+  }
+
+  .chat-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 10px 0;
+  }
+
+  .chat-row[data-role="assistant"] {
+    align-items: flex-start;
+  }
+
+  .chat-row[data-role="user"] {
+    align-items: flex-end;
+  }
+
+  .chat-row[data-role="system"] {
+    align-items: center;
+    text-align: center;
+  }
+
+  .chat-bubble {
+    max-width: 70%;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(255, 255, 255, 0.92);
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .chat-bubble[data-role="assistant"] {
+    background: rgba(243, 244, 246, 0.95);
+  }
+
+  .chat-bubble[data-role="user"] {
+    background: rgba(0, 122, 255, 0.12);
+    border-color: rgba(0, 122, 255, 0.22);
+  }
+
+  .chat-system {
+    max-width: 70%;
+    font-size: 12px;
+    color: #6b7280;
+    word-break: break-word;
+  }
+
+  .chat-ts {
+    font-size: 11px;
+    color: #6b7280;
+  }
+
+  .tool-card {
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(248, 250, 252, 0.95);
+    padding: 10px 12px;
+  }
+
+  .tool-card summary {
+    cursor: pointer;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    list-style: none;
+  }
+
+  .tool-card summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-card-body {
+    margin-top: 8px;
+    text-align: left;
+  }
+
+  .tool-card-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 6px;
+  }
+
+  .output-toolbar {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .output-searchbar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .output-searchbar input {
+    flex: 1;
+    min-width: 160px;
+    border-radius: 999px;
+  }
+
+  .output-count {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 800;
+    padding: 0 4px;
+  }
+
+  .output-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .output-feed {
+    margin-top: 10px;
+    max-height: 520px;
+    overflow: auto;
+    border-radius: 16px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(250, 250, 250, 0.9);
+    padding: 0;
+    position: relative;
+  }
+
+  .output-pre {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    max-height: none;
+  }
+
+  .paused-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 900;
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    background: rgba(255, 251, 235, 0.9);
+    color: #92400e;
+  }
+
+  :global(.out-mark) {
+    background: rgba(245, 158, 11, 0.35);
+    color: inherit;
+    border-radius: 4px;
+    padding: 0 1px;
+  }
+
+  :global(.out-mark.current) {
+    background: rgba(245, 158, 11, 0.7);
+  }
+
+  .detail-input {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .detail-input input {
+    flex: 1;
   }
 
   .sessions-todo {
     grid-column: 2;
-    grid-row: 4;
+    grid-row: 2;
   }
 
-  @media (max-width: 920px) {
-    .sessions-messages,
-    .sessions-input,
-    .sessions-output,
+  @media (max-width: 640px) {
+    .sessions-detail,
     .sessions-todo {
       grid-column: 1;
       grid-row: auto;
     }
-  }
-
-  .sessions-list ul {
-    max-height: 520px;
-    overflow: auto;
-    margin-top: 10px;
-    padding-left: 18px;
   }
 
   h1 {
