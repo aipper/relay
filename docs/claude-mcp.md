@@ -11,6 +11,14 @@ This repo supports running Claude Code CLI under `hostd` and exposing filesystem
 
 ## Configure Claude MCP server
 
+When you start Claude via `relay-hostd`, hostd will (best-effort) inject a per-run `--mcp-config` to register `relay mcp` as an MCP server (no persistent changes).
+
+- If your installed Claude CLI does **not** support `--mcp-config`, you can either upgrade Claude, or use the “persistent registration” steps below.
+- To opt out of auto-injection, set `RELAY_CLAUDE_DISABLE_RELAY_MCP=1` in the `relay-hostd` environment.
+- If your `relay` binary is not in `PATH`, hostd will try to use a sibling `relay` next to `relay-hostd`. You can override the command via `RELAY_MCP_COMMAND=/abs/path/to/relay`.
+
+### Optional: persistent registration
+
 Build `relay`:
 
 ```sh
@@ -67,4 +75,3 @@ In the PWA, open the run and confirm:
 ```sh
 relay mcp --root /path/to/project
 ```
-

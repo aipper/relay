@@ -194,18 +194,18 @@ pub fn base_prompt_regex(tool: &str) -> Arc<Regex> {
     // MVP: heuristic patterns for interactive prompts.
     // Keep patterns broad but avoid matching arbitrary single letters.
     let base = r"(?ix)
-        (proceed\\?|continue\\?|are\\s+you\\s+sure\\?|confirm\\b)
-        |(\\(\\s*y\\s*/\\s*n\\s*\\))
-        |(\\[\\s*y\\s*/\\s*n\\s*\\])
-        |(\\(\\s*y\\s*/\\s*N\\s*\\))
-        |(\\[\\s*y\\s*/\\s*N\\s*\\])
+        (proceed\?|continue\?|are\s+you\s+sure\?|confirm\b)
+        |(\(\s*y\s*/\s*n\s*\))
+        |(\[\s*y\s*/\s*n\s*\])
+        |(\(\s*y\s*/\s*N\s*\))
+        |(\[\s*y\s*/\s*N\s*\])
     ";
     let codex_extra = r"(?ix)
-        |(allow\\b.*\\?)
-        |(permission\\b.*\\?)
-        |(approve\\b.*\\?)
+        |(allow\b.*\?)
+        |(permission\b.*\?)
+        |(approve\b.*\?)
     ";
-    let pat = if tool == "codex" {
+    let pat = if tool == "codex" || tool == "claude" {
         format!("{base}{codex_extra}")
     } else {
         base.to_string()
@@ -217,3 +217,18 @@ pub mod claude;
 pub mod codex;
 pub mod iflow;
 pub mod shell;
+
+#[cfg(test)]
+mod tests {
+    use super::base_prompt_regex;
+
+    #[test]
+    fn claude_prompt_regex_matches_common_permission_prompts() {
+        let re = base_prompt_regex("claude");
+        assert!(re.is_match("Proceed? [y/N]"));
+        assert!(re.is_match("Continue? (y/n)"));
+        assert!(re.is_match("Allow this? (y/n)"));
+        assert!(re.is_match("Permission required?"));
+        assert!(re.is_match("Approve?"));
+    }
+}

@@ -140,6 +140,26 @@ Configure server (one-time):
 relay init --server http://<your-vps>:8787
 ```
 
+Optional: configure + start hostd daemon in one step:
+
+```sh
+relay init --server http://<your-vps>:8787 --start-daemon
+```
+
+Optional (Linux): install + enable a systemd user service:
+
+```sh
+relay daemon stop || true
+relay init --server http://<your-vps>:8787 --install-systemd-user
+systemctl --user status relay-hostd
+```
+
+If you want hostd to keep running without login, enable linger (may require sudo depending on distro/policy):
+
+```sh
+loginctl enable-linger "$USER"
+```
+
 Start a run (hostd auto-starts if needed):
 
 ```sh

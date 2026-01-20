@@ -135,6 +135,26 @@ npm i -g @aipper/relay-cli
 relay init --server http://<你的VPS>:8787
 ```
 
+（可选）初始化后立刻常驻启动 hostd（方便 PWA 直接看到在线状态）：
+
+```sh
+relay init --server http://<你的VPS>:8787 --start-daemon
+```
+
+（可选，Linux）安装并启用 systemd user service（登录后自动常驻）：
+
+```sh
+relay daemon stop || true
+relay init --server http://<你的VPS>:8787 --install-systemd-user
+systemctl --user status relay-hostd
+```
+
+如果你希望“不开机登录也常驻”，可启用 linger（发行版/权限不同，可能需要 sudo）：
+
+```sh
+loginctl enable-linger "$USER"
+```
+
 启动会话（如本地 unix socket 不存在会自动拉起 hostd）：
 
 ```sh

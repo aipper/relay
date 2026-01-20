@@ -99,6 +99,10 @@ Similarly:
 - `RELAY_CLAUDE_BIN=/path/to/claude`
 - `RELAY_IFLOW_BIN=/path/to/iflow`
 
+MCP bridge injection (per-run, no persistent config changes):
+- Codex: enabled by default (opt out: `RELAY_CODEX_DISABLE_RELAY_MCP=1`)
+- Claude: enabled when supported by your Claude CLI (opt out: `RELAY_CLAUDE_DISABLE_RELAY_MCP=1`)
+
 ### Run `codex` / `claude` / `iflow` directly in any project (no Bun)
 
 If you use the packaged binaries (or have `relay` in PATH) and a background `relay-hostd` running,

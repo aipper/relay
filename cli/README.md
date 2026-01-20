@@ -22,6 +22,19 @@ npm i -g @aipper/relay-cli
 relay init --server http://<your-vps>:8787
 ```
 
+（可选）一条命令同时常驻启动 hostd：
+
+```bash
+relay init --server http://<your-vps>:8787 --start-daemon
+```
+
+（可选，Linux）安装并启用 systemd user service（开机/登录后自动常驻）：
+
+```bash
+relay daemon stop || true
+relay init --server http://<your-vps>:8787 --install-systemd-user
+```
+
 这会写入：
 - `~/.relay/settings.json`（保存 server 地址，供 `relay auth login --save` 等命令复用）
 - `~/.config/abrelay/hostd.json`（hostd 连接配置；默认生成 `host_id/host_token`，只需要配置 server 地址即可）

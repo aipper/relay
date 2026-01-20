@@ -230,7 +230,11 @@ if [[ "$MODE" == "user" ]]; then
   DATA_DIR="${HOME}/.relay"
   CONFIG_PATH="${DATA_DIR}/hostd.json"
   BIN_DIR="$DATA_DIR/bin"
-  UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+  # Derive the unit dir from the *systemd user manager* environment when possible.
+  # This avoids mismatches when the invoking shell has a different XDG_CONFIG_HOME.
+  SYSTEMD_USER_CONFIG_HOME="$(systemctl --user show-environment 2>/dev/null | awk -F= '$1=="XDG_CONFIG_HOME"{print $2; exit}')"
+  UNIT_BASE="${SYSTEMD_USER_CONFIG_HOME:-${XDG_CONFIG_HOME:-${HOME}/.config}}"
+  UNIT_DIR="${UNIT_BASE%/}/systemd/user"
   mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
 
   SOCK_PATH="${SOCK_PATH:-$DATA_DIR/relay-hostd.sock}"
@@ -277,7 +281,22 @@ EOF
 
   [[ -f "$UNIT_DIR/relay-hostd.service" ]] || fail "unit file not found: $UNIT_DIR/relay-hostd.service"
   systemctl --user daemon-reload
-  systemctl --user enable --now relay-hostd.service
+  if ! systemctl --user enable --now relay-hostd.service; then
+    # Fallback #1: enable via path (systemctl supports absolute unit file paths).
+    systemctl --user enable --now "$UNIT_DIR/relay-hostd.service" || true
+    systemctl --user daemon-reload
+
+    # Fallback #2: some environments ignore XDG_CONFIG_HOME for unit discovery; try ~/.config.
+    if ! systemctl --user enable --now relay-hostd.service; then
+      fallback_unit_dir="${HOME}/.config/systemd/user"
+      if [[ "$fallback_unit_dir" != "$UNIT_DIR" ]]; then
+        mkdir -p "$fallback_unit_dir"
+        cp "$UNIT_DIR/relay-hostd.service" "$fallback_unit_dir/relay-hostd.service"
+        systemctl --user daemon-reload
+      fi
+      systemctl --user enable --now relay-hostd.service
+    fi
+  fi
 
   echo "[ok] installed (user service)"
   echo "status: systemctl --user status relay-hostd"
@@ -333,7 +352,9 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable --now relay-hostd
+  if ! systemctl enable --now relay-hostd; then
+    systemctl enable --now "$UNIT_PATH"
+  fi
 
   echo "[ok] installed (system service)"
   echo "status: systemctl status relay-hostd"
@@ -447,7 +468,7 @@ OUT
 ) >>"$HOSTD_LOG_PATH" 2>&1
 EOF
 
-cat >"$PKG_DIR/install-hostd-systemd-user.sh" <<'EOF'
+cat >"$PKG_DIR/install-hostd-systemd-user.sh" <<'INSTALL_HOSTD_SYSTEMD_USER_SH_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -512,7 +533,9 @@ esac
 
 DATA_DIR="${HOME}/.relay"
 BIN_DIR="$DATA_DIR/bin"
-UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+SYSTEMD_USER_CONFIG_HOME="$(systemctl --user show-environment 2>/dev/null | awk -F= '$1=="XDG_CONFIG_HOME"{print $2; exit}')"
+UNIT_BASE="${SYSTEMD_USER_CONFIG_HOME:-${XDG_CONFIG_HOME:-${HOME}/.config}}"
+UNIT_DIR="${UNIT_BASE%/}/systemd/user"
 mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
 
 install -m 0755 "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd"
@@ -560,12 +583,16 @@ EOF
 
 [[ -f "$UNIT_DIR/relay-hostd.service" ]] || { echo "unit file not found: $UNIT_DIR/relay-hostd.service" >&2; exit 1; }
 systemctl --user daemon-reload
-systemctl --user enable --now relay-hostd.service
+if ! systemctl --user enable --now relay-hostd.service; then
+  systemctl --user enable --now "$UNIT_DIR/relay-hostd.service" || true
+  systemctl --user daemon-reload
+  systemctl --user enable --now relay-hostd.service
+fi
 
 echo "[ok] relay-hostd installed and started"
 echo "logs: journalctl --user -u relay-hostd -f"
 echo "sock: $SOCK_PATH"
-EOF
+INSTALL_HOSTD_SYSTEMD_USER_SH_EOF
 
 run chmod +x \
   "$PKG_DIR/client-init.sh" \

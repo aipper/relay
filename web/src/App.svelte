@@ -88,7 +88,14 @@
   let isMobile = false;
 
   let selectedRunId = "";
-  let inputText = "";
+  let inputModalOpen = false;
+  let inputModalText = "";
+  let inputModalEl: HTMLTextAreaElement | null = null;
+  let lastSeenPromptRequest: Record<string, string> = {};
+  let stopConfirmOpen = false;
+  let approvalModalOpen = false;
+  let approvalModalShowArgs = false;
+  let lastSeenApprovalRequest: Record<string, string> = {};
   let lastError = "";
   let outputByRun: Record<string, string> = {};
   let awaitingByRun: Record<
@@ -98,7 +105,10 @@
         prompt?: string;
         request_id?: string;
         op_tool?: string;
+        op_args?: unknown;
         op_args_summary?: string;
+        approve_text?: string;
+        deny_text?: string;
       }
     | undefined
   > = {};
@@ -255,7 +265,11 @@
   }
 
   function statusLabel(r: RunRow): { label: string; kind: "running" | "warning" | "error" | "done" } {
-    if (r.status === "awaiting_approval") return { label: "待审批", kind: "warning" };
+    if (r.status === "awaiting_approval") {
+      const reason = (r.pending_reason ?? "").trim().toLowerCase();
+      if (reason === "prompt") return { label: "待输入", kind: "warning" };
+      return { label: "待审批", kind: "warning" };
+    }
     if (r.status === "awaiting_input") return { label: "待输入", kind: "warning" };
     if (r.status === "running") return { label: "运行中", kind: "running" };
     if (r.status === "exited") {
@@ -263,6 +277,70 @@
       return { label: "已结束", kind: "done" };
     }
     return { label: r.status, kind: "done" };
+  }
+
+  function awaitingFromRunRow(r: RunRow | null): {
+    reason?: string;
+    prompt?: string;
+    request_id?: string;
+    op_tool?: string;
+    op_args?: unknown;
+    op_args_summary?: string;
+    approve_text?: string;
+    deny_text?: string;
+  } | null {
+    if (!r) return null;
+    if (!r.pending_request_id && !r.pending_prompt && !r.pending_op_tool && !r.pending_op_args_summary) return null;
+    return {
+      reason: r.pending_reason ?? undefined,
+      prompt: r.pending_prompt ?? undefined,
+      request_id: r.pending_request_id ?? undefined,
+      op_tool: r.pending_op_tool ?? undefined,
+      op_args_summary: r.pending_op_args_summary ?? undefined,
+      op_args: undefined,
+      approve_text: undefined,
+      deny_text: undefined,
+    };
+  }
+
+  type RiskKind = "read" | "write" | "exec" | "other";
+
+  function normalizeOpToolName(name: string): string {
+    const raw = name.trim().toLowerCase();
+    if (raw.startsWith("rpc.")) return raw.slice(4);
+    return raw;
+  }
+
+  function riskForOpTool(name?: string | null): { kind: RiskKind; label: string } | null {
+    const t = (name ?? "").trim();
+    if (!t) return null;
+    const n = normalizeOpToolName(t);
+
+    if (n === "fs.read" || n.startsWith("fs.read.")) return { kind: "read", label: "read" };
+    if (n === "fs.write" || n.startsWith("fs.write.")) return { kind: "write", label: "write" };
+    if (n === "bash" || n === "host.bash" || n.endsWith(".bash")) return { kind: "exec", label: "exec" };
+
+    return { kind: "other", label: "other" };
+  }
+
+  function awaitingIsPrompt(a: {
+    reason?: string;
+    op_tool?: string;
+  }): boolean {
+    const reason = (a.reason ?? "").trim().toLowerCase();
+    const opTool = (a.op_tool ?? "").trim();
+    return reason === "prompt" && !opTool;
+  }
+
+  function awaitingIsApproval(a: {
+    reason?: string;
+    request_id?: string;
+    op_tool?: string;
+  }): boolean {
+    if (awaitingIsPrompt(a)) return false;
+    const reqId = (a.request_id ?? "").trim();
+    const opTool = (a.op_tool ?? "").trim();
+    return Boolean(reqId || opTool);
   }
 
   function hostDisplayName(h: HostInfo | null | undefined, hostId: string): string {
@@ -933,6 +1011,8 @@
                 reason: dataString(msg, "reason"),
                 prompt: dataString(msg, "prompt"),
                 request_id: reqId,
+                approve_text: dataString(msg, "approve_text"),
+                deny_text: dataString(msg, "deny_text"),
               },
             };
           }
@@ -944,7 +1024,10 @@
                 prompt: dataString(msg, "prompt"),
                 request_id: dataString(msg, "request_id"),
                 op_tool: dataString(msg, "op_tool"),
+                op_args: dataAny(msg, "op_args"),
                 op_args_summary: dataString(msg, "op_args_summary"),
+                approve_text: dataString(msg, "approve_text"),
+                deny_text: dataString(msg, "deny_text"),
               },
             };
           }
@@ -1081,6 +1164,12 @@
     } else {
       recentSessions = [];
     }
+  }
+
+  async function refreshSelectedSession() {
+    if (!token) return;
+    await Promise.all([refreshHosts(), refreshRuns()]);
+    if (selectedRunId) await loadMessages(selectedRunId);
   }
 
   async function loadMessages(runId: string) {
@@ -1290,6 +1379,28 @@
     });
   }
 
+  async function openInputModal(prefill = "") {
+    inputModalText = prefill;
+    inputModalOpen = true;
+    await tick();
+    inputModalEl?.focus();
+  }
+
+  function closeInputModal() {
+    inputModalOpen = false;
+    inputModalText = "";
+  }
+
+  function sendQuickInput(text: string) {
+    sendInput(text);
+    closeInputModal();
+  }
+
+  function sendInputModalText() {
+    sendInput(inputModalText);
+    closeInputModal();
+  }
+
   function sendDecision(decision: "approve" | "deny") {
     if (!selectedRunId) return;
     const reqId = selectedAwaiting?.request_id;
@@ -1318,9 +1429,31 @@
   $: selectedRun = runs.find((r) => r.id === selectedRunId) ?? null;
   $: awaitingRuns = runs.filter((r) => r.status === "awaiting_input" || r.status === "awaiting_approval");
   $: selectedOutput = selectedRunId ? outputByRun[selectedRunId] ?? "" : "";
-  $: selectedAwaiting = selectedRunId ? awaitingByRun[selectedRunId] ?? null : null;
+  $: selectedAwaiting = selectedRunId ? awaitingByRun[selectedRunId] ?? awaitingFromRunRow(selectedRun) : null;
   $: selectedMessages = selectedRunId ? messagesByRun[selectedRunId] ?? [] : [];
   $: hostsById = Object.fromEntries(hosts.map((h) => [h.id, h] as const)) as Record<string, HostInfo>;
+
+  $: if (selectedRunId && selectedAwaiting && awaitingIsApproval(selectedAwaiting) && !approvalModalOpen) {
+    const key = (selectedAwaiting.request_id ?? selectedAwaiting.op_tool ?? "").trim();
+    if (key && lastSeenApprovalRequest[selectedRunId] !== key) {
+      lastSeenApprovalRequest = { ...lastSeenApprovalRequest, [selectedRunId]: key };
+      approvalModalShowArgs = false;
+      approvalModalOpen = true;
+    }
+  }
+
+  $: if (selectedRunId && selectedAwaiting && awaitingIsPrompt(selectedAwaiting) && !inputModalOpen) {
+    const key = (selectedAwaiting.request_id ?? "").trim();
+    if (key && lastSeenPromptRequest[selectedRunId] !== key) {
+      lastSeenPromptRequest = { ...lastSeenPromptRequest, [selectedRunId]: key };
+      openInputModal("");
+    }
+  }
+
+  $: if (approvalModalOpen && (!selectedAwaiting || !awaitingIsApproval(selectedAwaiting))) {
+    approvalModalOpen = false;
+    approvalModalShowArgs = false;
+  }
   $: filteredRuns = (() => {
     const q = sessionSearch.trim().toLowerCase();
     if (!q) return runs;
@@ -1724,8 +1857,23 @@
           {/if}
           <div class="detail-title-sub">
             <span class="dot" data-online={host?.online ? "1" : "0"} aria-hidden="true"></span>
-            <span>{hostDisplayName(host, selectedRun.host_id)}</span>
-            <span class="subtle">{formatRelativeTime(host?.last_seen_at ?? null)}</span>
+            <span class="detail-host"><code>{selectedRun.host_id}</code></span>
+            <span class="subtle">最近 {formatRelativeTime(host?.last_seen_at ?? null)}</span>
+            <span class="subtle">活跃 {formatRelativeTime(selectedRun.last_active_at ?? selectedRun.started_at)}</span>
+          </div>
+          <div class="detail-meta">
+            <span class="meta-pill">
+              <span class="meta-k">tool</span>
+              <span class="meta-v">{selectedRun.tool}</span>
+            </span>
+            <span class="meta-pill">
+              <span class="meta-k">run</span>
+              <span class="meta-v"><code>{selectedRun.id}</code></span>
+            </span>
+            <span class="meta-pill meta-pill-cwd">
+              <span class="meta-k">cwd</span>
+              <span class="meta-v"><code>{selectedRun.cwd}</code></span>
+            </span>
           </div>
         </div>
         <div class="detail-actions">
@@ -1733,11 +1881,19 @@
             <button class="secondary" on:click={() => (selectedRunId = "")} type="button">返回</button>
           {/if}
           <span class="session-status" data-kind={st.kind}>{st.label}</span>
-          {#if selectedAwaiting}
-            <button on:click={() => sendDecision("approve")} disabled={!selectedRunId || status !== "connected"}>同意</button>
-            <button on:click={() => sendDecision("deny")} disabled={!selectedRunId || status !== "connected"}>拒绝</button>
+          {#if selectedAwaiting && awaitingIsApproval(selectedAwaiting)}
+            <button
+              on:click={() => {
+                approvalModalShowArgs = false;
+                approvalModalOpen = true;
+              }}
+              disabled={!selectedRunId}
+              type="button"
+            >
+              审批
+            </button>
           {/if}
-          <button on:click={() => sendStop("term")} disabled={!selectedRunId || status !== "connected"}>停止</button>
+          <button on:click={() => (stopConfirmOpen = true)} disabled={!selectedRunId || status !== "connected"}>停止</button>
         </div>
       </div>
 
@@ -1757,6 +1913,15 @@
           刷新
         </button>
       </div>
+
+      {#if token && status !== "connected"}
+        <div class="offline-banner">
+          <span class="dot" data-online="0" aria-hidden="true"></span>
+          <span>离线</span>
+          <button class="secondary" on:click={connect} type="button">重连</button>
+          <button class="secondary" on:click={refreshSelectedSession} disabled={!selectedRunId} type="button">刷新</button>
+        </div>
+      {/if}
 
       {#if selectedAwaiting && (selectedAwaiting.op_tool || selectedAwaiting.op_args_summary || selectedAwaiting.prompt)}
         <div class="awaiting-banner">
@@ -1801,6 +1966,28 @@
                 </div>
               {:else if m.kind === "tool.result" && displayMessages[i - 1]?.kind === "tool.call" && displayMessages[i - 1]?.request_id && displayMessages[i - 1]?.request_id === m.request_id}
                 <!-- paired with previous tool.call; skip rendering -->
+              {:else if m.kind === "run.permission_requested"}
+                {@const isCurrent = Boolean(selectedAwaiting?.request_id) && selectedAwaiting?.request_id === m.request_id}
+                <div class="chat-row" data-role="system">
+                  <div class="approval-card">
+                    <div class="approval-card-top">
+                      <span class="meta-pill">
+                        <span class="meta-k">tool</span>
+                        <span class="meta-v">{selectedRun.tool}</span>
+                      </span>
+                      {#if isCurrent && selectedAwaiting?.op_tool}
+                        <span class="session-op">{selectedAwaiting.op_tool}</span>
+                      {/if}
+                      {#if isCurrent && selectedAwaiting?.op_args_summary}
+                        <span class="session-op-args">{selectedAwaiting.op_args_summary}</span>
+                      {/if}
+                    </div>
+                    {#if m.text}
+                      <div class="approval-card-prompt">{m.text}</div>
+                    {/if}
+                  </div>
+                  <div class="chat-ts">{formatAbsTime(m.ts)}</div>
+                </div>
               {:else}
                 <div class="chat-row" data-role={m.role}>
                   {#if m.role === "system"}
@@ -1858,15 +2045,8 @@
       {/if}
 
       <div class="detail-input">
-        <input bind:value={inputText} placeholder="输入…" />
-        <button
-          on:click={() => {
-            sendInput(inputText);
-            inputText = "";
-          }}
-          disabled={!selectedRunId || status !== "connected"}
-        >
-          发送
+        <button class="secondary" on:click={() => openInputModal("")} disabled={!selectedRunId || status !== "connected"} type="button">
+          输入
         </button>
       </div>
     {/if}
@@ -2093,6 +2273,160 @@
       {/each}
     </ul>
   </section>
+
+  {#if inputModalOpen}
+    <div class="modal-overlay" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-head">
+          <div class="modal-title">输入</div>
+          <button class="secondary" on:click={closeInputModal} type="button">关闭</button>
+        </div>
+        <div class="modal-body">
+          <textarea
+            class="input-textarea"
+            bind:this={inputModalEl}
+            bind:value={inputModalText}
+            placeholder=""
+            rows="3"
+          ></textarea>
+          <div class="quick-inputs">
+            <button class="secondary" on:click={() => sendQuickInput("y\n")} type="button">y</button>
+            <button class="secondary" on:click={() => sendQuickInput("n\n")} type="button">n</button>
+            <button class="secondary" on:click={() => sendQuickInput("continue\n")} type="button">continue</button>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary" on:click={closeInputModal} type="button">取消</button>
+          <button on:click={sendInputModalText} disabled={!selectedRunId || status !== "connected"} type="button">发送</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if approvalModalOpen && selectedRun && selectedAwaiting && awaitingIsApproval(selectedAwaiting)}
+    {@const risk = riskForOpTool(selectedAwaiting.op_tool)}
+    <div class="modal-overlay" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-head">
+          <div class="modal-title">待审批</div>
+          <button
+            class="secondary"
+            on:click={() => {
+              approvalModalOpen = false;
+              approvalModalShowArgs = false;
+            }}
+            type="button"
+          >
+            关闭
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="approval-meta">
+            <span class="meta-pill">
+              <span class="meta-k">tool</span>
+              <span class="meta-v">{selectedRun.tool}</span>
+            </span>
+            {#if selectedAwaiting.op_tool}
+              <span class="meta-pill">
+                <span class="meta-k">op</span>
+                <span class="meta-v"><code>{selectedAwaiting.op_tool}</code></span>
+              </span>
+            {/if}
+            {#if risk}
+              <span class="risk-pill" data-kind={risk.kind}>{risk.label}</span>
+            {/if}
+          </div>
+
+          {#if selectedAwaiting.op_args_summary}
+            <div class="approval-summary"><code>{selectedAwaiting.op_args_summary}</code></div>
+          {/if}
+
+          {#if selectedAwaiting.prompt}
+            <div class="approval-prompt">{selectedAwaiting.prompt}</div>
+          {/if}
+
+          {#if selectedAwaiting.op_args !== undefined && selectedAwaiting.op_args !== null}
+            <details class="approval-details" bind:open={approvalModalShowArgs}>
+              <summary>参数</summary>
+              <pre>{JSON.stringify(selectedAwaiting.op_args, null, 2)}</pre>
+            </details>
+          {/if}
+        </div>
+        <div class="modal-actions">
+          <button
+            class="secondary"
+            on:click={() => {
+              approvalModalOpen = false;
+              approvalModalShowArgs = false;
+            }}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            on:click={() => {
+              sendDecision("deny");
+              approvalModalOpen = false;
+              approvalModalShowArgs = false;
+            }}
+            disabled={!selectedRunId || status !== "connected"}
+            type="button"
+          >
+            拒绝
+          </button>
+          <button
+            on:click={() => {
+              sendDecision("approve");
+              approvalModalOpen = false;
+              approvalModalShowArgs = false;
+            }}
+            disabled={!selectedRunId || status !== "connected"}
+            type="button"
+          >
+            同意
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if stopConfirmOpen}
+    <div class="modal-overlay" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-head">
+          <div class="modal-title">停止会话</div>
+          <button class="secondary" on:click={() => (stopConfirmOpen = false)} type="button">关闭</button>
+        </div>
+        <div class="modal-body">
+          <code>{selectedRunId}</code>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary" on:click={() => (stopConfirmOpen = false)} type="button">取消</button>
+          <button
+            on:click={() => {
+              sendStop("term");
+              stopConfirmOpen = false;
+            }}
+            disabled={!selectedRunId || status !== "connected"}
+            type="button"
+          >
+            停止
+          </button>
+          <button
+            class="danger"
+            on:click={() => {
+              sendStop("kill");
+              stopConfirmOpen = false;
+            }}
+            disabled={!selectedRunId || status !== "connected"}
+            type="button"
+          >
+            强制停止
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   {#if toastText}
     <div class="toast" role="status" aria-live="polite">{toastText}</div>
@@ -2513,12 +2847,215 @@
     color: #6b7280;
   }
 
+  .detail-host code {
+    font-weight: 900;
+    color: #111827;
+  }
+
+  .detail-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 12px;
+  }
+
+  .meta-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(255, 255, 255, 0.75);
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .meta-k {
+    color: #6b7280;
+    font-weight: 900;
+  }
+
+  .meta-v {
+    color: #111827;
+    font-weight: 900;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .meta-pill-cwd {
+    flex: 1 1 360px;
+  }
+
   .detail-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
+  }
+
+  .offline-banner {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(239, 68, 68, 0.18);
+    background: rgba(239, 68, 68, 0.06);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 900;
+    color: #991b1b;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 100;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 520px;
+    border-radius: 18px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(255, 255, 255, 0.96);
+    padding: 14px;
+    box-shadow:
+      0 2px 12px rgba(0, 0, 0, 0.16),
+      0 18px 50px rgba(0, 0, 0, 0.22);
+  }
+
+  .modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .modal-title {
+    font-weight: 900;
+    font-size: 14px;
+  }
+
+  .modal-body {
+    margin-top: 10px;
+    color: #6b7280;
+  }
+
+  .input-textarea {
+    width: 100%;
+    min-height: 96px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(255, 255, 255, 0.9);
+    font: inherit;
+    font-size: 13px;
+    color: #111827;
+    box-sizing: border-box;
+    resize: vertical;
+  }
+
+  .quick-inputs {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .modal-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .approval-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .risk-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(255, 255, 255, 0.75);
+    font-weight: 900;
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+
+  .risk-pill[data-kind="read"] {
+    background: rgba(0, 122, 255, 0.12);
+    border-color: rgba(0, 122, 255, 0.22);
+    color: #1d4ed8;
+  }
+
+  .risk-pill[data-kind="write"] {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.28);
+    color: #92400e;
+  }
+
+  .risk-pill[data-kind="exec"] {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.22);
+    color: #991b1b;
+  }
+
+  .risk-pill[data-kind="other"] {
+    background: rgba(107, 114, 128, 0.12);
+    border-color: rgba(107, 114, 128, 0.22);
+    color: #374151;
+  }
+
+  .approval-summary {
+    margin-top: 10px;
+    color: #111827;
+  }
+
+  .approval-summary code {
+    font-size: 12px;
+  }
+
+  .approval-prompt {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #111827;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .approval-details {
+    margin-top: 10px;
+  }
+
+  .approval-details summary {
+    cursor: pointer;
+    font-weight: 900;
+    color: #374151;
+  }
+
+  button.danger {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.26);
+    color: #991b1b;
   }
 
   .detail-tabs {
@@ -2637,6 +3174,29 @@
     padding: 10px 12px;
   }
 
+  .approval-card {
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    background: rgba(255, 251, 235, 0.85);
+    padding: 10px 12px;
+  }
+
+  .approval-card-top {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .approval-card-prompt {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #92400e;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
   .tool-card summary {
     cursor: pointer;
     display: flex;
@@ -2743,10 +3303,6 @@
     display: flex;
     gap: 8px;
     align-items: center;
-  }
-
-  .detail-input input {
-    flex: 1;
   }
 
   .sessions-todo {

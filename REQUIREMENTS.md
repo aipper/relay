@@ -192,8 +192,12 @@
 - 安装体验（macOS/Linux）：
   - `npm i -g @aipper/relay-cli` 在 `postinstall` 阶段 best-effort 下载并安装 `relay-hostd` 到 `~/.relay/bin`（失败不阻断安装，可手动 `relay hostd install`）。
   - `--yes/-y` 或 `RELAY_YES=1` 可跳过确认（用于自动安装/提示场景）。
+  - Linux（systemd）：打包目录内置的 `client-init.sh` / `install-hostd-systemd-user.sh` 安装 user service 时，应能兼容 `XDG_CONFIG_HOME` 与 systemd user manager 环境不一致的场景（避免 `Unit relay-hostd.service does not exist`）。
 - 常驻体验：
   - 运行 `relay codex/claude/iflow/gemini` 或本地 `relay runs/fs/git/local ...` 时，若本地 unix socket 不存在则自动拉起 `relay-hostd`（等价 `relay daemon start`）并等待就绪。
+- 开箱即用（个人使用）：
+  - `relay init --server http://<vps>:8787 --start-daemon` 可一条命令完成“写入 server 配置 + 常驻启动 hostd”（也可通过 `RELAY_START_DAEMON=1` 启用）。
+  - Linux（systemd）：`relay init --server http://<vps>:8787 --install-systemd-user` 可一条命令完成“写入 server 配置 + 安装并启用 systemd user service”（也可通过 `RELAY_INSTALL_SYSTEMD_USER=1` 启用）。
 
 ### web（Svelte PWA）
 

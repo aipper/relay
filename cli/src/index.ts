@@ -6,7 +6,7 @@ function usage(): never {
   console.log(`relay (skeleton)
 
 Usage:
-  relay init [--server http://127.0.0.1:8787] [--yes] [--force]
+  relay init [--server http://127.0.0.1:8787] [--start-daemon] [--install-systemd-user] [--yes] [--force]
 
   relay auth status
   relay auth login --server http://127.0.0.1:8787 --username admin --password '...' [--save]
@@ -409,6 +409,148 @@ function requireBinaryInPath(bin: string): void {
     stderr: "ignore",
   });
   if (r.exitCode !== 0) throw new Error(`missing dependency: ${bin}`);
+}
+
+function spawnSyncText(argv: string[]): { exitCode: number; stdout: string; stderr: string } {
+  const r = Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe" });
+  const td = new TextDecoder();
+  const stdout = r.stdout ? td.decode(r.stdout).trim() : "";
+  const stderr = r.stderr ? td.decode(r.stderr).trim() : "";
+  return { exitCode: r.exitCode ?? 0, stdout, stderr };
+}
+
+function systemdUserUnitDirOrThrow(): string {
+  if (process.platform !== "linux") {
+    throw new Error("systemd user service is supported on Linux only");
+  }
+
+  requireBinaryInPath("systemctl");
+
+  const envRes = spawnSyncText(["systemctl", "--user", "show-environment"]);
+  if (envRes.exitCode !== 0) {
+    throw new Error(
+      "systemctl --user is not available (no user systemd session). Hint: loginctl enable-linger <user> or install as a system service.",
+    );
+  }
+
+  let systemdXdgConfigHome = "";
+  for (const line of envRes.stdout.split("\n")) {
+    const idx = line.indexOf("=");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const val = line.slice(idx + 1).trim();
+    if (key === "XDG_CONFIG_HOME") {
+      systemdXdgConfigHome = val;
+      break;
+    }
+  }
+
+  const base = systemdXdgConfigHome || xdgConfigHomeDir() || `${envOrUndefined("HOME") ?? ""}/.config`;
+  const trimmed = base.replace(/\/$/, "");
+  if (!trimmed) throw new Error("cannot resolve systemd user unit directory (missing HOME/XDG_CONFIG_HOME)");
+  return `${trimmed}/systemd/user`;
+}
+
+async function writeFileWithOptionalBackup(args: {
+  path: string;
+  content: string;
+  mode?: number;
+  force: boolean;
+}): Promise<{ wrote: true; backupPath?: string }> {
+  const fs = await import("node:fs/promises");
+  const p = await import("node:path");
+
+  const dir = p.dirname(args.path);
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+
+  let backupPath: string | undefined;
+  const exists = await fs
+    .stat(args.path)
+    .then(() => true)
+    .catch(() => false);
+  if (exists) {
+    if (!args.force) throw new Error(`destination exists: ${args.path} (use --force to overwrite)`);
+    const ts = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
+    backupPath = `${args.path}.bak.${ts}`;
+    await fs.copyFile(args.path, backupPath);
+  }
+
+  await fs.writeFile(args.path, args.content, { encoding: "utf8" });
+  if (args.mode !== undefined) {
+    await fs.chmod(args.path, args.mode).catch(() => {});
+  }
+  return { wrote: true, ...(backupPath ? { backupPath } : {}) };
+}
+
+async function installSystemdUserService(args: { hostdBin: string; hostdConfigPath: string; force: boolean }) {
+  if (process.platform !== "linux") throw new Error("systemd install is supported on Linux only");
+
+  const home = envOrUndefined("HOME");
+  if (!home) throw new Error("HOME is not set; cannot install systemd user service");
+
+  const unitDir = systemdUserUnitDirOrThrow();
+  const unitPath = `${unitDir}/relay-hostd.service`;
+  const envPath = `${relayHomeDir()}/hostd.env`;
+
+  const rustLog = (envOrUndefined("RUST_LOG") ?? "warn").trim() || "warn";
+  const pathEnv = envOrUndefined("PATH") ?? "";
+
+  const envLines = [`ABRELAY_CONFIG=${args.hostdConfigPath}`, `RUST_LOG=${rustLog}`];
+  if (pathEnv.trim()) envLines.push(`PATH=${pathEnv}`);
+  const envContent = envLines.join("\n") + "\n";
+
+  const unitContent =
+    `[Unit]
+Description=relay-hostd (user)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.relay/hostd.env
+ExecStart=${args.hostdBin}
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=%h/.relay
+
+[Install]
+WantedBy=default.target
+`;
+
+  const envWrite = await writeFileWithOptionalBackup({ path: envPath, content: envContent, mode: 0o600, force: args.force });
+  const unitWrite = await writeFileWithOptionalBackup({ path: unitPath, content: unitContent, mode: 0o644, force: args.force });
+
+  const reload = spawnSyncText(["systemctl", "--user", "daemon-reload"]);
+  if (reload.exitCode !== 0) throw new Error("systemctl --user daemon-reload failed");
+
+  const enable = spawnSyncText(["systemctl", "--user", "enable", "--now", "relay-hostd.service"]);
+  if (enable.exitCode !== 0) {
+    const enableByPath = spawnSyncText(["systemctl", "--user", "enable", "--now", unitPath]);
+    if (enableByPath.exitCode !== 0) {
+      const fallbackDir = `${home.replace(/\/$/, "")}/.config/systemd/user`;
+      const fallbackPath = `${fallbackDir}/relay-hostd.service`;
+      const fs = await import("node:fs/promises");
+      await fs.mkdir(fallbackDir, { recursive: true, mode: 0o700 }).catch(() => {});
+      await fs.copyFile(unitPath, fallbackPath).catch(() => {});
+      spawnSyncText(["systemctl", "--user", "daemon-reload"]);
+
+      const enableFallback = spawnSyncText(["systemctl", "--user", "enable", "--now", "relay-hostd.service"]);
+      if (enableFallback.exitCode !== 0) {
+        throw new Error("failed to enable relay-hostd.service via systemctl --user");
+      }
+    }
+  }
+
+  return {
+    installed: true,
+    env: { path: envPath, ...(envWrite.backupPath ? { backup: envWrite.backupPath } : {}) },
+    unit: { path: unitPath, ...(unitWrite.backupPath ? { backup: unitWrite.backupPath } : {}) },
+    next: ["systemctl --user status relay-hostd", "journalctl --user -u relay-hostd -f", "loginctl enable-linger <user> (optional)"],
+  };
 }
 
 function resolveHostdBin(): string {
@@ -857,6 +999,11 @@ async function main() {
   if (cmd === "init") {
     const yes = hasFlag("--yes") || hasFlag("-y");
     const force = hasFlag("--force");
+    const startDaemon = hasFlag("--start-daemon") || envTruthy("RELAY_START_DAEMON");
+    const installSystemdUser = hasFlag("--install-systemd-user") || envTruthy("RELAY_INSTALL_SYSTEMD_USER");
+    if (startDaemon && installSystemdUser) {
+      throw new Error("cannot use --start-daemon and --install-systemd-user together");
+    }
 
     const prev = await readSettings();
     const serverDefault = prev.server;
@@ -933,12 +1080,34 @@ async function main() {
       await writeJsonFile(hostdPath, next);
     }
 
+    const systemd = await (async () => {
+      if (!installSystemdUser) return null;
+      const existing = await readDaemonState();
+      if (existing && isProcessRunning(existing.pid)) {
+        throw new Error(`relay daemon is running (pid=${existing.pid}); stop it first: relay daemon stop`);
+      }
+      await ensureHostdInstalled();
+      const hostdBin = resolveHostdBin();
+      if (!fileIsExecutable(hostdBin)) throw new Error(`relay-hostd is not executable: ${hostdBin}`);
+      return await installSystemdUserService({ hostdBin, hostdConfigPath: hostdPath, force });
+    })();
+
+    const daemon = await (async () => {
+      if (!startDaemon) return null;
+      const res = await startDaemonDetached({ serverHttp, hostdConfigOverride: hostdPath });
+      return res.started
+        ? { started: true, pid: res.pid, sock: res.sock, log: res.log }
+        : { started: false, reason: res.reason, pid: res.pid, sock: res.sock, log: res.log };
+    })();
+
     console.log(
       JSON.stringify(
         {
           saved: true,
           settings: { path: settingsPath(), server: serverHttp },
           hostd: { config_path: hostdPath, server_base_url: serverWs, host_id: next.host_id },
+          ...(systemd ? { systemd } : {}),
+          ...(daemon ? { daemon } : {}),
         },
         null,
         2,

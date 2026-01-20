@@ -5,9 +5,11 @@
 - `relay-hostd-darwin-x64`
 - `relay-hostd-darwin-arm64`
 - `relay-hostd-linux-x64`
+- `relay-hostd-linux-arm64`
 - `relay-darwin-x64`
 - `relay-darwin-arm64`
 - `relay-linux-x64`
+- `relay-linux-arm64`
 
 默认下载地址（可通过 `RELAY_RELEASE_BASE_URL` 覆盖）会从 `cli/package.json#repository.url` 推导：
 

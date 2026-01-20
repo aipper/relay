@@ -342,6 +342,34 @@ fn tool_error_result(text: String) -> JsonValue {
     })
 }
 
+fn normalize_mcp_tool_name(raw_name: &str) -> &str {
+    let raw = raw_name.trim();
+    if raw.is_empty() {
+        return raw;
+    }
+
+    // Some clients namespace MCP tool names as `<server>.<tool>`.
+    let dot = raw.rsplit('.').next().unwrap_or(raw);
+
+    // Claude Code commonly exposes MCP tools to the model as `mcp__<server>__<tool>`.
+    // We accept that form too in case the client forwards it unchanged.
+    dot.rsplit("__").next().unwrap_or(dot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_mcp_tool_name;
+
+    #[test]
+    fn normalizes_common_mcp_tool_name_prefixes() {
+        assert_eq!(normalize_mcp_tool_name("fs_read"), "fs_read");
+        assert_eq!(normalize_mcp_tool_name("relay.fs_read"), "fs_read");
+        assert_eq!(normalize_mcp_tool_name("mcp__relay__fs_read"), "fs_read");
+        assert_eq!(normalize_mcp_tool_name("mcp__relay__bash"), "bash");
+        assert_eq!(normalize_mcp_tool_name("   mcp__relay__git_status  "), "git_status");
+    }
+}
+
 #[derive(Clone)]
 enum McpMode {
     Hostd {
@@ -498,8 +526,7 @@ async fn run_mcp(root: std::path::PathBuf) -> anyhow::Result<()> {
             "tools/call" => {
                 let params = req.params.unwrap_or(JsonValue::Null);
                 let raw_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                // Some clients namespace MCP tool names as `<server>.<tool>`.
-                let name = raw_name.rsplit('.').next().unwrap_or(raw_name);
+                let name = normalize_mcp_tool_name(raw_name);
                 let args = params.get("arguments").cloned().unwrap_or(JsonValue::Null);
                 match name {
                     "fs_read" => {
