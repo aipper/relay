@@ -241,6 +241,7 @@ if [[ "$MODE" == "user" ]]; then
   SPOOL_DB_PATH="${SPOOL_DB_PATH:-$DATA_DIR/hostd-spool.db}"
   HOSTD_LOG_PATH="${HOSTD_LOG_PATH:-$DATA_DIR/hostd.log}"
   RUST_LOG_LEVEL="${RUST_LOG:-warn}"
+  PATH_ENV="${PATH:-}"
 
   install_file "$ROOT/bin/relay-hostd" "$BIN_DIR/relay-hostd" 0755
   install_file "$ROOT/bin/relay" "$BIN_DIR/relay" 0755
@@ -254,6 +255,7 @@ if [[ "$MODE" == "user" ]]; then
     echo "SPOOL_DB_PATH=$SPOOL_DB_PATH"
     echo "HOSTD_LOG_PATH=$HOSTD_LOG_PATH"
     echo "RUST_LOG=$RUST_LOG_LEVEL"
+    [[ -n "$PATH_ENV" ]] && echo "PATH=$PATH_ENV"
   } >"$DATA_DIR/hostd.env"
   chmod 0600 "$DATA_DIR/hostd.env"
 
@@ -271,9 +273,8 @@ Restart=always
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=%h/.relay
 
 [Install]
 WantedBy=default.target
@@ -546,6 +547,7 @@ SOCK_PATH="${LOCAL_UNIX_SOCKET:-$DATA_DIR/relay-hostd.sock}"
 SPOOL_DB_PATH="${SPOOL_DB_PATH:-$DATA_DIR/hostd-spool.db}"
 HOSTD_LOG_PATH="${HOSTD_LOG_PATH:-$DATA_DIR/hostd.log}"
 RUST_LOG_LEVEL="${RUST_LOG:-warn}"
+PATH_ENV="${PATH:-}"
 
 {
   echo "ABRELAY_CONFIG=$CONFIG_PATH"
@@ -556,6 +558,7 @@ RUST_LOG_LEVEL="${RUST_LOG:-warn}"
   echo "SPOOL_DB_PATH=$SPOOL_DB_PATH"
   echo "HOSTD_LOG_PATH=$HOSTD_LOG_PATH"
   echo "RUST_LOG=$RUST_LOG_LEVEL"
+  [[ -n "$PATH_ENV" ]] && echo "PATH=$PATH_ENV"
 } >"$DATA_DIR/hostd.env"
 chmod 0600 "$DATA_DIR/hostd.env"
 
@@ -573,9 +576,8 @@ Restart=always
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=%h/.relay
 
 [Install]
 WantedBy=default.target

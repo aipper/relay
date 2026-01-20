@@ -513,9 +513,8 @@ Restart=always
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=%h/.relay
 
 [Install]
 WantedBy=default.target
