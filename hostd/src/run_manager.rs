@@ -124,8 +124,7 @@ impl RunManager {
             .context("openpty")?;
 
         let spec = crate::runners::for_tool(&tool)
-            .build(&cmd, &resolved_cwd)
-            .context("build runner command")?;
+            .build(&cmd, &resolved_cwd)?;
         let mut command: CommandBuilder = spec.command;
         command.env("RELAY_RUN_ID", &run_id);
         command.env("RELAY_TOOL", &tool);
