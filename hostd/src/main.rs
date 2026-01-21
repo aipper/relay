@@ -40,6 +40,11 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
+    // rustls 0.23 requires a process-level CryptoProvider for TLS.
+    // tokio-tungstenite disables rustls default features, so we explicitly
+    // install a provider to support `wss://` connections.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let (cfg, cfg_path) = Config::from_env_and_file()?;
     if let Some(p) = cfg_path.as_ref() {
         tracing::info!(config_path=%p.display(), "loaded hostd config");
