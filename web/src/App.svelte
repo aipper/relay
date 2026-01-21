@@ -77,7 +77,36 @@
   let username = "admin";
   let password = "";
   let token = "";
+  let keepSignedIn = true;
+  let rememberPassword = false;
+  type PersistedAuthV1 = {
+    username?: string;
+    token?: string;
+    keepSignedIn?: boolean;
+    rememberPassword?: boolean;
+    password?: string;
+  };
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem("relay.auth.v1");
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === "object") {
+          const v = parsed as PersistedAuthV1;
+          if (typeof v.keepSignedIn === "boolean") keepSignedIn = v.keepSignedIn;
+          if (typeof v.rememberPassword === "boolean") rememberPassword = v.rememberPassword;
+          if (typeof v.username === "string" && v.username.trim()) username = v.username;
+          if (typeof v.token === "string" && v.token.trim() && keepSignedIn) token = v.token;
+          if (typeof v.password === "string" && rememberPassword) password = v.password;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
   let status = "disconnected";
+  let loginBusy = false;
+  $: loginBusy = status === "checking" || status === "connecting";
   let view: "sessions" | "hosts" | "start" | "tools" | "settings" = "sessions";
   let health: Health | null = null;
   let events: WsEnvelope[] = [];
@@ -195,6 +224,22 @@
     else localStorage.removeItem("relay.baseUrl");
   }
 
+  function persistAuthPrefs() {
+    if (typeof window === "undefined") return;
+    const payload: PersistedAuthV1 = {
+      username: username.trim(),
+      keepSignedIn,
+      rememberPassword,
+    };
+    if (keepSignedIn && token) payload.token = token;
+    if (rememberPassword && password) payload.password = password;
+    try {
+      localStorage.setItem("relay.auth.v1", JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }
+
   function persistHostGroupCollapsed() {
     if (typeof window === "undefined") return;
     try {
@@ -262,6 +307,15 @@
       toastText = "";
       toastTimer = null;
     }, 1500);
+  }
+
+  function connLabel(s: string): string {
+    if (s === "connected") return "已连接";
+    if (s === "checking") return "检查中";
+    if (s === "connecting") return "连接中";
+    if (s === "disconnected") return "未连接";
+    if (s === "error") return "错误";
+    return s;
   }
 
   function statusLabel(r: RunRow): { label: string; kind: "running" | "warning" | "error" | "done" } {
@@ -752,7 +806,7 @@
       flushParagraph(para);
     }
 
-    return blocks.join("") || `<div style="color:#6b7280">(empty)</div>`;
+    return blocks.join("");
   }
 
   function renderMarkdownBasic(src: string): string {
@@ -781,7 +835,7 @@
       out += renderMarkdownTextBlock(chunk);
     }
 
-    return out || `<div style="color:#6b7280">(empty)</div>`;
+    return out;
   }
 
   function toolMetaFromText(kind: string, text: string): { label: string; details: string } {
@@ -922,25 +976,173 @@
     return null;
   }
 
+  function resetConnectionState() {
+    status = "checking";
+    events = [];
+    health = null;
+    outputByRun = {};
+    awaitingByRun = {};
+    hosts = [];
+    messagesByRun = {};
+
+    if (ws) {
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      ws = null;
+    }
+  }
+
+  function openAppWebSocket(nextToken: string) {
+    status = "connecting";
+    const nextWs = new WebSocket(`${toWsBase(apiBaseUrl)}/ws/app?token=${encodeURIComponent(nextToken)}`);
+    ws = nextWs;
+    nextWs.onopen = () => {
+      if (ws === nextWs) status = "connected";
+    };
+    nextWs.onclose = () => {
+      if (ws === nextWs) status = "disconnected";
+    };
+    nextWs.onerror = () => {
+      if (ws === nextWs) status = "error";
+    };
+    nextWs.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data) as WsEnvelope;
+        events = [msg, ...events].slice(0, 2000);
+        if (msg.type === "rpc.response") {
+          const reqId = dataString(msg, "request_id");
+          if (reqId) {
+            const cb = pendingRpc.get(reqId);
+            if (cb) {
+              pendingRpc.delete(reqId);
+              cb(msg);
+            }
+          }
+        }
+        if (msg.run_id && msg.type === "run.output") {
+          const text = dataString(msg, "text") ?? "";
+          const existing = outputByRun[msg.run_id] ?? "";
+          outputByRun = { ...outputByRun, [msg.run_id]: truncateTail(existing + text, 200_000) };
+        }
+        if (msg.run_id && msg.type === "run.awaiting_input") {
+          const reqId = dataString(msg, "request_id");
+          awaitingByRun = {
+            ...awaitingByRun,
+            [msg.run_id]: {
+              reason: dataString(msg, "reason"),
+              prompt: dataString(msg, "prompt"),
+              request_id: reqId,
+              approve_text: dataString(msg, "approve_text"),
+              deny_text: dataString(msg, "deny_text"),
+            },
+          };
+        }
+        if (msg.run_id && msg.type === "run.permission_requested") {
+          awaitingByRun = {
+            ...awaitingByRun,
+            [msg.run_id]: {
+              reason: dataString(msg, "reason"),
+              prompt: dataString(msg, "prompt"),
+              request_id: dataString(msg, "request_id"),
+              op_tool: dataString(msg, "op_tool"),
+              op_args: dataAny(msg, "op_args"),
+              op_args_summary: dataString(msg, "op_args_summary"),
+              approve_text: dataString(msg, "approve_text"),
+              deny_text: dataString(msg, "deny_text"),
+            },
+          };
+        }
+        if (msg.run_id && msg.type === "run.input") {
+          awaitingByRun = { ...awaitingByRun, [msg.run_id]: undefined };
+        }
+        if (msg.run_id && msg.type === "run.exited") {
+          awaitingByRun = { ...awaitingByRun, [msg.run_id]: undefined };
+        }
+
+        const m = envToMessage(msg);
+        if (m && msg.run_id) appendMessage(msg.run_id, m);
+
+        // Best-effort local run status updates.
+        if (msg.run_id) {
+          const i = runs.findIndex((x) => x.id === msg.run_id);
+          const last_active_at = msg.ts;
+          const hasReqId = dataString(msg, "request_id");
+
+          if (i === -1 && msg.type === "run.started") {
+            runs = [
+              {
+                id: msg.run_id,
+                host_id: msg.host_id ?? "unknown",
+                tool: dataString(msg, "tool") ?? "unknown",
+                cwd: dataString(msg, "cwd") ?? ".",
+                status: "running",
+                started_at: msg.ts,
+                last_active_at: msg.ts,
+              },
+              ...runs,
+            ];
+            return;
+          }
+
+          if (i !== -1) {
+            const base: RunRow = { ...runs[i], last_active_at };
+            if (msg.type === "run.permission_requested") {
+              runs[i] = {
+                ...base,
+                status: "awaiting_approval",
+                pending_request_id: dataString(msg, "request_id"),
+                pending_reason: dataString(msg, "reason"),
+                pending_prompt: dataString(msg, "prompt"),
+                pending_op_tool: dataString(msg, "op_tool"),
+                pending_op_args_summary: dataString(msg, "op_args_summary"),
+              };
+            } else if (msg.type === "run.awaiting_input") {
+              runs[i] = { ...base, status: hasReqId ? "awaiting_approval" : "awaiting_input" };
+            } else if (msg.type === "run.input") {
+              runs[i] = {
+                ...base,
+                status: "running",
+                pending_request_id: null,
+                pending_reason: null,
+                pending_prompt: null,
+                pending_op_tool: null,
+                pending_op_args_summary: null,
+              };
+            } else if (msg.type === "run.exited") {
+              const exit_code =
+                isRecord(msg.data) && typeof msg.data["exit_code"] === "number" ? msg.data["exit_code"] : base.exit_code;
+              runs[i] = {
+                ...base,
+                status: "exited",
+                ended_at: msg.ts,
+                exit_code,
+                pending_request_id: null,
+                pending_reason: null,
+                pending_prompt: null,
+                pending_op_tool: null,
+                pending_op_args_summary: null,
+              };
+            } else if (msg.type === "run.started") {
+              runs[i] = { ...base, status: "running", started_at: msg.ts, ended_at: null, exit_code: null };
+            } else if (msg.type === "run.output" || msg.type === "tool.call" || msg.type === "tool.result") {
+              runs[i] = base;
+            }
+            runs = [...runs];
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }
+
   async function connect() {
     lastError = "";
     try {
-      status = "checking";
-      events = [];
-      health = null;
-      outputByRun = {};
-      awaitingByRun = {};
-      hosts = [];
-      messagesByRun = {};
-
-      if (ws) {
-        try {
-          ws.close();
-        } catch {
-          // ignore
-        }
-        ws = null;
-      }
+      resetConnectionState();
 
       const h = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/health`);
       if (!h.ok) {
@@ -967,151 +1169,41 @@
       view = "sessions";
 
       persistServerPrefs();
+      persistAuthPrefs();
 
       await refreshHosts();
       await refreshRuns();
+      if (!token) return;
       if (selectedRunId) await loadMessages(selectedRunId);
 
-      status = "connecting";
-      const nextWs = new WebSocket(`${toWsBase(apiBaseUrl)}/ws/app?token=${encodeURIComponent(token)}`);
-      ws = nextWs;
-      nextWs.onopen = () => {
-        if (ws === nextWs) status = "connected";
-      };
-      nextWs.onclose = () => {
-        if (ws === nextWs) status = "disconnected";
-      };
-      nextWs.onerror = () => {
-        if (ws === nextWs) status = "error";
-      };
-      nextWs.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data) as WsEnvelope;
-          events = [msg, ...events].slice(0, 2000);
-          if (msg.type === "rpc.response") {
-            const reqId = dataString(msg, "request_id");
-            if (reqId) {
-              const cb = pendingRpc.get(reqId);
-              if (cb) {
-                pendingRpc.delete(reqId);
-                cb(msg);
-              }
-            }
-          }
-          if (msg.run_id && msg.type === "run.output") {
-            const text = dataString(msg, "text") ?? "";
-            const existing = outputByRun[msg.run_id] ?? "";
-            outputByRun = { ...outputByRun, [msg.run_id]: truncateTail(existing + text, 200_000) };
-          }
-          if (msg.run_id && msg.type === "run.awaiting_input") {
-            const reqId = dataString(msg, "request_id");
-            awaitingByRun = {
-              ...awaitingByRun,
-              [msg.run_id]: {
-                reason: dataString(msg, "reason"),
-                prompt: dataString(msg, "prompt"),
-                request_id: reqId,
-                approve_text: dataString(msg, "approve_text"),
-                deny_text: dataString(msg, "deny_text"),
-              },
-            };
-          }
-          if (msg.run_id && msg.type === "run.permission_requested") {
-            awaitingByRun = {
-              ...awaitingByRun,
-              [msg.run_id]: {
-                reason: dataString(msg, "reason"),
-                prompt: dataString(msg, "prompt"),
-                request_id: dataString(msg, "request_id"),
-                op_tool: dataString(msg, "op_tool"),
-                op_args: dataAny(msg, "op_args"),
-                op_args_summary: dataString(msg, "op_args_summary"),
-                approve_text: dataString(msg, "approve_text"),
-                deny_text: dataString(msg, "deny_text"),
-              },
-            };
-          }
-          if (msg.run_id && msg.type === "run.input") {
-            awaitingByRun = { ...awaitingByRun, [msg.run_id]: undefined };
-          }
-          if (msg.run_id && msg.type === "run.exited") {
-            awaitingByRun = { ...awaitingByRun, [msg.run_id]: undefined };
-          }
+      openAppWebSocket(token);
+    } catch (e) {
+      lastError = `${e instanceof Error ? e.message : String(e)}\nserver=${apiBaseUrl}`.trim();
+      status = "error";
+    }
+  }
 
-          const m = envToMessage(msg);
-          if (m && msg.run_id) appendMessage(msg.run_id, m);
+  async function resumeFromStoredToken() {
+    if (!token) return;
+    lastError = "";
+    const savedToken = token;
+    try {
+      resetConnectionState();
 
-          // Best-effort local run status updates.
-          if (msg.run_id) {
-            const i = runs.findIndex((x) => x.id === msg.run_id);
-            const last_active_at = msg.ts;
-            const hasReqId = dataString(msg, "request_id");
+      const h = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/health`);
+      if (!h.ok) {
+        const body = await h.text().catch(() => "");
+        throw new Error(`health failed: ${h.status} ${body}`.trim());
+      }
+      health = (await h.json()) as Health;
+      view = "sessions";
 
-            if (i === -1 && msg.type === "run.started") {
-              runs = [
-                {
-                  id: msg.run_id,
-                  host_id: msg.host_id ?? "unknown",
-                  tool: dataString(msg, "tool") ?? "unknown",
-                  cwd: dataString(msg, "cwd") ?? ".",
-                  status: "running",
-                  started_at: msg.ts,
-                  last_active_at: msg.ts,
-                },
-                ...runs,
-              ];
-              return;
-            }
+      await refreshHosts();
+      await refreshRuns();
+      if (!token) return;
+      if (selectedRunId) await loadMessages(selectedRunId);
 
-            if (i !== -1) {
-              const base: RunRow = { ...runs[i], last_active_at };
-              if (msg.type === "run.permission_requested") {
-                runs[i] = {
-                  ...base,
-                  status: "awaiting_approval",
-                  pending_request_id: dataString(msg, "request_id"),
-                  pending_reason: dataString(msg, "reason"),
-                  pending_prompt: dataString(msg, "prompt"),
-                  pending_op_tool: dataString(msg, "op_tool"),
-                  pending_op_args_summary: dataString(msg, "op_args_summary"),
-                };
-              } else if (msg.type === "run.awaiting_input") {
-                runs[i] = { ...base, status: hasReqId ? "awaiting_approval" : "awaiting_input" };
-              } else if (msg.type === "run.input") {
-                runs[i] = {
-                  ...base,
-                  status: "running",
-                  pending_request_id: null,
-                  pending_reason: null,
-                  pending_prompt: null,
-                  pending_op_tool: null,
-                  pending_op_args_summary: null,
-                };
-              } else if (msg.type === "run.exited") {
-                const exit_code = isRecord(msg.data) && typeof msg.data["exit_code"] === "number" ? msg.data["exit_code"] : base.exit_code;
-                runs[i] = {
-                  ...base,
-                  status: "exited",
-                  ended_at: msg.ts,
-                  exit_code,
-                  pending_request_id: null,
-                  pending_reason: null,
-                  pending_prompt: null,
-                  pending_op_tool: null,
-                  pending_op_args_summary: null,
-                };
-              } else if (msg.type === "run.started") {
-                runs[i] = { ...base, status: "running", started_at: msg.ts, ended_at: null, exit_code: null };
-              } else if (msg.type === "run.output" || msg.type === "tool.call" || msg.type === "tool.result") {
-                runs[i] = base;
-              }
-              runs = [...runs];
-            }
-          }
-        } catch {
-          // ignore
-        }
-      };
+      openAppWebSocket(savedToken);
     } catch (e) {
       lastError = `${e instanceof Error ? e.message : String(e)}\nserver=${apiBaseUrl}`.trim();
       status = "error";
@@ -1124,6 +1216,7 @@
     token = "";
     status = "disconnected";
     view = "sessions";
+    persistAuthPrefs();
   }
 
   async function refreshHosts() {
@@ -1131,6 +1224,12 @@
     const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/hosts`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (r.status === 401) {
+      lastError = "登录已过期，请重新登录";
+      setToast("登录已过期");
+      disconnect();
+      return;
+    }
     if (r.ok) {
       hosts = (await r.json()) as HostInfo[];
       const online = hosts.filter((h) => h.online);
@@ -1146,6 +1245,12 @@
     const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/sessions`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (r.status === 401) {
+      lastError = "登录已过期，请重新登录";
+      setToast("登录已过期");
+      disconnect();
+      return;
+    }
     if (r.ok) {
       runs = (await r.json()) as RunRow[];
       if (!selectedRunId && runs.length > 0) selectedRunId = runs[0].id;
@@ -1159,6 +1264,12 @@
     const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/sessions/recent?limit=50`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (r.status === 401) {
+      lastError = "登录已过期，请重新登录";
+      setToast("登录已过期");
+      disconnect();
+      return;
+    }
     if (r.ok) {
       recentSessions = (await r.json()) as RunRow[];
     } else {
@@ -1180,6 +1291,12 @@
         headers: { Authorization: `Bearer ${token}` },
       },
     );
+    if (r.status === 401) {
+      lastError = "登录已过期，请重新登录";
+      setToast("登录已过期");
+      disconnect();
+      return;
+    }
     if (!r.ok) return;
     const msgs = (await r.json()) as ChatMessageApi[];
     const mapped: ChatMessage[] = msgs.map((m) => ({
@@ -1591,6 +1708,19 @@
     todos = [];
   }
 
+  onMount(() => {
+    let stopped = false;
+    (async () => {
+      if (!token) return;
+      await resumeFromStoredToken();
+      if (stopped) return;
+      if (!token && rememberPassword && password) await connect();
+    })();
+    return () => {
+      stopped = true;
+    };
+  });
+
   // Best-effort polling while disconnected (helps mobile background/resume).
   onMount(() => {
     let stopped = false;
@@ -1599,6 +1729,7 @@
       if (stopped) return;
       if (!token) return;
       if (status === "connected") return;
+      if (status === "checking" || status === "connecting") return;
       if (inFlight) return;
       inFlight = true;
       try {
@@ -1652,7 +1783,7 @@
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
       <span class="conn-status" data-kind={status}>
         <span class="conn-dot" aria-hidden="true"></span>
-        <span>{status}</span>
+        <span>{connLabel(status)}</span>
       </span>
       {#if token}
         <span class="subtle"><code>{username}</code></span>
@@ -1708,24 +1839,42 @@
     {/if}
     <label>
       用户名
-      <input bind:value={username} />
+      <input bind:value={username} autocomplete="username" on:change={persistAuthPrefs} />
     </label>
     <label>
       密码
-      <input type="password" bind:value={password} />
+      <input type="password" bind:value={password} autocomplete="current-password" on:change={persistAuthPrefs} />
     </label>
+    <div class="login-prefs">
+      <label class="checkbox">
+        <input
+          type="checkbox"
+          bind:checked={keepSignedIn}
+          on:change={() => {
+            persistAuthPrefs();
+          }}
+        />
+        刷新后保持登录
+      </label>
+      <label class="checkbox">
+        <input
+          type="checkbox"
+          bind:checked={rememberPassword}
+          on:change={() => {
+            if (!rememberPassword) password = "";
+            persistAuthPrefs();
+          }}
+        />
+        记住密码（本机）
+      </label>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button on:click={connect}>登录</button>
-      <button on:click={disconnect} disabled={!ws && !token}>断开</button>
+      <button on:click={connect} disabled={loginBusy || !username.trim() || !password}>{loginBusy ? "登录中…" : "登录"}</button>
     </div>
     {#if isProbablyInsecureUrl(apiBaseUrl)}
       <div style="margin-top:8px;padding:8px;border:1px solid #f59e0b;background:#fffbeb">
         注意：当前是 <code>http://</code>，密码会明文传输。建议通过 HTTPS 访问（例如用 Caddy 反代）。
       </div>
-    {/if}
-    <div>Status: {status}</div>
-    {#if health}
-      <div>Health: {health.name} {health.version}</div>
     {/if}
     {#if lastError}
       <div style="color:#b91c1c">{lastError}</div>
@@ -1778,6 +1927,40 @@
         <div style="margin-top:10px;padding:8px;border:1px solid #f59e0b;background:#fffbeb">
           检测到 <code>http://</code>：密码与 token 在传输层不加密。建议通过 HTTPS 访问。
         </div>
+      {/if}
+    </div>
+
+    <div style="margin-top:14px">
+      <div style="font-weight:600">登录</div>
+      <div class="subtle">当前用户：<code>{username}</code></div>
+      <div class="login-prefs" style="margin-top:8px">
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            bind:checked={keepSignedIn}
+            on:change={() => {
+              persistAuthPrefs();
+            }}
+          />
+          刷新后保持登录
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            bind:checked={rememberPassword}
+            on:change={() => {
+              if (!rememberPassword) password = "";
+              persistAuthPrefs();
+            }}
+          />
+          记住密码（本机）
+        </label>
+      </div>
+      {#if rememberPassword}
+        <label style="margin-top:10px">
+          密码
+          <input type="password" bind:value={password} autocomplete="current-password" on:change={persistAuthPrefs} />
+        </label>
       {/if}
     </div>
   </section>
@@ -1845,7 +2028,7 @@
 
   <section class="sessions-detail">
     {#if !selectedRun}
-      <div class="subtle">(未选择会话)</div>
+      <div class="subtle"></div>
     {:else}
       {@const st = statusLabel(selectedRun)}
       {@const host = hostsById[selectedRun.host_id] ?? null}
@@ -1918,7 +2101,7 @@
         <div class="offline-banner">
           <span class="dot" data-online="0" aria-hidden="true"></span>
           <span>离线</span>
-          <button class="secondary" on:click={connect} type="button">重连</button>
+          <button class="secondary" on:click={resumeFromStoredToken} type="button">重连</button>
           <button class="secondary" on:click={refreshSelectedSession} disabled={!selectedRunId} type="button">刷新</button>
         </div>
       {/if}
@@ -2055,7 +2238,7 @@
   <section class="sessions-todo">
     <h2>待办</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-      <input bind:value={todoText} placeholder="Add a todo..." />
+      <input bind:value={todoText} placeholder="新增待办…" />
       <button
         on:click={() => {
           addTodo(todoText);
@@ -2063,17 +2246,17 @@
         }}
         disabled={!selectedRunId}
       >
-        Add
+        添加
       </button>
     </div>
 
     {#if todoSuggestions.length > 0}
       <div style="margin:8px 0;padding:8px;border:1px solid #e5e7eb;background:#f8fafc">
-        <strong>Suggestions (from output)</strong>
+        <strong>建议（来自输出）</strong>
         <ul>
           {#each todoSuggestions as s (s)}
             <li>
-              <button on:click={() => addTodo(s)} disabled={!selectedRunId} style="margin-right:8px">Add</button>
+              <button on:click={() => addTodo(s)} disabled={!selectedRunId} style="margin-right:8px">添加</button>
               {s}
             </li>
           {/each}
@@ -2081,9 +2264,7 @@
       </div>
     {/if}
 
-    {#if todos.length === 0}
-      <div>(no todos)</div>
-    {:else}
+    {#if todos.length > 0}
       <ul>
         {#each todos as t (t.id)}
           <li>
@@ -2091,7 +2272,7 @@
               <input type="checkbox" checked={t.done} on:change={() => toggleTodo(t.id)} />
               <span style={t.done ? "text-decoration:line-through;color:#6b7280" : ""}>{t.text}</span>
             </label>
-            <button on:click={() => removeTodo(t.id)} style="margin-left:8px">Remove</button>
+            <button on:click={() => removeTodo(t.id)} style="margin-left:8px">移除</button>
           </li>
         {/each}
       </ul>
@@ -2103,10 +2284,10 @@
   <section class:hidden={!token || view !== "tools"}>
     <h2>文件（run cwd）</h2>
     <label>
-      Path (relative)
+      路径（相对）
       <input bind:value={filePath} placeholder="README.md" />
     </label>
-    <button on:click={fetchFile} disabled={!selectedRunId || status !== "connected"}>Read</button>
+    <button on:click={fetchFile} disabled={!selectedRunId || status !== "connected"}>读取</button>
     {#if fileError}
       <div style="color:#b91c1c">{fileError}</div>
     {/if}
@@ -2129,7 +2310,7 @@
       <div>(no matches)</div>
     {:else}
       {#if searchTruncated}
-        <div style="color:#92400e">results truncated</div>
+        <div style="color:#92400e">结果已截断</div>
       {/if}
       <ul>
         {#each searchMatches as m (m.path + ":" + m.line + ":" + m.column)}
@@ -2144,11 +2325,11 @@
   <section class:hidden={!token || view !== "tools"}>
     <h2>Git（run cwd）</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button on:click={fetchGitStatus} disabled={!selectedRunId || status !== "connected"}>Status</button>
-      <button on:click={fetchGitDiff} disabled={!selectedRunId || status !== "connected"}>Diff</button>
+      <button on:click={fetchGitStatus} disabled={!selectedRunId || status !== "connected"}>状态</button>
+      <button on:click={fetchGitDiff} disabled={!selectedRunId || status !== "connected"}>差异</button>
     </div>
     <label>
-      Diff path (optional, relative)
+      Diff 路径（可选，相对）
       <input bind:value={gitDiffPath} placeholder="src/main.rs" />
     </label>
     {#if gitError}
@@ -2167,14 +2348,14 @@
   <section class:hidden={!token || view !== "hosts"}>
     <h2>主机诊断（WS-RPC）</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-      <button on:click={refreshHosts} disabled={!token}>Refresh hosts</button>
+      <button on:click={refreshHosts} disabled={!token}>刷新主机</button>
     </div>
     <label>
-      Host ID
+      主机 ID
       {#if hosts.length > 0}
         <select bind:value={hostDiagHostId} style="width:100%;padding:10px;box-sizing:border-box">
           {#each hosts as h (h.id)}
-            <option value={h.id}>{h.id}{h.online ? " (online)" : " (offline)"}</option>
+            <option value={h.id}>{h.id}{h.online ? "（在线）" : "（离线）"}</option>
           {/each}
         </select>
       {:else}
@@ -2228,13 +2409,13 @@
 
   <section class:hidden={!token || view !== "start"}>
     <h2>启动运行（远程）</h2>
-    <button on:click={refreshHosts} disabled={!token} style="margin-bottom:8px">Refresh hosts</button>
+    <button on:click={refreshHosts} disabled={!token} style="margin-bottom:8px">刷新主机</button>
     <label>
-      Host ID
+      主机 ID
       {#if hosts.length > 0}
         <select bind:value={startHostId} style="width:100%;padding:10px;box-sizing:border-box">
           {#each hosts as h (h.id)}
-            <option value={h.id}>{h.id}{h.online ? " (online)" : " (offline)"}</option>
+            <option value={h.id}>{h.id}{h.online ? "（在线）" : "（离线）"}</option>
           {/each}
         </select>
       {:else}
@@ -2242,18 +2423,18 @@
       {/if}
     </label>
     <label>
-      Tool
+      工具
       <input bind:value={startTool} placeholder="codex" />
     </label>
     <label>
-      CWD (optional, host path)
+      CWD（可选，主机路径）
       <input bind:value={startCwd} placeholder="/path/to/project" />
     </label>
     <label>
-      Command
+      命令
       <input bind:value={startCmd} placeholder="echo hi; cat" />
     </label>
-    <button on:click={startRun} disabled={status !== "connected"}>Start</button>
+    <button on:click={startRun} disabled={status !== "connected"}>启动</button>
     {#if startError}
       <div style="color:#b91c1c">{startError}</div>
     {/if}
@@ -2434,11 +2615,35 @@
 </main>
 
 <style>
+  :global(:root) {
+    --bg: #f8fafc;
+    --surface: rgba(255, 255, 255, 0.92);
+    --surface-2: rgba(255, 255, 255, 0.78);
+    --surface-muted: rgba(248, 250, 252, 0.96);
+    --text: #1e293b;
+    --text-strong: #0f172a;
+    --muted: #64748b;
+    --border: rgba(2, 6, 23, 0.12);
+    --border-strong: rgba(2, 6, 23, 0.18);
+    --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.06);
+    --shadow-md: 0 10px 30px rgba(2, 6, 23, 0.1);
+    --primary: #2563eb;
+    --primary-2: #3b82f6;
+    --success: #22c55e;
+    --warning: #f97316;
+    --danger: #ef4444;
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --radius-sm: 10px;
+  }
+
   :global(body) {
     margin: 0;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Segoe UI, Roboto, sans-serif;
-    background: #f2f2f7;
-    color: #111827;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   :global(code) {
@@ -2450,6 +2655,10 @@
     max-width: 1040px;
     margin: 0 auto;
     padding: 14px;
+    padding-top: calc(14px + env(safe-area-inset-top));
+    padding-right: calc(14px + env(safe-area-inset-right));
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+    padding-left: calc(14px + env(safe-area-inset-left));
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -2465,7 +2674,7 @@
 
   .subtle {
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
     margin-top: 2px;
   }
 
@@ -2476,7 +2685,7 @@
     transform: translateX(-50%);
     padding: 10px 12px;
     border-radius: 999px;
-    border: 1px solid rgba(17, 24, 39, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.18);
     background: rgba(17, 24, 39, 0.86);
     color: rgba(255, 255, 255, 0.95);
     font-size: 13px;
@@ -2491,24 +2700,24 @@
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
-    background: rgba(17, 24, 39, 0.06);
-    border-radius: 14px;
+    background: rgba(2, 6, 23, 0.06);
+    border-radius: var(--radius-lg);
     padding: 6px;
   }
 
   .segmented button {
     border: none;
     background: transparent;
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     padding: 10px 8px;
     font-weight: 800;
     font-size: 13px;
   }
 
   .segmented button.active {
-    background: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border);
   }
 
   .conn-status {
@@ -2518,37 +2727,37 @@
     border-radius: 999px;
     padding: 6px 10px;
     font-size: 12px;
-    border: 1px solid rgba(17, 24, 39, 0.1);
-    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
   }
 
   .conn-dot {
     width: 8px;
     height: 8px;
     border-radius: 999px;
-    background: rgba(107, 114, 128, 0.7);
+    background: rgba(100, 116, 139, 0.8);
   }
 
   .conn-status[data-kind="connected"] {
-    background: rgba(52, 199, 89, 0.12);
-    border-color: rgba(52, 199, 89, 0.28);
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.28);
     color: #065f46;
   }
 
   .conn-status[data-kind="connected"] .conn-dot {
-    background: rgba(52, 199, 89, 0.9);
+    background: rgba(34, 197, 94, 0.95);
   }
 
   .conn-status[data-kind="checking"],
   .conn-status[data-kind="connecting"] {
-    background: rgba(0, 122, 255, 0.12);
-    border-color: rgba(0, 122, 255, 0.28);
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.28);
     color: #1d4ed8;
   }
 
   .conn-status[data-kind="checking"] .conn-dot,
   .conn-status[data-kind="connecting"] .conn-dot {
-    background: rgba(0, 122, 255, 0.9);
+    background: rgba(37, 99, 235, 0.95);
   }
 
   .conn-status[data-kind="error"] {
@@ -2567,7 +2776,7 @@
 
   .sessions-layout {
     display: grid;
-    grid-template-columns: 360px 1fr;
+    grid-template-columns: clamp(320px, 34vw, 360px) 1fr;
     gap: 12px;
     align-items: start;
   }
@@ -2612,7 +2821,7 @@
   }
 
   .secondary {
-    background: rgba(255, 255, 255, 0.75);
+    background: var(--surface-2);
   }
 
   .list-search {
@@ -2635,19 +2844,19 @@
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
-    border-radius: 14px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(255, 255, 255, 0.75);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
     text-align: left;
   }
 
   .host-group-header:hover {
-    border-color: rgba(17, 24, 39, 0.16);
+    border-color: var(--border-strong);
   }
 
   .chevron {
     width: 16px;
-    color: #6b7280;
+    color: var(--muted);
     flex: 0 0 auto;
   }
 
@@ -2655,12 +2864,12 @@
     width: 10px;
     height: 10px;
     border-radius: 999px;
-    background: #9ca3af;
+    background: rgba(100, 116, 139, 0.7);
     flex: 0 0 auto;
   }
 
   .dot[data-online="1"] {
-    background: #22c55e;
+    background: var(--success);
   }
 
   .host-name {
@@ -2671,7 +2880,7 @@
 
   .host-last-seen {
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
     flex: 0 0 auto;
   }
 
@@ -2687,21 +2896,27 @@
     text-align: left;
     position: relative;
     padding: 10px 12px;
-    border-radius: 16px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(255, 255, 255, 0.86);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface);
     display: flex;
     flex-direction: column;
     gap: 6px;
+    box-shadow: var(--shadow-sm);
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease,
+      box-shadow 160ms ease;
   }
 
   .session-item:hover {
-    border-color: rgba(17, 24, 39, 0.16);
+    border-color: var(--border-strong);
+    box-shadow: 0 2px 10px rgba(2, 6, 23, 0.09);
   }
 
   .session-item.selected {
-    border-color: rgba(0, 122, 255, 0.35);
-    background: rgba(0, 122, 255, 0.08);
+    border-color: rgba(37, 99, 235, 0.35);
+    background: rgba(37, 99, 235, 0.08);
   }
 
   .session-item.selected::before {
@@ -2712,7 +2927,7 @@
     bottom: 10px;
     width: 3px;
     border-radius: 999px;
-    background: rgba(0, 122, 255, 0.9);
+    background: rgba(37, 99, 235, 0.9);
   }
 
   .session-item-top {
@@ -2726,7 +2941,7 @@
     font-weight: 900;
     font-size: 13px;
     line-height: 1.2;
-    color: #111827;
+    color: var(--text-strong);
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -2741,20 +2956,20 @@
     padding: 4px 8px;
     font-size: 12px;
     font-weight: 800;
-    border: 1px solid rgba(17, 24, 39, 0.12);
-    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
     flex: 0 0 auto;
   }
 
   .session-status[data-kind="running"] {
-    background: rgba(52, 199, 89, 0.12);
-    border-color: rgba(52, 199, 89, 0.28);
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.28);
     color: #065f46;
   }
 
   .session-status[data-kind="warning"] {
-    background: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.28);
+    background: rgba(249, 115, 22, 0.12);
+    border-color: rgba(249, 115, 22, 0.28);
     color: #92400e;
   }
 
@@ -2776,27 +2991,27 @@
     flex-wrap: wrap;
     align-items: center;
     font-size: 12px;
-    color: #374151;
+    color: #334155;
   }
 
   .session-tool {
     font-weight: 900;
-    color: #111827;
+    color: var(--text-strong);
   }
 
   .session-op,
   .session-op-args {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 12px;
-    background: rgba(243, 244, 246, 0.9);
-    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(241, 245, 249, 0.96);
+    border: 1px solid rgba(2, 6, 23, 0.08);
     padding: 2px 6px;
     border-radius: 8px;
   }
 
   .session-summary {
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2810,7 +3025,7 @@
 
   .session-time {
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
   }
 
   .sessions-detail {
@@ -2844,12 +3059,12 @@
     flex-wrap: wrap;
     align-items: center;
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
   }
 
   .detail-host code {
     font-weight: 900;
-    color: #111827;
+    color: var(--text-strong);
   }
 
   .detail-meta {
@@ -2866,19 +3081,19 @@
     gap: 6px;
     padding: 4px 8px;
     border-radius: 999px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
     max-width: 100%;
     min-width: 0;
   }
 
   .meta-k {
-    color: #6b7280;
+    color: var(--muted);
     font-weight: 900;
   }
 
   .meta-v {
-    color: #111827;
+    color: var(--text-strong);
     font-weight: 900;
     min-width: 0;
     overflow: hidden;
@@ -2901,7 +3116,7 @@
   .offline-banner {
     margin-top: 10px;
     padding: 10px 12px;
-    border-radius: 16px;
+    border-radius: var(--radius-lg);
     border: 1px solid rgba(239, 68, 68, 0.18);
     background: rgba(239, 68, 68, 0.06);
     display: flex;
@@ -2928,8 +3143,8 @@
     width: 100%;
     max-width: 520px;
     border-radius: 18px;
-    border: 1px solid rgba(17, 24, 39, 0.12);
-    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.98);
     padding: 14px;
     box-shadow:
       0 2px 12px rgba(0, 0, 0, 0.16),
@@ -2950,19 +3165,19 @@
 
   .modal-body {
     margin-top: 10px;
-    color: #6b7280;
+    color: var(--muted);
   }
 
   .input-textarea {
     width: 100%;
     min-height: 96px;
     padding: 10px 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(17, 24, 39, 0.12);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
     background: rgba(255, 255, 255, 0.9);
     font: inherit;
     font-size: 13px;
-    color: #111827;
+    color: var(--text-strong);
     box-sizing: border-box;
     resize: vertical;
   }
@@ -2994,22 +3209,22 @@
     align-items: center;
     padding: 4px 8px;
     border-radius: 999px;
-    border: 1px solid rgba(17, 24, 39, 0.12);
-    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
     font-weight: 900;
     font-size: 12px;
     text-transform: uppercase;
   }
 
   .risk-pill[data-kind="read"] {
-    background: rgba(0, 122, 255, 0.12);
-    border-color: rgba(0, 122, 255, 0.22);
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.22);
     color: #1d4ed8;
   }
 
   .risk-pill[data-kind="write"] {
-    background: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.28);
+    background: rgba(249, 115, 22, 0.12);
+    border-color: rgba(249, 115, 22, 0.28);
     color: #92400e;
   }
 
@@ -3027,7 +3242,7 @@
 
   .approval-summary {
     margin-top: 10px;
-    color: #111827;
+    color: var(--text-strong);
   }
 
   .approval-summary code {
@@ -3037,7 +3252,7 @@
   .approval-prompt {
     margin-top: 10px;
     font-size: 13px;
-    color: #111827;
+    color: var(--text-strong);
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -3064,8 +3279,8 @@
     gap: 6px;
     margin-top: 12px;
     padding: 6px;
-    border-radius: 14px;
-    background: rgba(17, 24, 39, 0.06);
+    border-radius: var(--radius-lg);
+    background: rgba(2, 6, 23, 0.06);
   }
 
   .detail-tabs button {
@@ -3078,17 +3293,17 @@
   }
 
   .detail-tabs button.active {
-    background: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border);
   }
 
   .awaiting-banner {
     margin-top: 10px;
     padding: 10px 12px;
-    border-radius: 16px;
-    border: 1px solid rgba(245, 158, 11, 0.25);
-    background: rgba(255, 251, 235, 0.85);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(249, 115, 22, 0.25);
+    background: rgba(255, 247, 237, 0.92);
   }
 
   .awaiting-banner-top {
@@ -3101,17 +3316,17 @@
   .awaiting-banner-prompt {
     margin-top: 8px;
     font-size: 12px;
-    color: #92400e;
+    color: #9a3412;
     word-break: break-word;
   }
 
   .chat-feed {
     margin-top: 12px;
-    max-height: 520px;
+    max-height: clamp(320px, 60vh, 720px);
     overflow: auto;
-    border-radius: 16px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(250, 250, 250, 0.9);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface-muted);
     padding: 12px;
   }
 
@@ -3138,47 +3353,47 @@
   .chat-bubble {
     max-width: 70%;
     padding: 10px 12px;
-    border-radius: 16px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(255, 255, 255, 0.92);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface);
     word-break: break-word;
     white-space: pre-wrap;
   }
 
   .chat-bubble[data-role="assistant"] {
-    background: rgba(243, 244, 246, 0.95);
+    background: rgba(241, 245, 249, 0.96);
   }
 
   .chat-bubble[data-role="user"] {
-    background: rgba(0, 122, 255, 0.12);
-    border-color: rgba(0, 122, 255, 0.22);
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.22);
   }
 
   .chat-system {
     max-width: 70%;
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
     word-break: break-word;
   }
 
   .chat-ts {
     font-size: 11px;
-    color: #6b7280;
+    color: var(--muted);
   }
 
   .tool-card {
     width: 100%;
-    border-radius: 16px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(248, 250, 252, 0.95);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface-muted);
     padding: 10px 12px;
   }
 
   .approval-card {
     width: 100%;
-    border-radius: 16px;
-    border: 1px solid rgba(245, 158, 11, 0.25);
-    background: rgba(255, 251, 235, 0.85);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(249, 115, 22, 0.25);
+    background: rgba(255, 247, 237, 0.92);
     padding: 10px 12px;
   }
 
@@ -3192,7 +3407,7 @@
   .approval-card-prompt {
     margin-top: 8px;
     font-size: 12px;
-    color: #92400e;
+    color: #9a3412;
     word-break: break-word;
     white-space: pre-wrap;
   }
@@ -3217,7 +3432,7 @@
 
   .tool-card-label {
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
     margin-bottom: 6px;
   }
 
@@ -3243,7 +3458,7 @@
 
   .output-count {
     font-size: 12px;
-    color: #6b7280;
+    color: var(--muted);
     font-weight: 800;
     padding: 0 4px;
   }
@@ -3257,11 +3472,11 @@
 
   .output-feed {
     margin-top: 10px;
-    max-height: 520px;
+    max-height: clamp(320px, 60vh, 720px);
     overflow: auto;
-    border-radius: 16px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(250, 250, 250, 0.9);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface-muted);
     padding: 0;
     position: relative;
   }
@@ -3282,9 +3497,9 @@
     padding: 6px 10px;
     font-size: 12px;
     font-weight: 900;
-    border: 1px solid rgba(245, 158, 11, 0.28);
-    background: rgba(255, 251, 235, 0.9);
-    color: #92400e;
+    border: 1px solid rgba(249, 115, 22, 0.28);
+    background: rgba(255, 247, 237, 0.94);
+    color: #9a3412;
   }
 
   :global(.out-mark) {
@@ -3335,19 +3550,15 @@
     margin: 12px 0 6px 0;
     font-size: 13px;
     font-weight: 800;
-    color: #374151;
+    color: #334155;
   }
 
   section {
-    background: rgba(255, 255, 255, 0.86);
-    backdrop-filter: saturate(180%) blur(18px);
-    -webkit-backdrop-filter: saturate(180%) blur(18px);
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 14px;
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.04),
-      0 10px 30px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-sm);
   }
 
   label {
@@ -3355,35 +3566,78 @@
     margin: 10px 0;
     font-size: 12px;
     font-weight: 700;
-    color: #374151;
+    color: #334155;
+  }
+
+  .login-prefs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin: 6px 0 2px;
+  }
+
+  label.checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #334155;
+    cursor: pointer;
+    user-select: none;
   }
 
   input,
   select {
     width: 100%;
+    min-height: 40px;
     padding: 10px 12px;
     box-sizing: border-box;
-    border-radius: 12px;
-    border: 1px solid rgba(17, 24, 39, 0.12);
-    background: rgba(255, 255, 255, 0.92);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--surface);
     font-size: 14px;
     outline: none;
   }
 
+  input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: 6px;
+    accent-color: var(--primary);
+  }
+
   input:focus,
   select:focus {
-    border-color: rgba(0, 122, 255, 0.5);
-    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.18);
+    border-color: rgba(37, 99, 235, 0.5);
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
   }
 
   button {
-    border: 1px solid rgba(17, 24, 39, 0.12);
-    border-radius: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    min-height: 40px;
     padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.92);
+    background: var(--surface);
     font-weight: 700;
     font-size: 13px;
     cursor: pointer;
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease,
+      box-shadow 160ms ease,
+      transform 40ms ease;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+
+  button:active:not(:disabled) {
+    transform: translateY(1px);
   }
 
   button:disabled {
@@ -3391,12 +3645,27 @@
     cursor: not-allowed;
   }
 
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  summary:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
   pre {
     white-space: pre-wrap;
     word-break: break-word;
-    border-radius: 14px;
-    border: 1px solid rgba(17, 24, 39, 0.08);
-    background: rgba(255, 255, 255, 0.88);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface);
     padding: 12px;
     overflow: auto;
   }

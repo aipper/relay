@@ -207,6 +207,9 @@
   - 实时日志（live logs）；
   - 审批与输入流转：approve/deny/input。
 - 交互与信息展示（MVP）：
+  - 登录成功后将 `token`（JWT）与用户名持久化到 localStorage；刷新页面不退出（可关闭）。
+  - 提供“记住密码（本机）”开关；开启后将密码存入 localStorage，并在 token 失效时可自动重登（个人使用；共享设备不建议开启）。
+  - 认证失败（HTTP 401 / token 失效）时自动清除 token 并回到登录页，提示“登录已过期”。
   - 首页以 session 维度展示列表（语义对齐 runs），待审批时每条显示“等待原因 + 会话工具/模型（run.tool）+ 待审批操作工具名（op_tool）”。
   - 列表仅展示状态，不提供 approve/deny，避免误操作。
   - 会话详情以消息流为主视图，并显示 `run_id`、`status`、`host_id`、`cwd`、host 在线状态（圆点 + 文本）、工具/模型（简单 SVG 图标，品牌色）、权限模式元信息；不展示 host 名称。
