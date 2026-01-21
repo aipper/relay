@@ -56,6 +56,8 @@
     data: unknown;
   };
 
+  const DEFAULT_SESSION_LIMIT = 200;
+
   const browserOrigin =
     typeof window !== "undefined" && typeof window.location?.origin === "string" ? window.location.origin : "";
 
@@ -884,6 +886,23 @@
     return url.replace(/^http:/, "ws:").replace(/^https:/, "wss:").replace(/\/$/, "");
   }
 
+  async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 15_000): Promise<Response> {
+    if (typeof AbortController === "undefined" || init.signal) return await fetch(url, init);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (e) {
+      const name = e && typeof e === "object" && "name" in e ? String((e as { name?: unknown }).name) : "";
+      if (name === "AbortError") {
+        throw new Error(`请求超时（${timeoutMs}ms）：${url}`);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   function isProbablyInsecureUrl(url: string) {
     if (!/^http:\/\//i.test(url)) return false;
     try {
@@ -1144,18 +1163,22 @@
     try {
       resetConnectionState();
 
-      const h = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/health`);
+      const h = await fetchWithTimeout(`${apiBaseUrl.replace(/\/$/, "")}/health`, {}, 10_000);
       if (!h.ok) {
         const body = await h.text().catch(() => "");
         throw new Error(`health failed: ${h.status} ${body}`.trim());
       }
       health = (await h.json()) as Health;
 
-      const l = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/auth/login`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
+      const l = await fetchWithTimeout(
+        `${apiBaseUrl.replace(/\/$/, "")}/auth/login`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        },
+        15_000,
+      );
       if (!l.ok) {
         const body = await l.text().catch(() => "");
         const hint =
@@ -1171,12 +1194,11 @@
       persistServerPrefs();
       persistAuthPrefs();
 
-      await refreshHosts();
-      await refreshRuns();
+      await Promise.all([refreshHosts(), refreshRuns()]);
       if (!token) return;
-      if (selectedRunId) await loadMessages(selectedRunId);
 
       openAppWebSocket(token);
+      if (selectedRunId) void loadMessages(selectedRunId);
     } catch (e) {
       lastError = `${e instanceof Error ? e.message : String(e)}\nserver=${apiBaseUrl}`.trim();
       status = "error";
@@ -1190,7 +1212,7 @@
     try {
       resetConnectionState();
 
-      const h = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/health`);
+      const h = await fetchWithTimeout(`${apiBaseUrl.replace(/\/$/, "")}/health`, {}, 10_000);
       if (!h.ok) {
         const body = await h.text().catch(() => "");
         throw new Error(`health failed: ${h.status} ${body}`.trim());
@@ -1198,12 +1220,11 @@
       health = (await h.json()) as Health;
       view = "sessions";
 
-      await refreshHosts();
-      await refreshRuns();
+      await Promise.all([refreshHosts(), refreshRuns()]);
       if (!token) return;
-      if (selectedRunId) await loadMessages(selectedRunId);
 
       openAppWebSocket(savedToken);
+      if (selectedRunId) void loadMessages(selectedRunId);
     } catch (e) {
       lastError = `${e instanceof Error ? e.message : String(e)}\nserver=${apiBaseUrl}`.trim();
       status = "error";
@@ -1221,9 +1242,13 @@
 
   async function refreshHosts() {
     if (!token) return;
-    const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/hosts`, {
+    const r = await fetchWithTimeout(
+      `${apiBaseUrl.replace(/\/$/, "")}/hosts`,
+      {
       headers: { Authorization: `Bearer ${token}` },
-    });
+      },
+      12_000,
+    );
     if (r.status === 401) {
       lastError = "登录已过期，请重新登录";
       setToast("登录已过期");
@@ -1242,9 +1267,13 @@
 
   async function refreshRuns() {
     if (!token) return;
-    const r = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/sessions`, {
+    const r = await fetchWithTimeout(
+      `${apiBaseUrl.replace(/\/$/, "")}/sessions/recent?limit=${DEFAULT_SESSION_LIMIT}`,
+      {
       headers: { Authorization: `Bearer ${token}` },
-    });
+      },
+      15_000,
+    );
     if (r.status === 401) {
       lastError = "登录已过期，请重新登录";
       setToast("登录已过期");
@@ -1285,11 +1314,12 @@
 
   async function loadMessages(runId: string) {
     if (!token) return;
-    const r = await fetch(
+    const r = await fetchWithTimeout(
       `${apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200`,
       {
         headers: { Authorization: `Bearer ${token}` },
       },
+      15_000,
     );
     if (r.status === 401) {
       lastError = "登录已过期，请重新登录";
