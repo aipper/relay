@@ -58,6 +58,7 @@ pub fn resolve_tool_bin(tool: &str, env_var: &str, default_bin: &str) -> String 
     map.get(tool)
         .cloned()
         .filter(|s| !s.trim().is_empty())
+        .or_else(|| find_non_shim_in_path(default_bin).map(|p| p.to_string_lossy().to_string()))
         .unwrap_or_else(|| default_bin.to_string())
 }
 
@@ -78,6 +79,17 @@ pub fn find_path_in_path(bin: &str) -> Option<std::path::PathBuf> {
     for dir in std::env::split_paths(&path) {
         let full = dir.join(bin);
         if full.is_file() {
+            return Some(full);
+        }
+    }
+    None
+}
+
+fn find_non_shim_in_path(bin: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    for dir in std::env::split_paths(&path) {
+        let full = dir.join(bin);
+        if full.is_file() && !is_relay_shim_path(&full) {
             return Some(full);
         }
     }

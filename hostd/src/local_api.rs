@@ -113,7 +113,7 @@ async fn start_run(
         .rm
         .start_run(req.tool, cmd, req.cwd)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e:#}")))?;
     Ok(Json(StartRunResponse { run_id }))
 }
 

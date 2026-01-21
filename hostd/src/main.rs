@@ -281,8 +281,10 @@ async fn connect_and_run(
                                 } else {
                                     crate::runners::resolve_tool_bin(tool, env_var, default_bin)
                                 };
-                                let ok = crate::runners::validate_bin_exists(&resolved, tool).is_ok();
-                                json!({ "tool": tool, "bin": resolved, "ok": ok })
+                                let err = crate::runners::validate_bin_exists(&resolved, tool)
+                                    .err()
+                                    .map(|e| e.to_string());
+                                json!({ "tool": tool, "bin": resolved, "ok": err.is_none(), "error": err })
                             };
 
                             let tools = ["codex", "claude", "iflow", "gemini"]
@@ -367,9 +369,10 @@ async fn connect_and_run(
                                         _ => ("", tool),
                                     };
                                     let resolved = crate::runners::resolve_tool_bin(tool, env_var, default_bin);
-                                    let ok =
-                                        crate::runners::validate_bin_exists(&resolved, tool).is_ok();
-                                    json!({ "tool": tool, "bin": resolved, "ok": ok })
+                                    let err = crate::runners::validate_bin_exists(&resolved, tool)
+                                        .err()
+                                        .map(|e| e.to_string());
+                                    json!({ "tool": tool, "bin": resolved, "ok": err.is_none(), "error": err })
                                 })
                                 .collect::<Vec<_>>();
 
