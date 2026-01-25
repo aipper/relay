@@ -173,6 +173,8 @@
   type TodoItem = { id: string; text: string; done: boolean; created_at: string };
   let todos: TodoItem[] = [];
   let todoText = "";
+  let todoSuggestions: string[] = [];
+  let todoSuggestionsTimer: ReturnType<typeof setTimeout> | null = null;
 
   let sessionDetailTab: "output" | "messages" = "output";
   let outputAutoScroll = true;
@@ -180,6 +182,7 @@
   let outputBufferLines = 400;
   let outputFeedEl: HTMLDivElement | null = null;
   let outputSearchInputEl: HTMLInputElement | null = null;
+  let outputScrollScheduled = false;
 
   let outputSearchText = "";
   let outputSearchActive = "";
@@ -426,6 +429,13 @@
       return;
     }
 
+    // Periodically compact processed messages to avoid unbounded growth when the
+    // websocket is producing faster than we can render.
+    if (wsQueuePos > 1000) {
+      wsQueue = wsQueue.slice(wsQueuePos);
+      wsQueuePos = 0;
+    }
+
     const started = performance.now();
 
     const shouldCaptureEvents = token && view === "settings";
@@ -442,6 +452,7 @@
     let nextOutputByRun = outputByRun;
     let selectedOutput = selectedId ? outputByRun[selectedId] ?? "" : "";
     let outputChanged = false;
+    const pendingOutputChunks: string[] = [];
 
     const newEvents: WsEnvelope[] = [];
     const newMessages: ChatMessage[] = [];
@@ -485,8 +496,10 @@
 
       if (msg.run_id && msg.type === "run.output" && msg.run_id === selectedId) {
         const text = dataString(msg, "text") ?? "";
-        selectedOutput = truncateTail(selectedOutput + text, 200_000);
-        outputChanged = true;
+        if (text) {
+          pendingOutputChunks.push(text);
+          outputChanged = true;
+        }
       }
 
       if (msg.run_id && msg.type === "run.awaiting_input") {
@@ -620,6 +633,8 @@
     }
 
     if (outputChanged && selectedId) {
+      const append = pendingOutputChunks.length > 0 ? pendingOutputChunks.join("") : "";
+      if (append) selectedOutput = truncateTail(selectedOutput + append, 200_000);
       nextOutputByRun = { ...nextOutputByRun, [selectedId]: selectedOutput };
       outputByRun = nextOutputByRun;
     }
@@ -686,6 +701,18 @@
     const lineHeight = 18;
     const visibleLines = Math.max(1, Math.floor(viewHeight / lineHeight));
     outputBufferLines = Math.min(2000, Math.max(200, visibleLines * 4));
+  }
+
+  function scheduleOutputScrollToBottom() {
+    if (outputScrollScheduled) return;
+    outputScrollScheduled = true;
+    requestAnimationFrame(() => {
+      outputScrollScheduled = false;
+      if (!outputFeedEl) return;
+      if (sessionDetailTab !== "output" || !outputAutoScroll) return;
+      outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
+      outputIsAtBottom = true;
+    });
   }
 
   function outputAtBottom(el: HTMLDivElement): boolean {
@@ -1508,13 +1535,18 @@
 
       // Populate output view from persisted messages (useful when opening a run after it started).
       if (!outputByRun[runId]) {
-        const out = mapped
-          .filter((m) => m.kind === "run.output" && m.text)
-          // API returns newest-first; output wants oldest-first.
-          .map((m) => m.text)
-          .reverse()
-          .join("");
-        outputByRun = { ...outputByRun, [runId]: truncateTail(out, 200_000) };
+        const maxChars = 200_000;
+        const partsRev: string[] = [];
+        let total = 0;
+        for (const m of mapped) {
+          // API returns newest-first.
+          if (m.kind !== "run.output" || !m.text) continue;
+          partsRev.push(m.text);
+          total += m.text.length;
+          if (total >= maxChars) break;
+        }
+        const out = partsRev.reverse().join("");
+        outputByRun = { ...outputByRun, [runId]: truncateTail(out, maxChars) };
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1826,13 +1858,7 @@
   $: if (outputSearchMatches.length === 0) outputSearchCursor = 0;
   $: if (outputSearchCursor >= outputSearchMatches.length) outputSearchCursor = 0;
   $: outputHtml = outputSearchActive ? renderOutputHtml(outputLines, outputSearchMatches, outputSearchCursor) : "";
-  $: if (sessionDetailTab === "output" && outputAutoScroll) {
-    tick().then(() => {
-      if (!outputFeedEl) return;
-      outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
-      outputIsAtBottom = true;
-    });
-  }
+  $: if (sessionDetailTab === "output" && outputAutoScroll) scheduleOutputScrollToBottom();
 
   $: displayMessages = (() => {
     const msgs = selectedMessages ?? [];
@@ -1913,7 +1939,16 @@
     return uniq.slice(0, 50);
   }
 
-  $: todoSuggestions = extractTodoSuggestions(outputDisplayText).filter((s) => !todos.some((t) => t.text === s));
+  $: if (!selectedRunId) {
+    todoSuggestions = [];
+  } else {
+    if (todoSuggestionsTimer) clearTimeout(todoSuggestionsTimer);
+    const text = outputDisplayText;
+    const snapshot = todos;
+    todoSuggestionsTimer = setTimeout(() => {
+      todoSuggestions = extractTodoSuggestions(text).filter((s) => !snapshot.some((t) => t.text === s));
+    }, 800);
+  }
 
   $: if (selectedRunId) {
     todos = loadTodos(selectedRunId);
@@ -1977,6 +2012,7 @@
       window.removeEventListener("resize", onResize);
       if (outputAutoResumeTimer) clearTimeout(outputAutoResumeTimer);
       if (toastTimer) clearTimeout(toastTimer);
+      if (todoSuggestionsTimer) clearTimeout(todoSuggestionsTimer);
     };
   });
 </script>
