@@ -159,7 +159,7 @@
 
 - **远程监控**：runs 列表、状态、实时日志。
 - **远程控制**：发送输入、停止会话；展示 awaiting_input/权限请求并提供 approve/deny。
-- **日志查看（排障）**：在设置页可查看 server 日志（`/server/logs/tail`）与 hostd 日志（`rpc.host.logs.tail`）。
+- **日志查看（排障）**：在 web 中可查看 server 日志（`/server/logs/tail`）与 hostd 日志（`rpc.host.logs.tail`）。
 - **文件与 git（后续阶段）**：浏览文件、查看 git diff、搜索文件内容。
 - **todo（后续阶段）**：对会话输出/消息提取 todo 并可跟踪进度。
 
