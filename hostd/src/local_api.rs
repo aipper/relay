@@ -1,13 +1,16 @@
 use axum::{
     Json, Router,
+    body::{Body, Bytes},
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
+    response::Response,
     routing::{get, post},
 };
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, broadcast, oneshot};
 
 use crate::fs_git;
 use crate::run_manager::{RunManager, RunSummary};
@@ -147,6 +150,81 @@ async fn stop_run(
 
 async fn list_runs(State(state): State<Arc<LocalState>>) -> Json<Vec<RunSummary>> {
     Json(state.rm.list_runs().await)
+}
+
+async fn stream_stdout(
+    State(state): State<Arc<LocalState>>,
+    Path(run_id): Path<String>,
+) -> Result<Response, (StatusCode, String)> {
+    // Ensure the run exists.
+    let _ = state
+        .rm
+        .get_run_cwd(&run_id)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let rx = state.rm.subscribe();
+    let stream = futures_util::stream::unfold(Some(rx), move |maybe_rx| {
+        let run_id = run_id.clone();
+        async move {
+            let mut rx = maybe_rx?;
+            loop {
+                match rx.recv().await {
+                    Ok(env) => {
+                        if env.run_id.as_deref() != Some(run_id.as_str()) {
+                            continue;
+                        }
+                        if env.r#type == "run.exited" {
+                            return None;
+                        }
+                        if env.r#type != "run.output" {
+                            continue;
+                        }
+                        let text = env.data.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                        return Some((
+                            Ok::<Bytes, std::io::Error>(Bytes::from(text.to_string())),
+                            Some(rx),
+                        ));
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => return None,
+                }
+            }
+        }
+    });
+
+    let body = Body::from_stream(stream);
+    let mut resp = Response::new(body);
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "text/plain; charset=utf-8".parse().unwrap(),
+    );
+    Ok(resp)
+}
+
+async fn stream_stdin(
+    State(state): State<Arc<LocalState>>,
+    Path(run_id): Path<String>,
+    body: Body,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // Ensure the run exists.
+    let _ = state
+        .rm
+        .get_run_cwd(&run_id)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        state
+            .rm
+            .write_stdin_bytes(&run_id, "cli", &chunk)
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn fs_read(
@@ -959,6 +1037,8 @@ async fn bash_run(
 pub fn router(state: Arc<LocalState>) -> Router {
     Router::new()
         .route("/runs", post(start_run).get(list_runs))
+        .route("/runs/:run_id/stdout", get(stream_stdout))
+        .route("/runs/:run_id/stdin", post(stream_stdin))
         .route("/runs/:run_id/input", post(send_input))
         .route("/runs/:run_id/stop", post(stop_run))
         .route("/runs/:run_id/fs/read", get(fs_read))

@@ -33,6 +33,7 @@ struct Run {
     tool: String,
     prompt_regex: Arc<Regex>,
     awaiting_input: Mutex<bool>,
+    stdin_line_buf: Mutex<Vec<u8>>,
     processed_input_ids: Mutex<HashSet<String>>,
     pending_permission: Mutex<Option<PendingPermission>>,
 }
@@ -123,8 +124,7 @@ impl RunManager {
             })
             .context("openpty")?;
 
-        let spec = crate::runners::for_tool(&tool)
-            .build(&cmd, &resolved_cwd)?;
+        let spec = crate::runners::for_tool(&tool).build(&cmd, &resolved_cwd)?;
         let mut command: CommandBuilder = spec.command;
         command.env("RELAY_RUN_ID", &run_id);
         command.env("RELAY_TOOL", &tool);
@@ -147,6 +147,7 @@ impl RunManager {
             tool: tool.clone(),
             prompt_regex: spec.prompt_regex,
             awaiting_input: Mutex::new(false),
+            stdin_line_buf: Mutex::new(Vec::new()),
             processed_input_ids: Mutex::new(HashSet::new()),
             pending_permission: Mutex::new(None),
         });
@@ -325,6 +326,95 @@ impl RunManager {
         env.run_id = Some(run.run_id.clone());
         env.seq = Some(run.next_seq());
         let _ = self.events.send(env);
+
+        Ok(())
+    }
+
+    pub async fn write_stdin_bytes(
+        &self,
+        run_id: &str,
+        actor: &str,
+        bytes: &[u8],
+    ) -> anyhow::Result<()> {
+        let run = {
+            let runs = self.runs.read().await;
+            runs.get(run_id).cloned()
+        }
+        .context("unknown run_id")?;
+
+        {
+            let mut w = run.writer.lock().await;
+            w.write_all(bytes).context("write stdin")?;
+            w.flush().ok();
+        }
+
+        // Track per-line input so we can emit `run.input` to clear awaiting state in the server UI.
+        // We only emit on newline boundaries to avoid spamming events for every keypress.
+        let mut lines: Vec<Vec<u8>> = Vec::new();
+        {
+            let mut buf = run.stdin_line_buf.lock().await;
+            buf.extend_from_slice(bytes);
+            if buf.len() > 64 * 1024 {
+                // Safety valve: if a client never sends a newline, don't grow unbounded.
+                buf.drain(0..(buf.len().saturating_sub(64 * 1024)));
+            }
+
+            let mut start = 0usize;
+            let mut i = 0usize;
+            while i < buf.len() {
+                match buf[i] {
+                    b'\n' => {
+                        lines.push(buf[start..=i].to_vec());
+                        start = i + 1;
+                    }
+                    b'\r' => {
+                        if i + 1 < buf.len() && buf[i + 1] == b'\n' {
+                            lines.push(buf[start..=i + 1].to_vec());
+                            start = i + 2;
+                            i += 1;
+                        } else {
+                            lines.push(buf[start..=i].to_vec());
+                            start = i + 1;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+
+            if start > 0 {
+                buf.drain(0..start);
+            }
+        }
+
+        for line in lines {
+            let text = String::from_utf8_lossy(&line).to_string();
+
+            {
+                let mut awaiting = run.awaiting_input.lock().await;
+                *awaiting = false;
+            }
+            {
+                let mut pending = run.pending_permission.lock().await;
+                *pending = None;
+            }
+
+            let redacted = self.redactor.redact(&text);
+            let input_id = uuid::Uuid::new_v4().to_string();
+            let mut env = WsEnvelope::new(
+                "run.input",
+                json!({
+                    "actor": actor,
+                    "input_id": input_id,
+                    "text_redacted": redacted.text_redacted,
+                    "text_sha256": redacted.text_sha256
+                }),
+            );
+            env.host_id = Some(self.host_id.clone());
+            env.run_id = Some(run.run_id.clone());
+            env.seq = Some(run.next_seq());
+            let _ = self.events.send(env);
+        }
 
         Ok(())
     }

@@ -660,6 +660,7 @@
     outputSearchActive = "";
     outputSearchCursor = 0;
     await focusOutputSearch();
+    if (!outputByRun[runId]) void loadMessages(runId);
   }
 
   function tailLines(text: string, maxLines: number): string {
@@ -1291,6 +1292,25 @@
           if (!wantsMessages && !wantsSettings) return;
         }
 
+        // Coalesce consecutive output chunks to avoid growing `wsQueue` too fast on heavy streams.
+        if (msg.type === "run.output") {
+          const text = dataString(msg, "text") ?? "";
+          const last = wsQueue.length > 0 ? wsQueue[wsQueue.length - 1] : null;
+          if (
+            text &&
+            last &&
+            last.type === "run.output" &&
+            last.run_id &&
+            last.run_id === msg.run_id &&
+            isRecord(last.data) &&
+            typeof last.data["text"] === "string"
+          ) {
+            last.data["text"] = `${String(last.data["text"])}${text}`;
+            scheduleWsFlush();
+            return;
+          }
+        }
+
         wsQueue.push(msg);
         scheduleWsFlush();
       } catch {
@@ -1485,6 +1505,17 @@
         text: m.text,
       }));
       messagesByRun = { ...messagesByRun, [runId]: mapped };
+
+      // Populate output view from persisted messages (useful when opening a run after it started).
+      if (!outputByRun[runId]) {
+        const out = mapped
+          .filter((m) => m.kind === "run.output" && m.text)
+          // API returns newest-first; output wants oldest-first.
+          .map((m) => m.text)
+          .reverse()
+          .join("");
+        outputByRun = { ...outputByRun, [runId]: truncateTail(out, 200_000) };
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("loadMessages failed", msg);

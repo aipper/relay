@@ -1,21 +1,27 @@
 use anyhow::Context;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
+use hyper::body::{Body as HttpBody, Frame};
 use hyper::{Request, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use std::io::IsTerminal;
+use std::pin::Pin;
+use std::process::Command;
+use std::task::{Context as TaskContext, Poll};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
 
 fn usage() -> ! {
     eprintln!(
         r#"relay (packaged-friendly)
 
 Usage:
-  relay codex  [--sock /path/to/relay-hostd.sock] [--cmd "codex ..."] [--cwd /path/to/project]
-  relay claude [--sock /path/to/relay-hostd.sock] [--cmd "claude ..."] [--cwd /path/to/project]
-  relay iflow  [--sock /path/to/relay-hostd.sock] [--cmd "iflow ..."] [--cwd /path/to/project]
-  relay gemini [--sock /path/to/relay-hostd.sock] [--cmd "gemini ..."] [--cwd /path/to/project]
+  relay codex  [--sock /path/to/relay-hostd.sock] [--cmd "codex ..."] [--cwd /path/to/project] [--attach|--no-attach]
+  relay claude [--sock /path/to/relay-hostd.sock] [--cmd "claude ..."] [--cwd /path/to/project] [--attach|--no-attach]
+  relay iflow  [--sock /path/to/relay-hostd.sock] [--cmd "iflow ..."] [--cwd /path/to/project] [--attach|--no-attach]
+  relay gemini [--sock /path/to/relay-hostd.sock] [--cmd "gemini ..."] [--cwd /path/to/project] [--attach|--no-attach]
 
   relay mcp [--root /path/to/project]
 
@@ -23,10 +29,15 @@ Notes:
   - If --cmd is omitted, it defaults to the subcommand name (e.g. `codex`).
   - If --cwd is omitted, it defaults to the current working directory.
   - If --sock is omitted, it tries RELAY_HOSTD_SOCK, ~/.relay/relay-hostd.sock, then ~/.relay/daemon.state.json.
+  - In a terminal (TTY), `relay <tool>` attaches by default (proxies stdin/stdout). Use `--no-attach` to only print the run id.
   - `--cmd` supports simple argv forms (e.g. `codex --help`). For shell pipelines/quotes, prefer using hostd directly.
 "#
     );
     std::process::exit(2);
+}
+
+fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|a| a == flag)
 }
 
 fn get_arg(args: &[String], flag: &str) -> Option<String> {
@@ -219,6 +230,171 @@ async fn pick_sock(sock_arg: Option<String>) -> anyhow::Result<String> {
     ))
 }
 
+struct SttyGuard {
+    enabled: bool,
+}
+
+impl SttyGuard {
+    fn enable_raw_noecho() -> anyhow::Result<Self> {
+        if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+            return Ok(Self { enabled: false });
+        }
+        let ok = Command::new("stty")
+            .args(["raw", "-echo"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        anyhow::ensure!(ok, "failed to set terminal raw mode via `stty`");
+        Ok(Self { enabled: true })
+    }
+}
+
+impl Drop for SttyGuard {
+    fn drop(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        let _ = Command::new("stty").arg("sane").status();
+    }
+}
+
+struct MpscBody {
+    rx: mpsc::Receiver<Bytes>,
+}
+
+impl HttpBody for MpscBody {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        match Pin::new(&mut self.rx).poll_recv(cx) {
+            Poll::Ready(Some(chunk)) => Poll::Ready(Some(Ok(Frame::data(chunk)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+async fn attach_tty(sock_path: &str, run_id: &str) -> anyhow::Result<()> {
+    // Best-effort interactive proxy: disable local echo and forward bytes to hostd while
+    // streaming PTY output back to stdout.
+    let _stty = SttyGuard::enable_raw_noecho().ok();
+
+    let (tx, rx) = mpsc::channel::<Bytes>(1024);
+
+    // stdin -> hostd (streaming POST)
+    let sock_for_stdin = sock_path.to_string();
+    let run_for_stdin = run_id.to_string();
+    let stdin_task = tokio::spawn(async move {
+        let stream = tokio::net::UnixStream::connect(&sock_for_stdin)
+            .await
+            .with_context(|| format!("connect unix socket: {sock_for_stdin}"))?;
+        let io = TokioIo::new(stream);
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+            .await
+            .context("http1 handshake (stdin)")?;
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "http://localhost/runs/{}/stdin",
+                percent_encode_query_value(&run_for_stdin)
+            ))
+            .header("content-type", "application/octet-stream")
+            .body(MpscBody { rx })
+            .context("build stdin request")?;
+
+        let resp = sender
+            .send_request(req)
+            .await
+            .context("send stdin request")?;
+        let status = resp.status();
+        let _ = resp.into_body().collect().await;
+        if status != StatusCode::NO_CONTENT && status != StatusCode::OK {
+            return Err(anyhow::anyhow!("stdin stream failed: {status}"));
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+
+    // Read from local stdin and forward to the body stream.
+    let tx_reader = tx.clone();
+    let reader_task = tokio::spawn(async move {
+        let mut stdin = tokio::io::stdin();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = stdin.read(&mut buf).await.context("read stdin")?;
+            if n == 0 {
+                break;
+            }
+            if tx_reader
+                .send(Bytes::copy_from_slice(&buf[..n]))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+    drop(tx);
+
+    // hostd -> stdout (streaming GET)
+    let stream = tokio::net::UnixStream::connect(sock_path)
+        .await
+        .with_context(|| format!("connect unix socket: {sock_path}"))?;
+    let io = TokioIo::new(stream);
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+        .await
+        .context("http1 handshake (stdout)")?;
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "http://localhost/runs/{}/stdout",
+            percent_encode_query_value(run_id)
+        ))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::new()))
+        .context("build stdout request")?;
+    let resp = sender
+        .send_request(req)
+        .await
+        .context("send stdout request")?;
+    if resp.status() != StatusCode::OK {
+        let status = resp.status();
+        let body = resp.into_body().collect().await.map(|b| b.to_bytes()).ok();
+        let body = body
+            .map(|b| String::from_utf8_lossy(&b).to_string())
+            .unwrap_or_default();
+        return Err(anyhow::anyhow!("stdout stream failed: {status} {body}"));
+    }
+
+    let mut body = resp.into_body();
+    let mut stdout = tokio::io::stdout();
+    while let Some(frame) = body.frame().await {
+        let frame = frame.context("read stdout frame")?;
+        if let Ok(data) = frame.into_data() {
+            stdout.write_all(data.as_ref()).await?;
+            stdout.flush().await?;
+        }
+    }
+
+    // Stop stdin forwarding and wait for the POST to finish.
+    reader_task.abort();
+    let _ = stdin_task.await;
+
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct JsonRpcReq {
     id: Option<JsonValue>,
@@ -366,7 +542,10 @@ mod tests {
         assert_eq!(normalize_mcp_tool_name("relay.fs_read"), "fs_read");
         assert_eq!(normalize_mcp_tool_name("mcp__relay__fs_read"), "fs_read");
         assert_eq!(normalize_mcp_tool_name("mcp__relay__bash"), "bash");
-        assert_eq!(normalize_mcp_tool_name("   mcp__relay__git_status  "), "git_status");
+        assert_eq!(
+            normalize_mcp_tool_name("   mcp__relay__git_status  "),
+            "git_status"
+        );
     }
 }
 
@@ -1096,6 +1275,14 @@ async fn main() -> anyhow::Result<()> {
         });
     let cmdline = get_arg(&args, "--cmd").unwrap_or_else(|| tool.to_string());
 
+    let attach = if has_flag(&args, "--no-attach") {
+        false
+    } else if has_flag(&args, "--attach") {
+        true
+    } else {
+        std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+    };
+
     let req = StartRunRequest {
         tool: tool.to_string(),
         cmd: cmdline.trim().to_string(),
@@ -1108,6 +1295,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let parsed: StartRunResponse = serde_json::from_str(&body).context("decode response json")?;
-    println!("{}", parsed.run_id);
+    if !attach {
+        println!("{}", parsed.run_id);
+        return Ok(());
+    }
+
+    eprintln!("run_id={}", parsed.run_id);
+    attach_tty(&sock, &parsed.run_id).await?;
     Ok(())
 }
