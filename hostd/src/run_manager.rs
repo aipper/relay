@@ -130,6 +130,12 @@ impl RunManager {
         command.env("RELAY_TOOL", &tool);
         command.env("RELAY_HOSTD_SOCK", &self.local_unix_socket);
         command.env("RELAY_CWD", &resolved_cwd);
+        if std::env::var_os("TERM").is_none() {
+            command.env("TERM", "xterm-256color");
+        }
+        if std::env::var_os("COLORTERM").is_none() {
+            command.env("COLORTERM", "truecolor");
+        }
 
         let mut child = pair.slave.spawn_command(command).context("spawn_command")?;
 

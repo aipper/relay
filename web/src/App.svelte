@@ -190,6 +190,8 @@
   let outputFeedEl: HTMLDivElement | null = null;
   let outputSearchInputEl: HTMLInputElement | null = null;
   let outputScrollScheduled = false;
+  let outputPausedPending = "";
+  let outputPausedPendingChars = 0;
 
   let outputSearchText = "";
   let outputSearchActive = "";
@@ -206,7 +208,6 @@
 
   let toastText = "";
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
-  let outputAutoResumeTimer: ReturnType<typeof setTimeout> | null = null;
 
   let startHostId = "host-dev";
   let startTool = "codex";
@@ -460,6 +461,7 @@
     let selectedOutput = selectedId ? outputByRun[selectedId] ?? "" : "";
     let outputChanged = false;
     const pendingOutputChunks: string[] = [];
+    const pendingPausedChunks: string[] = [];
 
     const newEvents: WsEnvelope[] = [];
     const newMessages: ChatMessage[] = [];
@@ -504,8 +506,12 @@
       if (msg.run_id && msg.type === "run.output" && msg.run_id === selectedId) {
         const text = sanitizeTerminalOutput(dataString(msg, "text") ?? "");
         if (text) {
-          pendingOutputChunks.push(text);
-          outputChanged = true;
+          if (outputAutoScroll) {
+            pendingOutputChunks.push(text);
+            outputChanged = true;
+          } else {
+            pendingPausedChunks.push(text);
+          }
         }
       }
 
@@ -641,9 +647,16 @@
 
     if (outputChanged && selectedId) {
       const append = pendingOutputChunks.length > 0 ? pendingOutputChunks.join("") : "";
-      if (append) selectedOutput = truncateTail(selectedOutput + append, 200_000);
+      if (append) selectedOutput = truncateTail(applyTerminalEdits(selectedOutput, append), 200_000);
       nextOutputByRun = { ...nextOutputByRun, [selectedId]: selectedOutput };
       outputByRun = nextOutputByRun;
+    }
+    if (pendingPausedChunks.length > 0 && selectedId) {
+      const append = pendingPausedChunks.join("");
+      if (append) {
+        outputPausedPending = truncateTail(applyTerminalEdits(outputPausedPending, append), 200_000);
+        outputPausedPendingChars = Math.min(2_000_000_000, outputPausedPendingChars + append.length);
+      }
     }
     if (awaitingChanged) awaitingByRun = nextAwaiting;
     if (runsChanged) runs = nextRuns;
@@ -678,6 +691,8 @@
     selectedRunId = runId;
     sessionDetailTab = "output";
     outputAutoScroll = true;
+    outputPausedPending = "";
+    outputPausedPendingChars = 0;
     outputSearchText = "";
     outputSearchActive = "";
     outputSearchCursor = 0;
@@ -727,24 +742,17 @@
     return el.scrollTop + el.clientHeight >= el.scrollHeight - threshold;
   }
 
-  function scheduleOutputAutoResume() {
-    if (outputAutoResumeTimer) clearTimeout(outputAutoResumeTimer);
-    outputAutoResumeTimer = setTimeout(async () => {
-      outputAutoScroll = true;
-      await tick();
-      if (outputFeedEl) {
-        outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
-        outputIsAtBottom = true;
-      }
-    }, 10_000);
-  }
-
   async function resumeOutputAutoScroll() {
-    outputAutoScroll = true;
-    if (outputAutoResumeTimer) {
-      clearTimeout(outputAutoResumeTimer);
-      outputAutoResumeTimer = null;
+    const runId = selectedRunId;
+    if (runId && outputPausedPending) {
+      const maxChars = 200_000;
+      const base = outputByRun[runId] ?? "";
+      const merged = truncateTail(applyTerminalEdits(base, outputPausedPending), maxChars);
+      outputByRun = { ...outputByRun, [runId]: merged };
+      outputPausedPending = "";
+      outputPausedPendingChars = 0;
     }
+    outputAutoScroll = true;
     await tick();
     if (outputFeedEl) {
       outputFeedEl.scrollTop = outputFeedEl.scrollHeight;
@@ -754,7 +762,6 @@
 
   function pauseOutputAutoScroll() {
     outputAutoScroll = false;
-    scheduleOutputAutoResume();
   }
 
   function handleOutputScroll() {
@@ -763,9 +770,6 @@
     outputIsAtBottom = atBottom;
     if (!atBottom) {
       if (outputAutoScroll) pauseOutputAutoScroll();
-      else scheduleOutputAutoResume();
-    } else if (!outputAutoScroll) {
-      scheduleOutputAutoResume();
     }
   }
 
@@ -1149,8 +1153,8 @@
     // Fast-path: most output is plain text.
     if (!s0.includes("\x1b") && !s0.includes("\r")) return s0;
 
-    // Normalize newlines first (many TUIs use \r without \n).
-    let s = s0.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    // Keep carriage returns: we apply CR semantics when merging into the output buffer.
+    let s = s0.replace(/\r\n/g, "\n");
 
     if (s.includes("\x1b")) {
       // CSI: ESC [ ... <final>
@@ -1163,9 +1167,37 @@
       s = s.replace(/\x1b[@-Z\\-_]/g, "");
     }
 
-    // Strip remaining control chars (keep \n and \t).
-    s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    // Strip remaining control chars (keep \n, \r, \t, and \b).
+    s = s.replace(/[\x00-\x07\x0B\x0C\x0E-\x1F\x7F]/g, "");
     return s;
+  }
+
+  function applyTerminalEdits(existing: string, chunk: string): string {
+    if (!chunk) return existing;
+
+    // Fast-path: append-only.
+    if (!chunk.includes("\r") && !chunk.includes("\b")) return `${existing}${chunk}`;
+
+    let out = existing;
+    let lineStart = out.lastIndexOf("\n") + 1;
+    for (let i = 0; i < chunk.length; i++) {
+      const ch = chunk[i]!;
+      if (ch === "\n") {
+        out += "\n";
+        lineStart = out.length;
+        continue;
+      }
+      if (ch === "\r") {
+        out = out.slice(0, lineStart);
+        continue;
+      }
+      if (ch === "\b") {
+        if (out.length > lineStart) out = out.slice(0, out.length - 1);
+        continue;
+      }
+      out += ch;
+    }
+    return out;
   }
 
   function dataString(e: WsEnvelope, key: string): string | undefined {
@@ -1577,7 +1609,12 @@
           total += m.text.length;
           if (total >= maxChars) break;
         }
-        const out = partsRev.reverse().join("");
+        const parts = partsRev.reverse();
+        let out = "";
+        for (const p of parts) {
+          out = applyTerminalEdits(out, p);
+          if (out.length > maxChars * 2) out = truncateTail(out, maxChars);
+        }
         outputByRun = { ...outputByRun, [runId]: truncateTail(out, maxChars) };
       }
     } catch (e) {
@@ -2078,7 +2115,6 @@
     window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("resize", onResize);
-      if (outputAutoResumeTimer) clearTimeout(outputAutoResumeTimer);
       if (toastTimer) clearTimeout(toastTimer);
       if (todoSuggestionsTimer) clearTimeout(todoSuggestionsTimer);
     };
