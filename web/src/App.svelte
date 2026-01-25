@@ -57,6 +57,7 @@
   };
 
   const DEFAULT_SESSION_LIMIT = 200;
+  const WS_BATCH_BUDGET_MS = 10;
 
   const browserOrigin =
     typeof window !== "undefined" && typeof window.location?.origin === "string" ? window.location.origin : "";
@@ -117,6 +118,9 @@
   let ws: WebSocket | null = null;
   let messagesByRun: Record<string, ChatMessage[]> = {};
   let isMobile = false;
+  let wsQueue: WsEnvelope[] = [];
+  let wsQueuePos = 0;
+  let wsFlushScheduled = false;
 
   let selectedRunId = "";
   let inputModalOpen = false;
@@ -409,6 +413,235 @@
     persistHostGroupCollapsed();
   }
 
+  function scheduleWsFlush() {
+    if (wsFlushScheduled) return;
+    wsFlushScheduled = true;
+    requestAnimationFrame(flushWsQueue);
+  }
+
+  function flushWsQueue() {
+    wsFlushScheduled = false;
+    if (wsQueue.length === 0) {
+      wsQueuePos = 0;
+      return;
+    }
+
+    const started = performance.now();
+
+    const shouldCaptureEvents = token && view === "settings";
+    const shouldAppendMessages = token && view === "sessions" && sessionDetailTab === "messages" && Boolean(selectedRunId);
+    const selectedId = selectedRunId;
+
+    let nextRuns = runs;
+    let nextRunsIndex: Map<string, number> | null = null;
+    let runsChanged = false;
+
+    let nextAwaiting = awaitingByRun;
+    let awaitingChanged = false;
+
+    let nextOutputByRun = outputByRun;
+    let selectedOutput = selectedId ? outputByRun[selectedId] ?? "" : "";
+    let outputChanged = false;
+
+    const newEvents: WsEnvelope[] = [];
+    const newMessages: ChatMessage[] = [];
+
+    const ensureRunsIndex = () => {
+      if (nextRunsIndex) return nextRunsIndex;
+      nextRunsIndex = new Map<string, number>();
+      for (let i = 0; i < nextRuns.length; i++) {
+        const r = nextRuns[i];
+        if (r?.id) nextRunsIndex.set(r.id, i);
+      }
+      return nextRunsIndex;
+    };
+
+    const upsertRun = (runId: string, updater: (cur: RunRow) => RunRow) => {
+      const idx = ensureRunsIndex().get(runId);
+      if (idx === undefined) return;
+      if (!runsChanged) {
+        nextRuns = [...nextRuns];
+        runsChanged = true;
+      }
+      nextRuns[idx] = updater(nextRuns[idx]!);
+    };
+
+    while (wsQueuePos < wsQueue.length) {
+      const msg = wsQueue[wsQueuePos]!;
+      wsQueuePos++;
+
+      if (shouldCaptureEvents) newEvents.push(msg);
+
+      if (msg.type === "rpc.response") {
+        const reqId = dataString(msg, "request_id");
+        if (reqId) {
+          const cb = pendingRpc.get(reqId);
+          if (cb) {
+            pendingRpc.delete(reqId);
+            cb(msg);
+          }
+        }
+      }
+
+      if (msg.run_id && msg.type === "run.output" && msg.run_id === selectedId) {
+        const text = dataString(msg, "text") ?? "";
+        selectedOutput = truncateTail(selectedOutput + text, 200_000);
+        outputChanged = true;
+      }
+
+      if (msg.run_id && msg.type === "run.awaiting_input") {
+        const reqId = dataString(msg, "request_id");
+        if (!awaitingChanged) {
+          nextAwaiting = { ...nextAwaiting };
+          awaitingChanged = true;
+        }
+        nextAwaiting[msg.run_id] = {
+          reason: dataString(msg, "reason"),
+          prompt: dataString(msg, "prompt"),
+          request_id: reqId,
+          approve_text: dataString(msg, "approve_text"),
+          deny_text: dataString(msg, "deny_text"),
+        };
+      }
+      if (msg.run_id && msg.type === "run.permission_requested") {
+        if (!awaitingChanged) {
+          nextAwaiting = { ...nextAwaiting };
+          awaitingChanged = true;
+        }
+        nextAwaiting[msg.run_id] = {
+          reason: dataString(msg, "reason"),
+          prompt: dataString(msg, "prompt"),
+          request_id: dataString(msg, "request_id"),
+          op_tool: dataString(msg, "op_tool"),
+          op_args: dataAny(msg, "op_args"),
+          op_args_summary: dataString(msg, "op_args_summary"),
+          approve_text: dataString(msg, "approve_text"),
+          deny_text: dataString(msg, "deny_text"),
+        };
+      }
+      if (msg.run_id && msg.type === "run.input") {
+        if (!awaitingChanged) {
+          nextAwaiting = { ...nextAwaiting };
+          awaitingChanged = true;
+        }
+        nextAwaiting[msg.run_id] = undefined;
+      }
+      if (msg.run_id && msg.type === "run.exited") {
+        if (!awaitingChanged) {
+          nextAwaiting = { ...nextAwaiting };
+          awaitingChanged = true;
+        }
+        nextAwaiting[msg.run_id] = undefined;
+      }
+
+      // Best-effort run status updates (skip high-volume events to keep UI responsive).
+      if (msg.run_id) {
+        const hasReqId = dataString(msg, "request_id");
+        const last_active_at = msg.ts;
+
+        if (msg.type === "run.started") {
+          const idx = ensureRunsIndex().get(msg.run_id);
+          if (idx === undefined) {
+            if (!runsChanged) {
+              nextRuns = [...nextRuns];
+              runsChanged = true;
+            }
+            nextRuns.unshift({
+              id: msg.run_id,
+              host_id: msg.host_id ?? "unknown",
+              tool: dataString(msg, "tool") ?? "unknown",
+              cwd: dataString(msg, "cwd") ?? ".",
+              status: "running",
+              started_at: msg.ts,
+              last_active_at: msg.ts,
+            });
+            nextRunsIndex = null;
+          } else {
+            upsertRun(msg.run_id, (cur) => ({
+              ...cur,
+              host_id: msg.host_id ?? cur.host_id,
+              tool: dataString(msg, "tool") ?? cur.tool,
+              cwd: dataString(msg, "cwd") ?? cur.cwd,
+              status: "running",
+              started_at: msg.ts,
+              last_active_at,
+              ended_at: null,
+              exit_code: null,
+            }));
+          }
+        } else if (msg.type === "run.permission_requested") {
+          upsertRun(msg.run_id, (cur) => ({
+            ...cur,
+            last_active_at,
+            status: "awaiting_approval",
+            pending_request_id: dataString(msg, "request_id"),
+            pending_reason: dataString(msg, "reason"),
+            pending_prompt: dataString(msg, "prompt"),
+            pending_op_tool: dataString(msg, "op_tool"),
+            pending_op_args_summary: dataString(msg, "op_args_summary"),
+          }));
+        } else if (msg.type === "run.awaiting_input") {
+          upsertRun(msg.run_id, (cur) => ({ ...cur, last_active_at, status: hasReqId ? "awaiting_approval" : "awaiting_input" }));
+        } else if (msg.type === "run.input") {
+          upsertRun(msg.run_id, (cur) => ({
+            ...cur,
+            last_active_at,
+            status: "running",
+            pending_request_id: null,
+            pending_reason: null,
+            pending_prompt: null,
+            pending_op_tool: null,
+            pending_op_args_summary: null,
+          }));
+        } else if (msg.type === "run.exited") {
+          const exit_code =
+            isRecord(msg.data) && typeof msg.data["exit_code"] === "number" ? msg.data["exit_code"] : undefined;
+          upsertRun(msg.run_id, (cur) => ({
+            ...cur,
+            last_active_at,
+            status: "exited",
+            ended_at: msg.ts,
+            exit_code: typeof exit_code === "number" ? exit_code : cur.exit_code,
+            pending_request_id: null,
+            pending_reason: null,
+            pending_prompt: null,
+            pending_op_tool: null,
+            pending_op_args_summary: null,
+          }));
+        }
+      }
+
+      if (shouldAppendMessages && msg.run_id && msg.run_id === selectedId) {
+        const m = envToMessage(msg);
+        if (m) newMessages.push(m);
+      }
+
+      if (performance.now() - started > WS_BATCH_BUDGET_MS) break;
+    }
+
+    if (outputChanged && selectedId) {
+      nextOutputByRun = { ...nextOutputByRun, [selectedId]: selectedOutput };
+      outputByRun = nextOutputByRun;
+    }
+    if (awaitingChanged) awaitingByRun = nextAwaiting;
+    if (runsChanged) runs = nextRuns;
+    if (shouldCaptureEvents && newEvents.length > 0) {
+      events = [...newEvents.reverse(), ...events].slice(0, 500);
+    }
+    if (newMessages.length > 0 && selectedId) {
+      const existing = messagesByRun[selectedId] ?? [];
+      messagesByRun = { ...messagesByRun, [selectedId]: truncateHead([...existing, ...newMessages], 1000) };
+    }
+
+    if (wsQueuePos >= wsQueue.length) {
+      wsQueue = [];
+      wsQueuePos = 0;
+      return;
+    }
+
+    scheduleWsFlush();
+  }
+
   async function focusOutputSearch() {
     await tick();
     updateOutputBufferLines();
@@ -426,7 +659,6 @@
     outputSearchText = "";
     outputSearchActive = "";
     outputSearchCursor = 0;
-    await loadMessages(runId);
     await focusOutputSearch();
   }
 
@@ -1030,128 +1262,8 @@
     nextWs.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data) as WsEnvelope;
-        events = [msg, ...events].slice(0, 2000);
-        if (msg.type === "rpc.response") {
-          const reqId = dataString(msg, "request_id");
-          if (reqId) {
-            const cb = pendingRpc.get(reqId);
-            if (cb) {
-              pendingRpc.delete(reqId);
-              cb(msg);
-            }
-          }
-        }
-        if (msg.run_id && msg.type === "run.output") {
-          const text = dataString(msg, "text") ?? "";
-          const existing = outputByRun[msg.run_id] ?? "";
-          outputByRun = { ...outputByRun, [msg.run_id]: truncateTail(existing + text, 200_000) };
-        }
-        if (msg.run_id && msg.type === "run.awaiting_input") {
-          const reqId = dataString(msg, "request_id");
-          awaitingByRun = {
-            ...awaitingByRun,
-            [msg.run_id]: {
-              reason: dataString(msg, "reason"),
-              prompt: dataString(msg, "prompt"),
-              request_id: reqId,
-              approve_text: dataString(msg, "approve_text"),
-              deny_text: dataString(msg, "deny_text"),
-            },
-          };
-        }
-        if (msg.run_id && msg.type === "run.permission_requested") {
-          awaitingByRun = {
-            ...awaitingByRun,
-            [msg.run_id]: {
-              reason: dataString(msg, "reason"),
-              prompt: dataString(msg, "prompt"),
-              request_id: dataString(msg, "request_id"),
-              op_tool: dataString(msg, "op_tool"),
-              op_args: dataAny(msg, "op_args"),
-              op_args_summary: dataString(msg, "op_args_summary"),
-              approve_text: dataString(msg, "approve_text"),
-              deny_text: dataString(msg, "deny_text"),
-            },
-          };
-        }
-        if (msg.run_id && msg.type === "run.input") {
-          awaitingByRun = { ...awaitingByRun, [msg.run_id]: undefined };
-        }
-        if (msg.run_id && msg.type === "run.exited") {
-          awaitingByRun = { ...awaitingByRun, [msg.run_id]: undefined };
-        }
-
-        const m = envToMessage(msg);
-        if (m && msg.run_id) appendMessage(msg.run_id, m);
-
-        // Best-effort local run status updates.
-        if (msg.run_id) {
-          const i = runs.findIndex((x) => x.id === msg.run_id);
-          const last_active_at = msg.ts;
-          const hasReqId = dataString(msg, "request_id");
-
-          if (i === -1 && msg.type === "run.started") {
-            runs = [
-              {
-                id: msg.run_id,
-                host_id: msg.host_id ?? "unknown",
-                tool: dataString(msg, "tool") ?? "unknown",
-                cwd: dataString(msg, "cwd") ?? ".",
-                status: "running",
-                started_at: msg.ts,
-                last_active_at: msg.ts,
-              },
-              ...runs,
-            ];
-            return;
-          }
-
-          if (i !== -1) {
-            const base: RunRow = { ...runs[i], last_active_at };
-            if (msg.type === "run.permission_requested") {
-              runs[i] = {
-                ...base,
-                status: "awaiting_approval",
-                pending_request_id: dataString(msg, "request_id"),
-                pending_reason: dataString(msg, "reason"),
-                pending_prompt: dataString(msg, "prompt"),
-                pending_op_tool: dataString(msg, "op_tool"),
-                pending_op_args_summary: dataString(msg, "op_args_summary"),
-              };
-            } else if (msg.type === "run.awaiting_input") {
-              runs[i] = { ...base, status: hasReqId ? "awaiting_approval" : "awaiting_input" };
-            } else if (msg.type === "run.input") {
-              runs[i] = {
-                ...base,
-                status: "running",
-                pending_request_id: null,
-                pending_reason: null,
-                pending_prompt: null,
-                pending_op_tool: null,
-                pending_op_args_summary: null,
-              };
-            } else if (msg.type === "run.exited") {
-              const exit_code =
-                isRecord(msg.data) && typeof msg.data["exit_code"] === "number" ? msg.data["exit_code"] : base.exit_code;
-              runs[i] = {
-                ...base,
-                status: "exited",
-                ended_at: msg.ts,
-                exit_code,
-                pending_request_id: null,
-                pending_reason: null,
-                pending_prompt: null,
-                pending_op_tool: null,
-                pending_op_args_summary: null,
-              };
-            } else if (msg.type === "run.started") {
-              runs[i] = { ...base, status: "running", started_at: msg.ts, ended_at: null, exit_code: null };
-            } else if (msg.type === "run.output" || msg.type === "tool.call" || msg.type === "tool.result") {
-              runs[i] = base;
-            }
-            runs = [...runs];
-          }
-        }
+        wsQueue.push(msg);
+        scheduleWsFlush();
       } catch {
         // ignore
       }
@@ -1194,11 +1306,8 @@
       persistServerPrefs();
       persistAuthPrefs();
 
-      await Promise.all([refreshHosts(), refreshRuns()]);
-      if (!token) return;
-
       openAppWebSocket(token);
-      if (selectedRunId) void loadMessages(selectedRunId);
+      void Promise.all([refreshHosts(), refreshRuns()]);
     } catch (e) {
       lastError = `${e instanceof Error ? e.message : String(e)}\nserver=${apiBaseUrl}`.trim();
       status = "error";
@@ -1220,11 +1329,8 @@
       health = (await h.json()) as Health;
       view = "sessions";
 
-      await Promise.all([refreshHosts(), refreshRuns()]);
-      if (!token) return;
-
       openAppWebSocket(savedToken);
-      if (selectedRunId) void loadMessages(selectedRunId);
+      void Promise.all([refreshHosts(), refreshRuns()]);
     } catch (e) {
       lastError = `${e instanceof Error ? e.message : String(e)}\nserver=${apiBaseUrl}`.trim();
       status = "error";
@@ -1282,7 +1388,7 @@
     }
     if (r.ok) {
       runs = (await r.json()) as RunRow[];
-      if (!selectedRunId && runs.length > 0) selectedRunId = runs[0].id;
+      if (selectedRunId && !runs.some((x) => x.id === selectedRunId)) selectedRunId = "";
     } else {
       runs = [];
     }
@@ -2121,7 +2227,16 @@
         >
           输出
         </button>
-        <button class:active={sessionDetailTab === "messages"} role="tab" on:click={() => (sessionDetailTab = "messages")}>消息</button>
+        <button
+          class:active={sessionDetailTab === "messages"}
+          role="tab"
+          on:click={() => {
+            sessionDetailTab = "messages";
+            if (selectedRunId) void loadMessages(selectedRunId);
+          }}
+        >
+          消息
+        </button>
         <button on:click={() => selectedRunId && loadMessages(selectedRunId)} disabled={!selectedRunId || !token} style="margin-left:auto">
           刷新
         </button>
@@ -2470,7 +2585,8 @@
     {/if}
   </section>
 
-  <section class:hidden={!token || view !== "settings"}>
+  {#if token && view === "settings"}
+  <section>
     <h2>事件</h2>
     <pre>{JSON.stringify(events[0] ?? null, null, 2)}</pre>
     <ul>
@@ -2484,6 +2600,7 @@
       {/each}
     </ul>
   </section>
+  {/if}
 
   {#if inputModalOpen}
     <div class="modal-overlay" role="dialog" aria-modal="true">
