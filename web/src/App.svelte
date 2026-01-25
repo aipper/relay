@@ -192,6 +192,11 @@
   let outputScrollScheduled = false;
   let outputPausedPending = "";
   let outputPausedPendingChars = 0;
+  let outputPausedPendingMode: "log" | "tui" = "log";
+  let outputModeByRun: Record<string, "log" | "tui"> = {};
+  let selectedOutputMode: "log" | "tui" = "log";
+  let outputTuiRunId = "";
+  let outputTuiState: TerminalState | null = null;
 
   let outputSearchText = "";
   let outputSearchActive = "";
@@ -462,6 +467,19 @@
     let outputChanged = false;
     const pendingOutputChunks: string[] = [];
     const pendingPausedChunks: string[] = [];
+    const pendingPausedTuiChunks: string[] = [];
+
+    let nextOutputModeByRun = outputModeByRun;
+    let outputModeChanged = false;
+    let selectedMode: "log" | "tui" = selectedId ? nextOutputModeByRun[selectedId] ?? "log" : "log";
+
+    let tuiState = outputTuiState;
+    let tuiRunId = outputTuiRunId;
+    let tuiChanged = false;
+    if (selectedId && selectedMode === "tui" && tuiRunId !== selectedId) {
+      tuiState = newTerminalState();
+      tuiRunId = selectedId;
+    }
 
     const newEvents: WsEnvelope[] = [];
     const newMessages: ChatMessage[] = [];
@@ -504,13 +522,42 @@
       }
 
       if (msg.run_id && msg.type === "run.output" && msg.run_id === selectedId) {
-        const text = sanitizeTerminalOutput(dataString(msg, "text") ?? "");
-        if (text) {
-          if (outputAutoScroll) {
-            pendingOutputChunks.push(text);
-            outputChanged = true;
+        const raw = dataString(msg, "text") ?? "";
+        if (raw) {
+          // Auto-detect: if we see cursor movement / clear-screen ANSI, switch to TUI snapshot mode.
+          if (selectedId && selectedMode === "log" && looksLikeTuiAnsi(raw)) {
+            if (!outputModeChanged) {
+              nextOutputModeByRun = { ...nextOutputModeByRun };
+              outputModeChanged = true;
+            }
+            nextOutputModeByRun[selectedId] = "tui";
+            selectedMode = "tui";
+            tuiState = newTerminalState();
+            tuiRunId = selectedId;
+            selectedOutput = "";
+          }
+
+          if (selectedMode === "tui") {
+            if (outputAutoScroll) {
+              if (!tuiState || tuiRunId !== selectedId) {
+                tuiState = newTerminalState();
+                tuiRunId = selectedId;
+              }
+              termWrite(tuiState, raw);
+              tuiChanged = true;
+            } else {
+              pendingPausedTuiChunks.push(raw);
+            }
           } else {
-            pendingPausedChunks.push(text);
+            const text = sanitizeTerminalOutput(raw);
+            if (text) {
+              if (outputAutoScroll) {
+                pendingOutputChunks.push(text);
+                outputChanged = true;
+              } else {
+                pendingPausedChunks.push(text);
+              }
+            }
           }
         }
       }
@@ -566,6 +613,25 @@
         const last_active_at = msg.ts;
 
         if (msg.type === "run.started") {
+          const tool = dataString(msg, "tool") ?? "unknown";
+          const isLikelyTuiTool = tool === "codex" || tool === "claude" || tool === "iflow" || tool === "gemini";
+          const mode: "log" | "tui" = isLikelyTuiTool ? "tui" : "log";
+          if (nextOutputModeByRun[msg.run_id] !== mode) {
+            if (!outputModeChanged) {
+              nextOutputModeByRun = { ...nextOutputModeByRun };
+              outputModeChanged = true;
+            }
+            nextOutputModeByRun[msg.run_id] = mode;
+            if (msg.run_id === selectedId) {
+              selectedMode = mode;
+              if (mode === "tui") {
+                tuiState = newTerminalState();
+                tuiRunId = selectedId;
+                selectedOutput = "";
+              }
+            }
+          }
+
           const idx = ensureRunsIndex().get(msg.run_id);
           if (idx === undefined) {
             if (!runsChanged) {
@@ -575,7 +641,7 @@
             nextRuns.unshift({
               id: msg.run_id,
               host_id: msg.host_id ?? "unknown",
-              tool: dataString(msg, "tool") ?? "unknown",
+              tool,
               cwd: dataString(msg, "cwd") ?? ".",
               status: "running",
               started_at: msg.ts,
@@ -586,7 +652,7 @@
             upsertRun(msg.run_id, (cur) => ({
               ...cur,
               host_id: msg.host_id ?? cur.host_id,
-              tool: dataString(msg, "tool") ?? cur.tool,
+              tool,
               cwd: dataString(msg, "cwd") ?? cur.cwd,
               status: "running",
               started_at: msg.ts,
@@ -645,19 +711,40 @@
       if (performance.now() - started > WS_BATCH_BUDGET_MS) break;
     }
 
-    if (outputChanged && selectedId) {
-      const append = pendingOutputChunks.length > 0 ? pendingOutputChunks.join("") : "";
-      if (append) selectedOutput = truncateTail(applyTerminalEdits(selectedOutput, append), 200_000);
-      nextOutputByRun = { ...nextOutputByRun, [selectedId]: selectedOutput };
-      outputByRun = nextOutputByRun;
-    }
-    if (pendingPausedChunks.length > 0 && selectedId) {
-      const append = pendingPausedChunks.join("");
-      if (append) {
-        outputPausedPending = truncateTail(applyTerminalEdits(outputPausedPending, append), 200_000);
-        outputPausedPendingChars = Math.min(2_000_000_000, outputPausedPendingChars + append.length);
+    if (selectedId && selectedMode === "tui") {
+      if (tuiState && tuiRunId === selectedId && tuiChanged) {
+        nextOutputByRun = { ...nextOutputByRun, [selectedId]: termToString(tuiState) };
+        outputByRun = nextOutputByRun;
+      }
+      if (pendingPausedTuiChunks.length > 0) {
+        const append = pendingPausedTuiChunks.join("");
+        if (append) {
+          outputPausedPendingMode = "tui";
+          outputPausedPending = truncateTail(outputPausedPending + append, 400_000);
+          outputPausedPendingChars = Math.min(2_000_000_000, outputPausedPendingChars + append.length);
+        }
+      }
+      if (tuiState && tuiRunId === selectedId) {
+        outputTuiState = tuiState;
+        outputTuiRunId = tuiRunId;
+      }
+    } else {
+      if (outputChanged && selectedId) {
+        const append = pendingOutputChunks.length > 0 ? pendingOutputChunks.join("") : "";
+        if (append) selectedOutput = truncateTail(applyTerminalEdits(selectedOutput, append), 200_000);
+        nextOutputByRun = { ...nextOutputByRun, [selectedId]: selectedOutput };
+        outputByRun = nextOutputByRun;
+      }
+      if (pendingPausedChunks.length > 0 && selectedId) {
+        const append = pendingPausedChunks.join("");
+        if (append) {
+          outputPausedPendingMode = "log";
+          outputPausedPending = truncateTail(applyTerminalEdits(outputPausedPending, append), 200_000);
+          outputPausedPendingChars = Math.min(2_000_000_000, outputPausedPendingChars + append.length);
+        }
       }
     }
+    if (outputModeChanged) outputModeByRun = nextOutputModeByRun;
     if (awaitingChanged) awaitingByRun = nextAwaiting;
     if (runsChanged) runs = nextRuns;
     if (shouldCaptureEvents && newEvents.length > 0) {
@@ -693,6 +780,9 @@
     outputAutoScroll = true;
     outputPausedPending = "";
     outputPausedPendingChars = 0;
+    outputPausedPendingMode = "log";
+    outputTuiRunId = "";
+    outputTuiState = null;
     outputSearchText = "";
     outputSearchActive = "";
     outputSearchCursor = 0;
@@ -745,12 +835,22 @@
   async function resumeOutputAutoScroll() {
     const runId = selectedRunId;
     if (runId && outputPausedPending) {
-      const maxChars = 200_000;
-      const base = outputByRun[runId] ?? "";
-      const merged = truncateTail(applyTerminalEdits(base, outputPausedPending), maxChars);
-      outputByRun = { ...outputByRun, [runId]: merged };
+      if (outputPausedPendingMode === "tui") {
+        let t = outputTuiState;
+        if (!t || outputTuiRunId !== runId) t = newTerminalState();
+        termWrite(t, outputPausedPending);
+        outputTuiState = t;
+        outputTuiRunId = runId;
+        outputByRun = { ...outputByRun, [runId]: termToString(t) };
+      } else {
+        const maxChars = 200_000;
+        const base = outputByRun[runId] ?? "";
+        const merged = truncateTail(applyTerminalEdits(base, outputPausedPending), maxChars);
+        outputByRun = { ...outputByRun, [runId]: merged };
+      }
       outputPausedPending = "";
       outputPausedPendingChars = 0;
+      outputPausedPendingMode = "log";
     }
     outputAutoScroll = true;
     await tick();
@@ -1200,6 +1300,397 @@
     return out;
   }
 
+  type TerminalState = {
+    rows: number;
+    cols: number;
+    cursorRow: number;
+    cursorCol: number;
+    savedRow: number;
+    savedCol: number;
+    grid: string[][];
+    escMode: "none" | "esc" | "csi" | "osc" | "dcs";
+    escBuf: string;
+    oscEsc: boolean;
+    dcsEsc: boolean;
+  };
+
+  function looksLikeTuiAnsi(s: string): boolean {
+    if (!s) return false;
+    if (!s.includes("\x1b[")) return false;
+    // Treat cursor movement / clear screen / clear line as "TUI-ish".
+    if (/\x1b\[[0-?]*[ -/]*[HJfKABCDGd]/.test(s)) return true;
+    // alt screen / private modes (e.g. ?1049h)
+    if (/\x1b\[\?[0-9;]*[hl]/.test(s)) return true;
+    return false;
+  }
+
+  function newTerminalState(rows = 24, cols = 80): TerminalState {
+    const grid = Array.from({ length: rows }, () => Array.from({ length: cols }, () => " "));
+    return {
+      rows,
+      cols,
+      cursorRow: 0,
+      cursorCol: 0,
+      savedRow: 0,
+      savedCol: 0,
+      grid,
+      escMode: "none",
+      escBuf: "",
+      oscEsc: false,
+      dcsEsc: false,
+    };
+  }
+
+  function termClampCursor(t: TerminalState) {
+    if (t.cursorRow < 0) t.cursorRow = 0;
+    if (t.cursorCol < 0) t.cursorCol = 0;
+    if (t.cursorRow >= t.rows) t.cursorRow = t.rows - 1;
+    if (t.cursorCol >= t.cols) t.cursorCol = t.cols - 1;
+  }
+
+  function termBlankLine(cols: number): string[] {
+    return Array.from({ length: cols }, () => " ");
+  }
+
+  function termScrollUp(t: TerminalState, n = 1) {
+    const count = Math.max(1, n | 0);
+    for (let i = 0; i < count; i++) {
+      t.grid.shift();
+      t.grid.push(termBlankLine(t.cols));
+    }
+    t.cursorRow = t.rows - 1;
+    termClampCursor(t);
+  }
+
+  function termClearAll(t: TerminalState) {
+    t.grid = Array.from({ length: t.rows }, () => termBlankLine(t.cols));
+    t.cursorRow = 0;
+    t.cursorCol = 0;
+    t.savedRow = 0;
+    t.savedCol = 0;
+    termClampCursor(t);
+  }
+
+  function termEraseInLine(t: TerminalState, mode: number) {
+    const line = t.grid[t.cursorRow];
+    if (!line) return;
+    const m = mode | 0;
+    let start = 0;
+    let end = t.cols;
+    if (m === 0) {
+      start = t.cursorCol;
+      end = t.cols;
+    } else if (m === 1) {
+      start = 0;
+      end = Math.min(t.cols, t.cursorCol + 1);
+    } else if (m === 2) {
+      start = 0;
+      end = t.cols;
+    } else {
+      return;
+    }
+    for (let i = start; i < end; i++) line[i] = " ";
+  }
+
+  function termEraseInDisplay(t: TerminalState, mode: number) {
+    const m = mode | 0;
+    if (m === 2) {
+      termClearAll(t);
+      return;
+    }
+    if (m === 0) {
+      // cursor -> end
+      termEraseInLine(t, 0);
+      for (let r = t.cursorRow + 1; r < t.rows; r++) {
+        const line = t.grid[r];
+        if (!line) continue;
+        for (let c = 0; c < t.cols; c++) line[c] = " ";
+      }
+      return;
+    }
+    if (m === 1) {
+      // start -> cursor
+      for (let r = 0; r < t.cursorRow; r++) {
+        const line = t.grid[r];
+        if (!line) continue;
+        for (let c = 0; c < t.cols; c++) line[c] = " ";
+      }
+      termEraseInLine(t, 1);
+    }
+  }
+
+  function termDeleteChars(t: TerminalState, n: number) {
+    const line = t.grid[t.cursorRow];
+    if (!line) return;
+    const count = Math.max(1, n | 0);
+    for (let i = 0; i < count; i++) {
+      if (t.cursorCol >= t.cols) break;
+      line.splice(t.cursorCol, 1);
+      line.push(" ");
+    }
+  }
+
+  function termInsertBlanks(t: TerminalState, n: number) {
+    const line = t.grid[t.cursorRow];
+    if (!line) return;
+    const count = Math.max(1, n | 0);
+    for (let i = 0; i < count; i++) {
+      if (t.cursorCol >= t.cols) break;
+      line.splice(t.cursorCol, 0, " ");
+      line.pop();
+    }
+  }
+
+  function termEraseChars(t: TerminalState, n: number) {
+    const line = t.grid[t.cursorRow];
+    if (!line) return;
+    const count = Math.max(1, n | 0);
+    for (let i = 0; i < count; i++) {
+      const c = t.cursorCol + i;
+      if (c >= t.cols) break;
+      line[c] = " ";
+    }
+  }
+
+  function termHandleCsi(t: TerminalState, buf: string) {
+    if (!buf) return;
+    const final = buf[buf.length - 1] ?? "";
+    let body = buf.slice(0, -1);
+    let isPrivate = false;
+    if (body.startsWith("?")) {
+      isPrivate = true;
+      body = body.slice(1);
+    }
+    const params = body
+      .split(";")
+      .map((p) => (p.trim() === "" ? NaN : Number.parseInt(p, 10)))
+      .map((n) => (Number.isFinite(n) ? n : NaN));
+    const p0 = params[0];
+    const p1 = params[1];
+
+    const n1 = Number.isFinite(p0) && p0 ? p0 : 1;
+
+    switch (final) {
+      case "H":
+      case "f": {
+        const row = (Number.isFinite(p0) && p0 ? p0 : 1) - 1;
+        const col = (Number.isFinite(p1) && p1 ? p1 : 1) - 1;
+        t.cursorRow = Math.max(0, Math.min(t.rows - 1, row));
+        t.cursorCol = Math.max(0, Math.min(t.cols - 1, col));
+        return;
+      }
+      case "A":
+        t.cursorRow -= n1;
+        termClampCursor(t);
+        return;
+      case "B":
+        t.cursorRow += n1;
+        termClampCursor(t);
+        return;
+      case "C":
+        t.cursorCol += n1;
+        termClampCursor(t);
+        return;
+      case "D":
+        t.cursorCol -= n1;
+        termClampCursor(t);
+        return;
+      case "G": {
+        const col = (Number.isFinite(p0) && p0 ? p0 : 1) - 1;
+        t.cursorCol = Math.max(0, Math.min(t.cols - 1, col));
+        return;
+      }
+      case "d": {
+        const row = (Number.isFinite(p0) && p0 ? p0 : 1) - 1;
+        t.cursorRow = Math.max(0, Math.min(t.rows - 1, row));
+        return;
+      }
+      case "J":
+        termEraseInDisplay(t, Number.isFinite(p0) ? (p0 as number) : 0);
+        return;
+      case "K":
+        termEraseInLine(t, Number.isFinite(p0) ? (p0 as number) : 0);
+        return;
+      case "s":
+        t.savedRow = t.cursorRow;
+        t.savedCol = t.cursorCol;
+        return;
+      case "u":
+        t.cursorRow = t.savedRow;
+        t.cursorCol = t.savedCol;
+        termClampCursor(t);
+        return;
+      case "P":
+        termDeleteChars(t, n1);
+        return;
+      case "@":
+        termInsertBlanks(t, n1);
+        return;
+      case "X":
+        termEraseChars(t, n1);
+        return;
+      case "S":
+        termScrollUp(t, n1);
+        return;
+      case "m":
+        // styles/colors: ignore
+        return;
+      case "h":
+      case "l":
+        if (isPrivate) {
+          const ps = params.filter((n) => Number.isFinite(n)) as number[];
+          if (ps.includes(1049) || ps.includes(1047) || ps.includes(47)) {
+            termClearAll(t);
+          }
+        }
+        return;
+      default:
+        return;
+    }
+  }
+
+  function termWrite(t: TerminalState, input: string) {
+    if (!input) return;
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i]!;
+
+      if (t.escMode === "none") {
+        if (ch === "\x1b") {
+          t.escMode = "esc";
+          continue;
+        }
+        if (ch === "\n") {
+          t.cursorRow += 1;
+          t.cursorCol = 0;
+          if (t.cursorRow >= t.rows) termScrollUp(t, 1);
+          continue;
+        }
+        if (ch === "\r") {
+          t.cursorCol = 0;
+          continue;
+        }
+        if (ch === "\b") {
+          if (t.cursorCol > 0) t.cursorCol -= 1;
+          continue;
+        }
+        if (ch === "\t") {
+          const next = ((Math.floor(t.cursorCol / 8) + 1) * 8) | 0;
+          while (t.cursorCol < Math.min(t.cols, next)) {
+            const line = t.grid[t.cursorRow];
+            if (line) line[t.cursorCol] = " ";
+            t.cursorCol += 1;
+          }
+          termClampCursor(t);
+          continue;
+        }
+
+        const line = t.grid[t.cursorRow];
+        if (line && t.cursorCol >= 0 && t.cursorCol < t.cols) line[t.cursorCol] = ch;
+        t.cursorCol += 1;
+        if (t.cursorCol >= t.cols) {
+          t.cursorCol = 0;
+          t.cursorRow += 1;
+          if (t.cursorRow >= t.rows) termScrollUp(t, 1);
+        }
+        continue;
+      }
+
+      if (t.escMode === "esc") {
+        if (ch === "[") {
+          t.escMode = "csi";
+          t.escBuf = "";
+          continue;
+        }
+        if (ch === "]") {
+          t.escMode = "osc";
+          t.escBuf = "";
+          t.oscEsc = false;
+          continue;
+        }
+        if (ch === "P") {
+          t.escMode = "dcs";
+          t.escBuf = "";
+          t.dcsEsc = false;
+          continue;
+        }
+        if (ch === "7") {
+          t.savedRow = t.cursorRow;
+          t.savedCol = t.cursorCol;
+          t.escMode = "none";
+          continue;
+        }
+        if (ch === "8") {
+          t.cursorRow = t.savedRow;
+          t.cursorCol = t.savedCol;
+          termClampCursor(t);
+          t.escMode = "none";
+          continue;
+        }
+        t.escMode = "none";
+        continue;
+      }
+
+      if (t.escMode === "csi") {
+        t.escBuf += ch;
+        if (ch >= "@" && ch <= "~") {
+          termHandleCsi(t, t.escBuf);
+          t.escMode = "none";
+          t.escBuf = "";
+        } else if (t.escBuf.length > 64) {
+          t.escMode = "none";
+          t.escBuf = "";
+        }
+        continue;
+      }
+
+      if (t.escMode === "osc") {
+        if (ch === "\x07") {
+          t.escMode = "none";
+          t.escBuf = "";
+          t.oscEsc = false;
+          continue;
+        }
+        if (t.oscEsc) {
+          if (ch === "\\") {
+            t.escMode = "none";
+            t.escBuf = "";
+            t.oscEsc = false;
+            continue;
+          }
+          t.oscEsc = false;
+        }
+        if (ch === "\x1b") {
+          t.oscEsc = true;
+          continue;
+        }
+        continue;
+      }
+
+      if (t.escMode === "dcs") {
+        if (t.dcsEsc) {
+          if (ch === "\\") {
+            t.escMode = "none";
+            t.escBuf = "";
+            t.dcsEsc = false;
+            continue;
+          }
+          t.dcsEsc = false;
+        }
+        if (ch === "\x1b") {
+          t.dcsEsc = true;
+          continue;
+        }
+        continue;
+      }
+    }
+  }
+
+  function termToString(t: TerminalState): string {
+    return t.grid
+      .map((line) => line.join("").replace(/\s+$/g, ""))
+      .join("\n");
+  }
+
   function dataString(e: WsEnvelope, key: string): string | undefined {
     if (!isRecord(e.data)) return undefined;
     const v = e.data[key];
@@ -1598,24 +2089,45 @@
       messagesByRun = { ...messagesByRun, [runId]: mapped };
 
       // Populate output view from persisted messages (useful when opening a run after it started).
-      if (!outputByRun[runId]) {
-        const maxChars = 200_000;
-        const partsRev: string[] = [];
-        let total = 0;
-        for (const m of mapped) {
-          // API returns newest-first.
-          if (m.kind !== "run.output" || !m.text) continue;
-          partsRev.push(m.text);
-          total += m.text.length;
-          if (total >= maxChars) break;
+      // For TUI tools (Codex/Claude/etc), reconstruct a small screen snapshot instead of a giant log.
+      const maxChars = 200_000;
+      const rawPartsRev: string[] = [];
+      let rawTotal = 0;
+      for (const m of msgs) {
+        // API returns newest-first.
+        if (m.kind !== "run.output" || !m.text) continue;
+        rawPartsRev.push(m.text);
+        rawTotal += m.text.length;
+        if (rawTotal >= 1_000_000) break;
+      }
+      const rawParts = rawPartsRev.reverse();
+      const tool = runs.find((x) => x.id === runId)?.tool ?? "";
+      const isLikelyTuiTool = tool === "codex" || tool === "claude" || tool === "iflow" || tool === "gemini";
+      const mode: "log" | "tui" =
+        rawParts.some((s) => looksLikeTuiAnsi(s)) || (isLikelyTuiTool && rawParts.some((s) => s.includes("\x1b[")))
+          ? "tui"
+          : "log";
+      if (outputModeByRun[runId] !== mode) outputModeByRun = { ...outputModeByRun, [runId]: mode };
+
+      if (mode === "tui") {
+        const t = newTerminalState();
+        for (const p of rawParts) termWrite(t, p);
+        outputByRun = { ...outputByRun, [runId]: termToString(t) };
+        if (runId === selectedRunId) {
+          outputTuiState = t;
+          outputTuiRunId = runId;
         }
-        const parts = partsRev.reverse();
+      } else {
         let out = "";
-        for (const p of parts) {
-          out = applyTerminalEdits(out, p);
+        for (const p of rawParts) {
+          out = applyTerminalEdits(out, sanitizeTerminalOutput(p));
           if (out.length > maxChars * 2) out = truncateTail(out, maxChars);
         }
         outputByRun = { ...outputByRun, [runId]: truncateTail(out, maxChars) };
+        if (runId === selectedRunId) {
+          outputTuiState = null;
+          outputTuiRunId = "";
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1956,8 +2468,13 @@
     return groups;
   })();
 
+  $: selectedOutputMode = selectedRunId ? outputModeByRun[selectedRunId] ?? "log" : "log";
   $: outputDisplayText =
-    sessionDetailTab === "output" && selectedRunId ? tailLines(selectedOutput, outputBufferLines) : "";
+    sessionDetailTab === "output" && selectedRunId
+      ? selectedOutputMode === "tui"
+        ? selectedOutput
+        : tailLines(selectedOutput, outputBufferLines)
+      : "";
   $: outputLines = outputSearchActive ? outputDisplayText.split(/\r?\n/) : [];
   $: outputSearchMatches = outputSearchActive ? computeOutputMatches(outputLines, outputSearchActive, selectedRunId) : [];
   $: if (outputSearchMatches.length === 0) outputSearchCursor = 0;
