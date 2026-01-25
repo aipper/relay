@@ -502,7 +502,7 @@
       }
 
       if (msg.run_id && msg.type === "run.output" && msg.run_id === selectedId) {
-        const text = dataString(msg, "text") ?? "";
+        const text = sanitizeTerminalOutput(dataString(msg, "text") ?? "");
         if (text) {
           pendingOutputChunks.push(text);
           outputChanged = true;
@@ -1143,6 +1143,31 @@
     return s.slice(s.length - maxChars);
   }
 
+  function sanitizeTerminalOutput(input: string): string {
+    const s0 = input ?? "";
+    if (!s0) return "";
+    // Fast-path: most output is plain text.
+    if (!s0.includes("\x1b") && !s0.includes("\r")) return s0;
+
+    // Normalize newlines first (many TUIs use \r without \n).
+    let s = s0.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+    if (s.includes("\x1b")) {
+      // CSI: ESC [ ... <final>
+      s = s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+      // OSC: ESC ] ... BEL or ESC \
+      s = s.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "");
+      // DCS: ESC P ... ESC \
+      s = s.replace(/\x1bP[\s\S]*?\x1b\\/g, "");
+      // Single-character escapes.
+      s = s.replace(/\x1b[@-Z\\-_]/g, "");
+    }
+
+    // Strip remaining control chars (keep \n and \t).
+    s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    return s;
+  }
+
   function dataString(e: WsEnvelope, key: string): string | undefined {
     if (!isRecord(e.data)) return undefined;
     const v = e.data[key];
@@ -1212,7 +1237,7 @@
         role: "assistant",
         kind: env.type,
         actor: dataString(env, "actor"),
-        text: dataString(env, "text") ?? "",
+        text: sanitizeTerminalOutput(dataString(env, "text") ?? ""),
       };
     }
     if (env.type === "run.input") {
@@ -1536,7 +1561,7 @@
         kind: m.kind,
         actor: m.actor,
         request_id: m.request_id,
-        text: m.text,
+        text: m.kind === "run.output" ? sanitizeTerminalOutput(m.text) : m.text,
       }));
       messagesByRun = { ...messagesByRun, [runId]: mapped };
 
@@ -1748,7 +1773,7 @@
       const maxBytes = Number(serverLogsMaxBytes);
       const lines2 = (Number.isFinite(lines) ? lines : 200).toString();
       const maxBytes2 = (Number.isFinite(maxBytes) ? maxBytes : 200000).toString();
-      const url = `${apiBaseUrl.replace(/\\/$/, "")}/server/logs/tail?lines=${encodeURIComponent(lines2)}&max_bytes=${encodeURIComponent(maxBytes2)}`;
+      const url = `${apiBaseUrl.replace(/\/$/, "")}/server/logs/tail?lines=${encodeURIComponent(lines2)}&max_bytes=${encodeURIComponent(maxBytes2)}`;
       const r = await fetchWithTimeout(
         url,
         {
