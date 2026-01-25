@@ -139,6 +139,11 @@ CREATE TABLE IF NOT EXISTS events (
     )
     .execute(pool)
     .await;
+    // Speed up `/sessions/:id/messages` (events lookup by run_id + pagination by id).
+    // Without this index, large `events` tables can make message listing appear to "hang".
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS events_run_id_id ON events(run_id, id);")
+        .execute(pool)
+        .await;
     let _ =
         sqlx::query("UPDATE runs SET last_active_at = started_at WHERE last_active_at IS NULL;")
             .execute(pool)
