@@ -170,6 +170,13 @@
   let hostLogsMaxBytes = "200000";
   let hostDiagError = "";
 
+  let serverLogsPath = "";
+  let serverLogs = "";
+  let serverLogsLines = "200";
+  let serverLogsMaxBytes = "200000";
+  let serverLogsTruncated = false;
+  let serverLogsError = "";
+
   type TodoItem = { id: string; text: string; done: boolean; created_at: string };
   let todos: TodoItem[] = [];
   let todoText = "";
@@ -1730,6 +1737,42 @@
     });
   }
 
+  async function fetchServerLogs() {
+    serverLogsError = "";
+    serverLogsPath = "";
+    serverLogs = "";
+    serverLogsTruncated = false;
+    if (!token) return;
+    try {
+      const lines = Number(serverLogsLines);
+      const maxBytes = Number(serverLogsMaxBytes);
+      const lines2 = (Number.isFinite(lines) ? lines : 200).toString();
+      const maxBytes2 = (Number.isFinite(maxBytes) ? maxBytes : 200000).toString();
+      const url = `${apiBaseUrl.replace(/\\/$/, "")}/server/logs/tail?lines=${encodeURIComponent(lines2)}&max_bytes=${encodeURIComponent(maxBytes2)}`;
+      const r = await fetchWithTimeout(
+        url,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+        20_000,
+      );
+      if (r.status === 401) {
+        lastError = "登录已过期，请重新登录";
+        setToast("登录已过期");
+        disconnect();
+        return;
+      }
+      const bodyText = await r.text().catch(() => "");
+      if (!r.ok) throw new Error(`server.logs.tail failed: ${r.status} ${bodyText}`.trim());
+      const parsed = JSON.parse(bodyText) as { path?: unknown; text?: unknown; truncated?: unknown };
+      serverLogsPath = typeof parsed.path === "string" ? parsed.path : "";
+      serverLogs = typeof parsed.text === "string" ? parsed.text : "";
+      serverLogsTruncated = Boolean(parsed.truncated);
+    } catch (e) {
+      serverLogsError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   function sendInput(text: string) {
     if (!selectedRunId) return;
     sendWs({
@@ -2210,6 +2253,33 @@
           密码
           <input type="password" bind:value={password} autocomplete="current-password" on:change={persistAuthPrefs} />
         </label>
+      {/if}
+    </div>
+
+    <div style="margin-top:14px">
+      <div style="font-weight:600">Server 日志</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:8px 0">
+        <label style="flex:1;min-width:140px">
+          lines
+          <input bind:value={serverLogsLines} placeholder="200" />
+        </label>
+        <label style="flex:1;min-width:140px">
+          max_bytes
+          <input bind:value={serverLogsMaxBytes} placeholder="200000" />
+        </label>
+        <button on:click={fetchServerLogs} disabled={status !== "connected"}>server.logs.tail</button>
+      </div>
+      {#if serverLogsError}
+        <div style="color:#b91c1c">{serverLogsError}</div>
+      {/if}
+      {#if serverLogsPath}
+        <div class="subtle" style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <code>{serverLogsPath}</code>
+          {#if serverLogsTruncated}
+            <span class="subtle">truncated</span>
+          {/if}
+        </div>
+        <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">{serverLogs}</pre>
       {/if}
     </div>
   </section>

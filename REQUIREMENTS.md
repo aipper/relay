@@ -159,6 +159,7 @@
 
 - **远程监控**：runs 列表、状态、实时日志。
 - **远程控制**：发送输入、停止会话；展示 awaiting_input/权限请求并提供 approve/deny。
+- **日志查看（排障）**：在设置页可查看 server 日志（`/server/logs/tail`）与 hostd 日志（`rpc.host.logs.tail`）。
 - **文件与 git（后续阶段）**：浏览文件、查看 git diff、搜索文件内容。
 - **todo（后续阶段）**：对会话输出/消息提取 todo 并可跟踪进度。
 
@@ -172,6 +173,7 @@
 - 提供 WebSocket：
   - 支持 PWA 连接。
   - 支持 hostd 连接。
+- 提供 server 日志 tail（排障）：`GET /server/logs/tail?lines=200&max_bytes=200000`（需要 JWT；默认 docker 写入 `/data/relay-server.log`，可用 `SERVER_LOG_PATH` 覆盖）。
 - 提供密码哈希生成能力（Argon2），用于创建可登录的凭据（见 README 的 `--hash-password` 用法）。
 
 ### hostd（Rust）

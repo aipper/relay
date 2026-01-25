@@ -30,6 +30,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tokio::sync::{RwLock, mpsc};
+use tracing_subscriber::prelude::*;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -55,6 +56,7 @@ struct AppState {
     hosts_tx: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
     run_to_host: Arc<RwLock<HashMap<String, String>>>,
     web_dist_dir: Option<std::path::PathBuf>,
+    server_log_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -275,6 +277,54 @@ async fn http_list_hosts(State(state): State<AppState>, headers: HeaderMap) -> i
                 .collect::<Vec<_>>();
             Json(out).into_response()
         }
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct LogsTailQuery {
+    #[serde(default)]
+    lines: Option<i64>,
+    #[serde(default)]
+    max_bytes: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct LogsTailResponse {
+    path: String,
+    text: String,
+    truncated: bool,
+}
+
+async fn http_server_logs_tail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<LogsTailQuery>,
+) -> impl IntoResponse {
+    let Some(token) = bearer_token(&headers) else {
+        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
+    };
+    if validate_jwt(&state, &token).is_err() {
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+
+    let Some(path) = state.server_log_path.clone() else {
+        return (
+            StatusCode::NOT_FOUND,
+            "server log file is not enabled (set SERVER_LOG_PATH or run with DATABASE_URL under /data)",
+        )
+            .into_response();
+    };
+
+    let lines = q.lines.unwrap_or(200).clamp(1, 2000) as usize;
+    let max_bytes = q.max_bytes.unwrap_or(200_000).clamp(1, 2_000_000) as usize;
+
+    let read = tokio::task::spawn_blocking(move || tail_log_file(&path, lines, max_bytes)).await;
+    let Ok(read) = read else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to read log file").into_response();
+    };
+    match read {
+        Ok(out) => Json(out).into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }
 }
@@ -934,12 +984,106 @@ async fn http_static_fallback(
     resp
 }
 
+fn detect_server_log_path() -> Option<std::path::PathBuf> {
+    let env = std::env::var("SERVER_LOG_PATH")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(v) = env {
+        return Some(std::path::PathBuf::from(v));
+    }
+
+    // Default: in docker we store SQLite under /data, so write logs alongside it.
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
+    if database_url.contains("/data/") && std::path::Path::new("/data").is_dir() {
+        return Some(std::path::PathBuf::from("/data/relay-server.log"));
+    }
+    None
+}
+
+fn init_tracing(server_log_path: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("relay_server=info"));
+
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(std::io::stdout);
+
+    if let Some(path) = server_log_path.clone() {
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            Ok(file) => {
+                let path2 = path.clone();
+                let file_writer = move || {
+                    file.try_clone()
+                        .or_else(|_| {
+                            std::fs::OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(&path2)
+                        })
+                        .unwrap_or_else(|_| std::fs::File::open("/dev/null").unwrap())
+                };
+                let file_layer = tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(file_writer);
+                tracing_subscriber::registry()
+                    .with(filter)
+                    .with(stdout_layer)
+                    .with(file_layer)
+                    .init();
+                return Some(path);
+            }
+            Err(err) => {
+                eprintln!(
+                    "failed to open SERVER_LOG_PATH {}: {err}; logs will go to stdout only",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stdout_layer)
+        .init();
+    None
+}
+
+fn tail_log_file(
+    path: &std::path::Path,
+    lines: usize,
+    max_bytes: usize,
+) -> anyhow::Result<LogsTailResponse> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    let start = len.saturating_sub(max_bytes as u64);
+    f.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    let truncated = len > max_bytes as u64;
+
+    let text = String::from_utf8_lossy(&buf).to_string();
+    let mut parts = text.lines().collect::<Vec<_>>();
+    if parts.len() > lines {
+        parts = parts[parts.len() - lines..].to_vec();
+    }
+    let out_text = parts.join("\n");
+
+    Ok(LogsTailResponse {
+        path: path.display().to_string(),
+        text: out_text,
+        truncated,
+    })
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() == 2 && args[0] == "--hash-password" {
         let password = args.remove(1);
@@ -951,6 +1095,8 @@ async fn main() -> anyhow::Result<()> {
         println!("{hash}");
         return Ok(());
     }
+
+    let server_log_path = init_tracing(detect_server_log_path());
 
     let cfg = config::Config::from_env()?;
     let bind_addr = cfg.bind_addr.clone();
@@ -974,6 +1120,7 @@ async fn main() -> anyhow::Result<()> {
         hosts_tx: Arc::new(RwLock::new(HashMap::new())),
         run_to_host: Arc::new(RwLock::new(HashMap::new())),
         web_dist_dir: None,
+        server_log_path,
     };
 
     let mut state = state;
@@ -984,9 +1131,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(
         bind_addr = %state.cfg.bind_addr,
-        database_url = %state.cfg.database_url,
         admin_username = %state.cfg.admin_username,
         web_dist_dir = ?state.web_dist_dir,
+        server_log_path = ?state.server_log_path,
         "relay-server starting"
     );
 
@@ -1011,6 +1158,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/sessions", get(http_list_sessions))
         .route("/sessions/recent", get(http_list_recent_sessions))
         .route("/hosts", get(http_list_hosts))
+        .route("/server/logs/tail", get(http_server_logs_tail))
         .route("/runs/:run_id/messages", get(http_list_messages))
         .route("/sessions/:session_id", get(http_get_session))
         .route(
