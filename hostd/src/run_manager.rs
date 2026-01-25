@@ -356,7 +356,9 @@ impl RunManager {
             buf.extend_from_slice(bytes);
             if buf.len() > 64 * 1024 {
                 // Safety valve: if a client never sends a newline, don't grow unbounded.
-                buf.drain(0..(buf.len().saturating_sub(64 * 1024)));
+                let len = buf.len();
+                let drop_len = len - 64 * 1024;
+                buf.drain(0..drop_len);
             }
 
             let mut start = 0usize;
