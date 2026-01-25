@@ -664,9 +664,20 @@
 
   function tailLines(text: string, maxLines: number): string {
     const max = Math.max(1, maxLines | 0);
-    const lines = text.split(/\r?\n/);
-    if (lines.length <= max) return text;
-    return lines.slice(lines.length - max).join("\n");
+    if (!text) return "";
+    // Avoid `split()` to reduce allocations while streaming output.
+    let idx = text.length;
+    let lines = 0;
+    while (idx > 0) {
+      const next = text.lastIndexOf("\n", idx - 1);
+      if (next === -1) break;
+      lines++;
+      if (lines >= max) {
+        return text.slice(next + 1);
+      }
+      idx = next;
+    }
+    return text;
   }
 
   function updateOutputBufferLines() {
@@ -1261,7 +1272,25 @@
     };
     nextWs.onmessage = (ev) => {
       try {
+        if (ws !== nextWs) return;
         const msg = JSON.parse(ev.data) as WsEnvelope;
+
+        // Drop high-volume events early to keep the UI thread responsive.
+        // - Only keep `run.output` for the currently selected session.
+        // - Only keep tool call/result when actively viewing messages or settings.
+        if (msg.type === "run.output") {
+          const sel = selectedRunId;
+          if (!sel || msg.run_id !== sel) return;
+          if (!(token && view === "sessions")) return;
+        }
+        if (msg.type === "tool.call" || msg.type === "tool.result") {
+          const sel = selectedRunId;
+          const wantsMessages =
+            token && view === "sessions" && sessionDetailTab === "messages" && Boolean(sel) && msg.run_id === sel;
+          const wantsSettings = token && view === "settings";
+          if (!wantsMessages && !wantsSettings) return;
+        }
+
         wsQueue.push(msg);
         scheduleWsFlush();
       } catch {
@@ -1759,12 +1788,13 @@
     return groups;
   })();
 
-  $: outputDisplayText = tailLines(selectedOutput, outputBufferLines);
-  $: outputLines = outputDisplayText.split(/\r?\n/);
+  $: outputDisplayText =
+    sessionDetailTab === "output" && selectedRunId ? tailLines(selectedOutput, outputBufferLines) : "";
+  $: outputLines = outputSearchActive ? outputDisplayText.split(/\r?\n/) : [];
   $: outputSearchMatches = outputSearchActive ? computeOutputMatches(outputLines, outputSearchActive, selectedRunId) : [];
   $: if (outputSearchMatches.length === 0) outputSearchCursor = 0;
   $: if (outputSearchCursor >= outputSearchMatches.length) outputSearchCursor = 0;
-  $: outputHtml = renderOutputHtml(outputLines, outputSearchMatches, outputSearchCursor);
+  $: outputHtml = outputSearchActive ? renderOutputHtml(outputLines, outputSearchMatches, outputSearchCursor) : "";
   $: if (sessionDetailTab === "output" && outputAutoScroll) {
     tick().then(() => {
       if (!outputFeedEl) return;
@@ -1852,7 +1882,7 @@
     return uniq.slice(0, 50);
   }
 
-  $: todoSuggestions = extractTodoSuggestions(selectedOutput).filter((s) => !todos.some((t) => t.text === s));
+  $: todoSuggestions = extractTodoSuggestions(outputDisplayText).filter((s) => !todos.some((t) => t.text === s));
 
   $: if (selectedRunId) {
     todos = loadTodos(selectedRunId);
@@ -2379,8 +2409,10 @@
           </div>
         </div>
         <div class="output-feed" bind:this={outputFeedEl} on:scroll={handleOutputScroll}>
-          {#if outputHtml}
+          {#if outputSearchActive}
             <pre class="output-pre">{@html outputHtml}</pre>
+          {:else}
+            <pre class="output-pre">{outputDisplayText}</pre>
           {/if}
           {#if !outputAutoScroll}
             <button class="paused-badge" on:click={resumeOutputAutoScroll} type="button">已暂停</button>
