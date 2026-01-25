@@ -23,7 +23,11 @@ use relay_protocol::{WsEnvelope, redaction::Redactor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::Executor;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration as StdDuration, Instant},
+};
 use tokio::sync::broadcast;
 use tokio::sync::{RwLock, mpsc};
 
@@ -682,17 +686,26 @@ ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at
     };
     update_seen.await;
 
+    let seen_update_interval = StdDuration::from_secs(5);
+    let run_touch_interval = StdDuration::from_secs(1);
+    let mut last_seen_written_at = Instant::now();
+    let mut last_active_written_by_run: HashMap<String, Instant> = HashMap::new();
+
     while let Some(Ok(msg)) = ws_receiver.next().await {
         match msg {
             Message::Text(text) => {
                 let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
                     continue;
                 };
-                let _ = sqlx::query("UPDATE hosts SET last_seen_at=?2 WHERE id=?1")
-                    .bind(&host_id)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(&state.db)
-                    .await;
+                let now_inst = Instant::now();
+                if now_inst.duration_since(last_seen_written_at) >= seen_update_interval {
+                    let _ = sqlx::query("UPDATE hosts SET last_seen_at=?2 WHERE id=?1")
+                        .bind(&host_id)
+                        .bind(Utc::now().to_rfc3339())
+                        .execute(&state.db)
+                        .await;
+                    last_seen_written_at = now_inst;
+                }
                 let run_id = env.run_id.clone().unwrap_or_else(|| "unknown".into());
                 let seq = env.seq;
 
@@ -774,7 +787,14 @@ ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at
                 }
 
                 if run_id != "unknown" {
-                    let _ = db::touch_run_last_active(&state.db, &run_id, env.ts).await;
+                    let should_touch = match last_active_written_by_run.get(&run_id) {
+                        Some(last) => now_inst.duration_since(*last) >= run_touch_interval,
+                        None => true,
+                    };
+                    if should_touch {
+                        let _ = db::touch_run_last_active(&state.db, &run_id, env.ts).await;
+                        last_active_written_by_run.insert(run_id.clone(), now_inst);
+                    }
                 }
 
                 // Persist minimal event. Skip RPC responses that don't belong to any run to avoid polluting

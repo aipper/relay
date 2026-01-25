@@ -1348,49 +1348,59 @@
 
   async function refreshHosts() {
     if (!token) return;
-    const r = await fetchWithTimeout(
-      `${apiBaseUrl.replace(/\/$/, "")}/hosts`,
-      {
-      headers: { Authorization: `Bearer ${token}` },
-      },
-      12_000,
-    );
-    if (r.status === 401) {
-      lastError = "登录已过期，请重新登录";
-      setToast("登录已过期");
-      disconnect();
-      return;
-    }
-    if (r.ok) {
-      hosts = (await r.json()) as HostInfo[];
-      const online = hosts.filter((h) => h.online);
-      if (online.length > 0 && !online.some((h) => h.id === startHostId)) startHostId = online[0].id;
-      if (online.length > 0 && !online.some((h) => h.id === hostDiagHostId)) hostDiagHostId = online[0].id;
-    } else {
-      hosts = [];
+    try {
+      const r = await fetchWithTimeout(
+        `${apiBaseUrl.replace(/\/$/, "")}/hosts`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+        20_000,
+      );
+      if (r.status === 401) {
+        lastError = "登录已过期，请重新登录";
+        setToast("登录已过期");
+        disconnect();
+        return;
+      }
+      if (r.ok) {
+        hosts = (await r.json()) as HostInfo[];
+        const online = hosts.filter((h) => h.online);
+        if (online.length > 0 && !online.some((h) => h.id === startHostId)) startHostId = online[0].id;
+        if (online.length > 0 && !online.some((h) => h.id === hostDiagHostId)) hostDiagHostId = online[0].id;
+      }
+    } catch (e) {
+      // Non-fatal: keep previous hosts to avoid "everything offline" flicker.
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("refreshHosts failed", msg);
+      setToast("主机列表刷新失败");
     }
   }
 
   async function refreshRuns() {
     if (!token) return;
-    const r = await fetchWithTimeout(
-      `${apiBaseUrl.replace(/\/$/, "")}/sessions/recent?limit=${DEFAULT_SESSION_LIMIT}`,
-      {
-      headers: { Authorization: `Bearer ${token}` },
-      },
-      15_000,
-    );
-    if (r.status === 401) {
-      lastError = "登录已过期，请重新登录";
-      setToast("登录已过期");
-      disconnect();
-      return;
-    }
-    if (r.ok) {
-      runs = (await r.json()) as RunRow[];
-      if (selectedRunId && !runs.some((x) => x.id === selectedRunId)) selectedRunId = "";
-    } else {
-      runs = [];
+    try {
+      const r = await fetchWithTimeout(
+        `${apiBaseUrl.replace(/\/$/, "")}/sessions/recent?limit=${DEFAULT_SESSION_LIMIT}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+        20_000,
+      );
+      if (r.status === 401) {
+        lastError = "登录已过期，请重新登录";
+        setToast("登录已过期");
+        disconnect();
+        return;
+      }
+      if (r.ok) {
+        runs = (await r.json()) as RunRow[];
+        if (selectedRunId && !runs.some((x) => x.id === selectedRunId)) selectedRunId = "";
+      }
+    } catch (e) {
+      // Non-fatal: keep previous runs; WS may still deliver incremental updates.
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("refreshRuns failed", msg);
+      setToast("会话列表刷新失败");
     }
   }
 
@@ -1420,31 +1430,37 @@
 
   async function loadMessages(runId: string) {
     if (!token) return;
-    const r = await fetchWithTimeout(
-      `${apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      },
-      15_000,
-    );
-    if (r.status === 401) {
-      lastError = "登录已过期，请重新登录";
-      setToast("登录已过期");
-      disconnect();
-      return;
+    try {
+      const r = await fetchWithTimeout(
+        `${apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+        20_000,
+      );
+      if (r.status === 401) {
+        lastError = "登录已过期，请重新登录";
+        setToast("登录已过期");
+        disconnect();
+        return;
+      }
+      if (!r.ok) return;
+      const msgs = (await r.json()) as ChatMessageApi[];
+      const mapped: ChatMessage[] = msgs.map((m) => ({
+        key: String(m.id),
+        ts: m.ts,
+        role: m.role === "assistant" || m.role === "user" ? m.role : "system",
+        kind: m.kind,
+        actor: m.actor,
+        request_id: m.request_id,
+        text: m.text,
+      }));
+      messagesByRun = { ...messagesByRun, [runId]: mapped };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("loadMessages failed", msg);
+      setToast("消息加载失败");
     }
-    if (!r.ok) return;
-    const msgs = (await r.json()) as ChatMessageApi[];
-    const mapped: ChatMessage[] = msgs.map((m) => ({
-      key: String(m.id),
-      ts: m.ts,
-      role: m.role === "assistant" || m.role === "user" ? m.role : "system",
-      kind: m.kind,
-      actor: m.actor,
-      request_id: m.request_id,
-      text: m.text,
-    }));
-    messagesByRun = { ...messagesByRun, [runId]: mapped };
   }
 
   function runIds(): string[] {

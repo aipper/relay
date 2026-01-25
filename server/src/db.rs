@@ -144,6 +144,9 @@ CREATE TABLE IF NOT EXISTS events (
     let _ = sqlx::query("CREATE INDEX IF NOT EXISTS events_run_id_id ON events(run_id, id);")
         .execute(pool)
         .await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS events_ts ON events(ts);")
+        .execute(pool)
+        .await;
     let _ =
         sqlx::query("UPDATE runs SET last_active_at = started_at WHERE last_active_at IS NULL;")
             .execute(pool)
