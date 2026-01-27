@@ -4,6 +4,7 @@ mod local_api;
 mod run_manager;
 mod runners;
 mod spool;
+mod tool_mode_cache;
 
 use futures_util::{SinkExt, StreamExt};
 use relay_protocol::WsEnvelope;

@@ -60,6 +60,9 @@ Notes:
 - `tool`: `codex | claude | iflow | ...`
 - `cwd`: working directory path
 - `command`: full command line (string)
+- Optional:
+  - `runner_mode`: `tui | structured` (best-effort; used by some tools like Codex)
+  - `mcp_args`: array of strings (when `runner_mode=structured`, the tool-specific server args)
 
 ### `run.output`
 

@@ -74,3 +74,24 @@ In the PWA, open the run and confirm:
 
 - `fs_read`, `fs_search`, `git_status`, `git_diff`
 - `fs_write` (requires approval), `bash` (requires approval)
+
+## Optional: Codex MCP server mode (structured)
+
+For TUI-heavy CLIs, the PTY output stream can be noisy (full-screen redraws). As an optional enhancement,
+`hostd` can run Codex via its experimental MCP server and translate `run.send_input` into MCP `tools/call`
+requests.
+
+Env:
+
+- `RELAY_CODEX_MODE=tui|structured|auto` (default: `tui`)
+- `RELAY_CODEX_PROBE_TIMEOUT_MS` (default: `5000`) — timeout for MCP server probe/init
+- `RELAY_TOOL_MODE_AUTO_RUNS` (default: `5`) — re-probe after N runs (auto mode)
+- `RELAY_TOOL_MODE_AUTO_TTL_SECS` (default: `86400`) — re-probe after TTL seconds (auto mode)
+
+Modes:
+
+- `tui`: default; run `codex` in a PTY (closest to “type `codex` in terminal”)
+- `structured`: start `codex mcp-server` (or auto-detected `codex mcp serve`) and drive the session via
+  MCP `tools/call` (`codex` / `codex-reply`). Each `run.send_input` line becomes the next prompt.
+- `auto`: probe the compatible MCP server args once and cache them in `~/.relay/tool-mode-cache.json`.
+  Re-probes when the cache is older than 24h or after 5 runs (defaults).

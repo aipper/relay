@@ -182,6 +182,11 @@
   - 运行 PTY 交互进程（PTY runner）。
   - 以出站方式通过 WebSocket 连接 server（outbound WS）。
   - 支持 `run.stop` 的 `signal`：`int | term | kill`（其中 `int` 语义等价“Ctrl+C 中断”，用于取消当前生成/操作；`term/kill` 用于结束进程）。
+  - Codex 运行模式（可选增强）：
+    - 支持通过 `RELAY_CODEX_MODE=tui|structured|auto` 控制 codex 启动方式（默认 `tui`）。
+    - `structured`：使用 `codex mcp-server`（兼容探测 `codex mcp serve`）启动 Codex MCP server，并通过 MCP `tools/call`（`codex` / `codex-reply`）驱动会话；输入仍走 `run.send_input`（按行作为 prompt）。
+    - `auto`：自动探测 Codex MCP server 的启动参数并持久化到 `~/.relay/tool-mode-cache.json`；默认满足“运行 5 次或 24 小时”触发再次探测（可用 `RELAY_TOOL_MODE_AUTO_RUNS` / `RELAY_TOOL_MODE_AUTO_TTL_SECS` 覆盖）。
+    - 探测超时可通过 `RELAY_CODEX_PROBE_TIMEOUT_MS` 配置（默认 5000ms）。
 - 事件 spooling 与重放：
   - 将待发送事件持久化到本地 SQLite spool DB。
   - 断线后重连时重放未送达事件。
