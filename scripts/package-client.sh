@@ -12,7 +12,14 @@ Builds release binaries for client-side usage (relay-hostd + relay CLI) and crea
 a self-contained directory under ./dist/ with a hostd-up.sh script.
 
 Usage:
-  scripts/package-client.sh
+  scripts/package-client.sh [--install-local] [--install-dir <dir>] [--restart-mode user|system] [--no-restart]
+
+Options:
+  --install-local        After packaging, install binaries to the local machine (default: ~/.relay/bin)
+                         and best-effort restart relay-hostd (Linux systemd).
+  --install-dir <dir>    Override local install dir (default: ~/.relay/bin).
+  --restart-mode <m>     user|system (default: user). "system" requires root to restart.
+  --no-restart           When --install-local is set, skip restarting relay-hostd.
 EOF
 }
 
@@ -28,10 +35,26 @@ run() {
   "$@"
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+INSTALL_LOCAL="0"
+NO_RESTART="0"
+INSTALL_DIR=""
+RESTART_MODE="user"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --install-local) INSTALL_LOCAL="1"; shift ;;
+    --no-restart) NO_RESTART="1"; shift ;;
+    --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
+    --restart-mode) RESTART_MODE="${2:-}"; shift 2 ;;
+    *) echo "unknown arg: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+case "$RESTART_MODE" in
+  user|system) ;;
+  *) echo "invalid --restart-mode: $RESTART_MODE (expected user|system)" >&2; exit 2 ;;
+esac
 
 need cargo
 need node
@@ -629,5 +652,66 @@ Quick start:
   3) Optional: install shims so `codex` in any project dir uses relay:
      ./install-shims.sh --auto-path
 EOF
+
+if [[ "$INSTALL_LOCAL" == "1" ]]; then
+  DATA_DIR="${RELAY_DATA_DIR:-${HOME}/.relay}"
+  LOCAL_BIN_DIR="${INSTALL_DIR:-$DATA_DIR/bin}"
+
+  echo "[package-client] installing to local bin dir: $LOCAL_BIN_DIR"
+  run mkdir -p "$LOCAL_BIN_DIR"
+
+  stamp="$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s)"
+  for name in relay-hostd relay; do
+    src="$ROOT/target/release/$name"
+    dst="$LOCAL_BIN_DIR/$name"
+    tmp="$dst.tmp.$$"
+    if [[ -f "$dst" ]]; then
+      run cp "$dst" "$dst.bak.$stamp" || true
+    fi
+    run cp "$src" "$tmp"
+    run chmod 0755 "$tmp"
+    run mv "$tmp" "$dst"
+  done
+
+  if [[ "$NO_RESTART" != "1" ]]; then
+    if command -v systemctl >/dev/null 2>&1; then
+      if [[ "$RESTART_MODE" == "user" ]]; then
+        if systemctl --user show-environment >/dev/null 2>&1 && systemctl --user cat relay-hostd.service >/dev/null 2>&1; then
+          systemctl --user daemon-reload >/dev/null 2>&1 || true
+          if ! systemctl --user restart relay-hostd.service; then
+            echo "[package-client] warning: failed to restart relay-hostd.service (user)" >&2
+          else
+            echo "[package-client] restarted: systemctl --user restart relay-hostd.service"
+          fi
+        else
+          echo "[package-client] note: systemd user unit relay-hostd.service not found; skip restart"
+        fi
+      else
+        if systemctl cat relay-hostd.service >/dev/null 2>&1; then
+          if [[ "${EUID:-$(id -u)}" != "0" ]]; then
+            echo "[package-client] note: restart-mode=system requires root; run: sudo systemctl restart relay-hostd.service"
+          else
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            if ! systemctl restart relay-hostd.service; then
+              echo "[package-client] warning: failed to restart relay-hostd.service (system)" >&2
+            else
+              echo "[package-client] restarted: systemctl restart relay-hostd.service"
+            fi
+          fi
+        else
+          echo "[package-client] note: system unit relay-hostd.service not found; skip restart"
+        fi
+      fi
+    else
+      echo "[package-client] note: systemctl not found; skip restart"
+    fi
+  else
+    echo "[package-client] skip restart (--no-restart)"
+  fi
+
+  echo "[package-client] rollback:"
+  echo "  - restore backups in: $LOCAL_BIN_DIR (relay-hostd.bak.<ts>, relay.bak.<ts>)"
+  echo "  - then restart relay-hostd again"
+fi
 
 echo "[package-client] ok: $PKG_DIR"
