@@ -2394,7 +2394,7 @@
     });
   }
 
-  function sendStop(signal: "term" | "kill" = "term") {
+  function sendStop(signal: "int" | "term" | "kill" = "term") {
     if (!selectedRunId) return;
     sendWs({
       type: "run.stop",
@@ -2973,6 +2973,15 @@
               审批
             </button>
           {/if}
+          <button
+            class="secondary"
+            on:click={() => sendStop("int")}
+            disabled={!selectedRunId || status !== "connected"}
+            type="button"
+            title="Ctrl+C"
+          >
+            中断
+          </button>
           <button on:click={() => (stopConfirmOpen = true)} disabled={!selectedRunId || status !== "connected"}>停止</button>
         </div>
       </div>

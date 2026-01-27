@@ -471,6 +471,7 @@ impl RunManager {
             use nix::unistd::Pid;
             let sig = match signal {
                 "kill" => Signal::SIGKILL,
+                "int" => Signal::SIGINT,
                 _ => Signal::SIGTERM,
             };
             kill(Pid::from_raw(run.pid), sig).context("kill")?;

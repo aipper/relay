@@ -106,7 +106,7 @@ This is emitted after an input is accepted and written to the PTY.
 
 `data`:
 
-- `signal`: `term | kill` (default `term`)
+- `signal`: `int | term | kill` (default `term`; `int` ≈ Ctrl+C)
 
 ## Acknowledgements (server ↔ hostd)
 
@@ -347,5 +347,5 @@ Stop a run with an explicit ack response (request/response style).
 `data`:
 
 - `request_id`: UUID
-- `signal`: `term | kill` (default `term`)
+- `signal`: `int | term | kill` (default `term`; `int` ≈ Ctrl+C)
 - `actor`: `web | cli | system` (optional)
