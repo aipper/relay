@@ -58,6 +58,7 @@
 
   const DEFAULT_SESSION_LIMIT = 200;
   const WS_BATCH_BUDGET_MS = 10;
+  const OUTPUT_TUI_RENDER_THROTTLE_MS = 200;
 
   const browserOrigin =
     typeof window !== "undefined" && typeof window.location?.origin === "string" ? window.location.origin : "";
@@ -121,6 +122,25 @@
   let wsQueue: WsEnvelope[] = [];
   let wsQueuePos = 0;
   let wsFlushScheduled = false;
+  let outputTuiLastRenderAt = 0;
+  let outputTuiRenderTimer: number | null = null;
+
+  function scheduleTuiRender(runId: string, delayMs: number) {
+    if (typeof window === "undefined") return;
+    if (!runId) return;
+    if (outputTuiRenderTimer) return;
+    const safeDelay = Math.max(0, Math.min(2000, delayMs | 0));
+    outputTuiRenderTimer = window.setTimeout(() => {
+      outputTuiRenderTimer = null;
+      if (runId !== selectedRunId) return;
+      if (!outputAutoScroll) return;
+      if (outputModeByRun[runId] !== "tui") return;
+      const t = outputTuiState;
+      if (!t || outputTuiRunId !== runId) return;
+      outputByRun = { ...outputByRun, [runId]: termToString(t) };
+      outputTuiLastRenderAt = performance.now();
+    }, safeDelay);
+  }
 
   let selectedRunId = "";
   let inputModalOpen = false;
@@ -713,8 +733,15 @@
 
     if (selectedId && selectedMode === "tui") {
       if (tuiState && tuiRunId === selectedId && tuiChanged) {
-        nextOutputByRun = { ...nextOutputByRun, [selectedId]: termToString(tuiState) };
-        outputByRun = nextOutputByRun;
+        const now = performance.now();
+        const elapsed = now - outputTuiLastRenderAt;
+        if (elapsed >= OUTPUT_TUI_RENDER_THROTTLE_MS) {
+          nextOutputByRun = { ...nextOutputByRun, [selectedId]: termToString(tuiState) };
+          outputByRun = nextOutputByRun;
+          outputTuiLastRenderAt = now;
+        } else {
+          scheduleTuiRender(selectedId, OUTPUT_TUI_RENDER_THROTTLE_MS - elapsed);
+        }
       }
       if (pendingPausedTuiChunks.length > 0) {
         const append = pendingPausedTuiChunks.join("");
@@ -783,6 +810,11 @@
     outputPausedPendingMode = "log";
     outputTuiRunId = "";
     outputTuiState = null;
+    outputTuiLastRenderAt = 0;
+    if (outputTuiRenderTimer) {
+      clearTimeout(outputTuiRenderTimer);
+      outputTuiRenderTimer = null;
+    }
     outputSearchText = "";
     outputSearchActive = "";
     outputSearchCursor = 0;
@@ -1829,6 +1861,11 @@
     awaitingByRun = {};
     hosts = [];
     messagesByRun = {};
+    outputTuiLastRenderAt = 0;
+    if (outputTuiRenderTimer) {
+      clearTimeout(outputTuiRenderTimer);
+      outputTuiRenderTimer = null;
+    }
 
     if (ws) {
       try {
@@ -2375,7 +2412,9 @@
   }
 
   function sendInputModalText() {
-    sendInput(inputModalText);
+    let text = inputModalText;
+    if (text && !text.includes("\n") && !text.endsWith("\r") && !text.endsWith("\n")) text += "\n";
+    sendInput(text);
     closeInputModal();
   }
 
