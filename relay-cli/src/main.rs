@@ -28,7 +28,7 @@ Usage:
 Notes:
   - If --cmd is omitted, it defaults to the subcommand name (e.g. `codex`).
   - If --cwd is omitted, it defaults to the current working directory.
-  - If --sock is omitted, it tries RELAY_HOSTD_SOCK, ~/.relay/relay-hostd.sock, then ~/.relay/daemon.state.json.
+  - If --sock is omitted, it tries RELAY_HOSTD_SOCK, ~/.relay/hostd.json (local_unix_socket), ~/.relay/relay-hostd.sock, then ~/.relay/daemon.state.json.
   - In a terminal (TTY), `relay <tool>` attaches by default (proxies stdin/stdout). Use `--no-attach` to only print the run id.
   - `--cmd` supports simple argv forms (e.g. `codex --help`). For shell pipelines/quotes, prefer using hostd directly.
 "#
@@ -139,6 +139,16 @@ fn relay_home_dir() -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(home).join(".relay"))
 }
 
+fn socket_from_relay_hostd_config() -> Option<String> {
+    let root = relay_home_dir()?;
+    let raw = std::fs::read_to_string(root.join("hostd.json")).ok()?;
+    let v = serde_json::from_str::<JsonValue>(&raw).ok()?;
+    v.get("local_unix_socket")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty())
+}
+
 fn xdg_config_home_dir() -> Option<std::path::PathBuf> {
     let v = std::env::var("XDG_CONFIG_HOME").ok()?;
     let v = v.trim().to_string();
@@ -200,13 +210,17 @@ async fn pick_sock(sock_arg: Option<String>) -> anyhow::Result<String> {
     }
 
     let mut candidates = Vec::<String>::new();
-    if let Some(s) = socket_from_abrelay_config() {
+    if let Some(s) = socket_from_relay_hostd_config() {
         candidates.push(s);
     }
     if let Some(root) = relay_home_dir() {
         candidates.push(root.join("relay-hostd.sock").to_string_lossy().to_string());
     }
     if let Some(s) = daemon_state_sock() {
+        candidates.push(s);
+    }
+    // Legacy compatibility: old configs may live under ~/.config/abrelay/hostd.json.
+    if let Some(s) = socket_from_abrelay_config() {
         candidates.push(s);
     }
 
