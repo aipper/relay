@@ -663,11 +663,28 @@ async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
                             (host_id, None)
                         } else {
                             let Some(run_id) = env.run_id.clone() else { continue; };
-                            let host_id = {
+                            // Prefer in-memory map, but fall back to the DB (useful after server restarts,
+                            // because the in-memory map is not persisted).
+                            let mut host_id = {
                                 let map = state.run_to_host.read().await;
                                 map.get(&run_id).cloned()
                             };
+                            if host_id.is_none() {
+                                host_id = sqlx::query_scalar::<_, String>(
+                                    "SELECT host_id FROM runs WHERE id=?1",
+                                )
+                                .bind(&run_id)
+                                .fetch_optional(&state.db)
+                                .await
+                                .ok()
+                                .flatten();
+                            }
                             let Some(host_id) = host_id else { continue; };
+                            {
+                                // Cache for subsequent inputs.
+                                let mut map = state.run_to_host.write().await;
+                                map.insert(run_id.clone(), host_id.clone());
+                            }
                             (host_id, Some(run_id))
                         };
 
@@ -763,10 +780,14 @@ ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at
                 let run_id = env.run_id.clone().unwrap_or_else(|| "unknown".into());
                 let seq = env.seq;
 
-                if env.r#type == "run.started" {
+                // Keep an always-fresh run_id -> host_id mapping so app-side inputs can be routed
+                // even after a relay-server restart (mapping is in-memory only).
+                if run_id != "unknown" {
                     let mut map = state.run_to_host.write().await;
                     map.insert(run_id.clone(), host_id.clone());
+                }
 
+                if env.r#type == "run.started" {
                     let tool = env
                         .data
                         .get("tool")
