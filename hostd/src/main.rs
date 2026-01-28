@@ -532,6 +532,18 @@ async fn connect_and_run(
                             let input_id = env.data.get("input_id").and_then(|v| v.as_str()).unwrap_or("unknown");
                             let text = env.data.get("text").and_then(|v| v.as_str()).unwrap_or("");
                             let _ = rm.send_input(run_id, actor, input_id, text).await;
+                        } else if env.r#type == "run.send_stdin" {
+                            let Some(run_id) = env.run_id.as_deref() else { continue; };
+                            let actor = env.data.get("actor").and_then(|v| v.as_str()).unwrap_or("web");
+                            let text = env.data.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                            if !text.is_empty() {
+                                let _ = rm.write_stdin_bytes(run_id, actor, text.as_bytes()).await;
+                            }
+                        } else if env.r#type == "run.resize" {
+                            let Some(run_id) = env.run_id.as_deref() else { continue; };
+                            let cols = env.data.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as u16;
+                            let rows = env.data.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
+                            let _ = rm.resize_run(run_id, cols, rows).await;
                         } else if env.r#type == "run.permission.approve" || env.r#type == "run.permission.deny" {
                             let Some(run_id) = env.run_id.as_deref() else { continue; };
                             let actor = env.data.get("actor").and_then(|v| v.as_str()).unwrap_or("web");

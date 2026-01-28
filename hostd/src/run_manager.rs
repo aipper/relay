@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chrono::Utc;
-use portable_pty::{CommandBuilder, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use relay_protocol::{WsEnvelope, redaction::Redactor};
 use serde_json::Value as JsonValue;
@@ -33,6 +33,7 @@ pub struct RunManager {
 struct Run {
     run_id: String,
     seq: AtomicI64,
+    pty: Option<StdMutex<Box<dyn MasterPty + Send>>>,
     writer: Mutex<Box<dyn Write + Send>>,
     pid: i32,
     cwd: String,
@@ -405,6 +406,7 @@ impl RunManager {
                 pixel_height: 0,
             })
             .context("openpty")?;
+        let (master, slave) = (pair.master, pair.slave);
 
         let spec = crate::runners::for_tool(&tool).build(&cmd, &cwd)?;
         let mut command: CommandBuilder = spec.command;
@@ -419,15 +421,16 @@ impl RunManager {
             command.env("COLORTERM", "truecolor");
         }
 
-        let mut child = pair.slave.spawn_command(command).context("spawn_command")?;
+        let mut child = slave.spawn_command(command).context("spawn_command")?;
         let pid = child.process_id().context("process_id")? as i32;
 
-        let reader = pair.master.try_clone_reader().context("clone reader")?;
-        let writer = pair.master.take_writer().context("take writer")?;
+        let reader = master.try_clone_reader().context("clone reader")?;
+        let writer = master.take_writer().context("take writer")?;
 
         let run = Arc::new(Run {
             run_id: run_id.clone(),
             seq: AtomicI64::new(0),
+            pty: Some(StdMutex::new(master)),
             writer: Mutex::new(writer),
             pid,
             cwd,
@@ -792,6 +795,7 @@ impl RunManager {
         let run = Arc::new(Run {
             run_id: run_id.clone(),
             seq: AtomicI64::new(0),
+            pty: None,
             writer: Mutex::new(Box::new(stdin)),
             pid,
             cwd,
@@ -1531,6 +1535,41 @@ impl RunManager {
             };
             kill(Pid::from_raw(run.pid), sig).context("kill")?;
         }
+
+        Ok(())
+    }
+
+    pub async fn resize_run(&self, run_id: &str, cols: u16, rows: u16) -> anyhow::Result<()> {
+        let run = {
+            let runs = self.runs.read().await;
+            runs.get(run_id).cloned()
+        }
+        .context("unknown run_id")?;
+
+        // Structured (MCP) runs don't have a PTY to resize.
+        let is_codex_mcp = { run.codex_mcp.lock().await.is_some() };
+        if is_codex_mcp {
+            return Ok(());
+        }
+
+        let cols = cols.clamp(2, 500);
+        let rows = rows.clamp(1, 200);
+
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let Some(pty) = run.pty.as_ref() else {
+                return Ok(());
+            };
+            let pty = pty.lock().map_err(|_| anyhow::anyhow!("pty lock poisoned"))?;
+            pty.resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .context("resize pty")?;
+            Ok(())
+        })
+        .await??;
 
         Ok(())
     }

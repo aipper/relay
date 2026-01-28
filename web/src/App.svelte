@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import XtermTerminal from "./XtermTerminal.svelte";
 
   type Health = { name: string; version: string };
   type LoginResponse = { access_token: string };
@@ -32,6 +33,7 @@
 
   type ChatMessageApi = {
     id: number;
+    seq?: number;
     ts: string;
     role: string;
     kind: string;
@@ -213,10 +215,31 @@
   let outputPausedPending = "";
   let outputPausedPendingChars = 0;
   let outputPausedPendingMode: "log" | "tui" = "log";
+  let outputPausedPendingMaxSeq = 0;
   let outputModeByRun: Record<string, "log" | "tui"> = {};
   let selectedOutputMode: "log" | "tui" = "log";
   let outputTuiRunId = "";
   let outputTuiState: TerminalState | null = null;
+  let xtermRef: {
+    write: (data: string) => void;
+    reset: () => void;
+    focus: () => void;
+  } | null = null;
+  let xtermRunId = "";
+  let xtermAppliedSeq = 0;
+  let xtermBackfillRunId = "";
+  let xtermBackfillReady = false;
+  let xtermBackfillText = "";
+  let xtermBackfillMaxSeq = 0;
+  let xtermBackfillPending: Array<{ seq?: number; text: string }> = [];
+  let xtermPreReady = "";
+  let xtermPreReadyMaxSeq = 0;
+  let xtermResizeTimer: ReturnType<typeof setTimeout> | null = null;
+  let xtermResizePending: { runId: string; cols: number; rows: number } | null = null;
+  let xtermLastResizeKey = "";
+  let stdinBuf = "";
+  let stdinBufRunId = "";
+  let stdinBufTimer: ReturnType<typeof setTimeout> | null = null;
 
   let outputSearchText = "";
   let outputSearchActive = "";
@@ -488,6 +511,8 @@
     const pendingOutputChunks: string[] = [];
     const pendingPausedChunks: string[] = [];
     const pendingPausedTuiChunks: string[] = [];
+    const pendingTuiWriteChunks: string[] = [];
+    let pendingTuiWriteMaxSeq = 0;
 
     let nextOutputModeByRun = outputModeByRun;
     let outputModeChanged = false;
@@ -543,6 +568,7 @@
 
       if (msg.run_id && msg.type === "run.output" && msg.run_id === selectedId) {
         const raw = dataString(msg, "text") ?? "";
+        const seq = typeof msg.seq === "number" ? msg.seq : undefined;
         if (raw) {
           // Auto-detect: if we see cursor movement / clear-screen ANSI, switch to TUI snapshot mode.
           if (selectedId && selectedMode === "log" && looksLikeTuiAnsi(raw)) {
@@ -558,15 +584,19 @@
           }
 
           if (selectedMode === "tui") {
-            if (outputAutoScroll) {
-              if (!tuiState || tuiRunId !== selectedId) {
-                tuiState = newTerminalState();
-                tuiRunId = selectedId;
-              }
-              termWrite(tuiState, raw);
-              tuiChanged = true;
-            } else {
+            if (typeof seq === "number" && seq > 0 && seq <= xtermAppliedSeq) {
+              // already applied (e.g. after backfill)
+            } else if (xtermBackfillRunId === selectedId) {
+              xtermBackfillPending.push({ seq, text: raw });
+            } else if (!outputAutoScroll) {
               pendingPausedTuiChunks.push(raw);
+              if (typeof seq === "number") outputPausedPendingMaxSeq = Math.max(outputPausedPendingMaxSeq, seq);
+            } else if (xtermRef && xtermRunId === selectedId) {
+              pendingTuiWriteChunks.push(raw);
+              if (typeof seq === "number") pendingTuiWriteMaxSeq = Math.max(pendingTuiWriteMaxSeq, seq);
+            } else {
+              xtermPreReady = truncateTail(`${xtermPreReady}${raw}`, 500_000);
+              if (typeof seq === "number") xtermPreReadyMaxSeq = Math.max(xtermPreReadyMaxSeq, seq);
             }
           } else {
             const text = sanitizeTerminalOutput(raw);
@@ -732,15 +762,11 @@
     }
 
     if (selectedId && selectedMode === "tui") {
-      if (tuiState && tuiRunId === selectedId && tuiChanged) {
-        const now = performance.now();
-        const elapsed = now - outputTuiLastRenderAt;
-        if (elapsed >= OUTPUT_TUI_RENDER_THROTTLE_MS) {
-          nextOutputByRun = { ...nextOutputByRun, [selectedId]: termToString(tuiState) };
-          outputByRun = nextOutputByRun;
-          outputTuiLastRenderAt = now;
-        } else {
-          scheduleTuiRender(selectedId, OUTPUT_TUI_RENDER_THROTTLE_MS - elapsed);
+      if (pendingTuiWriteChunks.length > 0 && xtermRef && xtermRunId === selectedId && outputAutoScroll) {
+        const chunk = pendingTuiWriteChunks.join("");
+        if (chunk) {
+          xtermRef.write(chunk);
+          xtermAppliedSeq = Math.max(xtermAppliedSeq, pendingTuiWriteMaxSeq);
         }
       }
       if (pendingPausedTuiChunks.length > 0) {
@@ -750,10 +776,6 @@
           outputPausedPending = truncateTail(outputPausedPending + append, 400_000);
           outputPausedPendingChars = Math.min(2_000_000_000, outputPausedPendingChars + append.length);
         }
-      }
-      if (tuiState && tuiRunId === selectedId) {
-        outputTuiState = tuiState;
-        outputTuiRunId = tuiRunId;
       }
     } else {
       if (outputChanged && selectedId) {
@@ -808,6 +830,22 @@
     outputPausedPending = "";
     outputPausedPendingChars = 0;
     outputPausedPendingMode = "log";
+    outputPausedPendingMaxSeq = 0;
+    xtermRunId = "";
+    xtermAppliedSeq = 0;
+    xtermBackfillRunId = "";
+    xtermBackfillReady = false;
+    xtermBackfillText = "";
+    xtermBackfillMaxSeq = 0;
+    xtermBackfillPending = [];
+    xtermPreReady = "";
+    xtermPreReadyMaxSeq = 0;
+    stdinBuf = "";
+    stdinBufRunId = "";
+    if (stdinBufTimer) {
+      clearTimeout(stdinBufTimer);
+      stdinBufTimer = null;
+    }
     outputTuiRunId = "";
     outputTuiState = null;
     outputTuiLastRenderAt = 0;
@@ -868,12 +906,13 @@
     const runId = selectedRunId;
     if (runId && outputPausedPending) {
       if (outputPausedPendingMode === "tui") {
-        let t = outputTuiState;
-        if (!t || outputTuiRunId !== runId) t = newTerminalState();
-        termWrite(t, outputPausedPending);
-        outputTuiState = t;
-        outputTuiRunId = runId;
-        outputByRun = { ...outputByRun, [runId]: termToString(t) };
+        if (xtermRef && xtermRunId === runId) {
+          xtermRef.write(outputPausedPending);
+          xtermAppliedSeq = Math.max(xtermAppliedSeq, outputPausedPendingMaxSeq);
+        } else {
+          xtermPreReady = truncateTail(`${xtermPreReady}${outputPausedPending}`, 500_000);
+          xtermPreReadyMaxSeq = Math.max(xtermPreReadyMaxSeq, outputPausedPendingMaxSeq);
+        }
       } else {
         const maxChars = 200_000;
         const base = outputByRun[runId] ?? "";
@@ -883,6 +922,7 @@
       outputPausedPending = "";
       outputPausedPendingChars = 0;
       outputPausedPendingMode = "log";
+      outputPausedPendingMaxSeq = 0;
     }
     outputAutoScroll = true;
     await tick();
@@ -2099,6 +2139,16 @@
   async function loadMessages(runId: string) {
     if (!token) return;
     try {
+      const tool0 = runs.find((x) => x.id === runId)?.tool ?? "";
+      const isLikelyTuiTool0 = tool0 === "codex" || tool0 === "claude" || tool0 === "iflow" || tool0 === "gemini";
+      const expectedMode0: "log" | "tui" = outputModeByRun[runId] ?? (isLikelyTuiTool0 ? "tui" : "log");
+      if (runId === selectedRunId && expectedMode0 === "tui") {
+        xtermBackfillRunId = runId;
+        xtermBackfillReady = false;
+        xtermBackfillText = "";
+        xtermBackfillMaxSeq = 0;
+        xtermBackfillPending = [];
+      }
       const r = await fetchWithTimeout(
         `${apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200`,
         {
@@ -2147,12 +2197,30 @@
       if (outputModeByRun[runId] !== mode) outputModeByRun = { ...outputModeByRun, [runId]: mode };
 
       if (mode === "tui") {
-        const t = newTerminalState();
-        for (const p of rawParts) termWrite(t, p);
-        outputByRun = { ...outputByRun, [runId]: termToString(t) };
+        let maxSeq = 0;
+        const parts: string[] = [];
+        // API returns newest-first, so replay from oldest-first for xterm.
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i];
+          if (!m || m.kind !== "run.output" || !m.text) continue;
+          parts.push(m.text);
+          if (typeof m.seq === "number") maxSeq = Math.max(maxSeq, m.seq);
+        }
+
+        // Mark as "loaded" for this run so we don't refetch on every click.
+        outputByRun = { ...outputByRun, [runId]: " " };
+
         if (runId === selectedRunId) {
-          outputTuiState = t;
-          outputTuiRunId = runId;
+          xtermBackfillRunId = runId;
+          xtermBackfillText = parts.join("");
+          xtermBackfillMaxSeq = maxSeq;
+          xtermBackfillReady = true;
+          applyXtermBackfillIfReady();
+        }
+
+        if (runId === selectedRunId) {
+          outputTuiState = null;
+          outputTuiRunId = "";
         }
       } else {
         let out = "";
@@ -2164,6 +2232,13 @@
         if (runId === selectedRunId) {
           outputTuiState = null;
           outputTuiRunId = "";
+        }
+        if (runId === selectedRunId && xtermBackfillRunId === runId) {
+          xtermBackfillRunId = "";
+          xtermBackfillReady = false;
+          xtermBackfillText = "";
+          xtermBackfillMaxSeq = 0;
+          xtermBackfillPending = [];
         }
       }
     } catch (e) {
@@ -2389,6 +2464,108 @@
     // Browser inputs naturally use '\n', so normalize to '\r' to match terminal behavior.
     // Also collapse CRLF to CR to avoid sending two line breaks.
     return (text ?? "").replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+  }
+
+  function sendStdin(text: string) {
+    if (!selectedRunId) return;
+    const chunk = normalizeTerminalInput(text);
+    if (!chunk) return;
+    sendWs({
+      type: "run.send_stdin",
+      ts: new Date().toISOString(),
+      run_id: selectedRunId,
+      data: { actor: "web", text: chunk },
+    });
+  }
+
+  function flushStdinBuf() {
+    if (stdinBufTimer) {
+      clearTimeout(stdinBufTimer);
+      stdinBufTimer = null;
+    }
+    const runId = stdinBufRunId;
+    const chunk = stdinBuf;
+    stdinBufRunId = "";
+    stdinBuf = "";
+    if (!chunk || !runId) return;
+    if (runId !== selectedRunId) return;
+    sendStdin(chunk);
+  }
+
+  function queueStdin(text: string) {
+    const runId = selectedRunId;
+    if (!runId) return;
+    if (stdinBufRunId && stdinBufRunId !== runId) {
+      stdinBuf = "";
+      stdinBufTimer && clearTimeout(stdinBufTimer);
+      stdinBufTimer = null;
+    }
+    stdinBufRunId = runId;
+    stdinBuf += text ?? "";
+    if (stdinBuf.length >= 4096) {
+      flushStdinBuf();
+      return;
+    }
+    if (!stdinBufTimer) {
+      stdinBufTimer = setTimeout(flushStdinBuf, 20);
+    }
+  }
+
+  function scheduleResize(runId: string, cols: number, rows: number) {
+    const c = Math.max(2, Math.min(500, cols | 0));
+    const r = Math.max(1, Math.min(200, rows | 0));
+    const key = `${runId}:${c}x${r}`;
+    if (key === xtermLastResizeKey) return;
+    xtermResizePending = { runId, cols: c, rows: r };
+    if (xtermResizeTimer) return;
+    xtermResizeTimer = setTimeout(() => {
+      xtermResizeTimer = null;
+      const p = xtermResizePending;
+      xtermResizePending = null;
+      if (!p) return;
+      if (!selectedRunId || p.runId !== selectedRunId) return;
+      xtermLastResizeKey = `${p.runId}:${p.cols}x${p.rows}`;
+      sendWs({
+        type: "run.resize",
+        ts: new Date().toISOString(),
+        run_id: p.runId,
+        data: { actor: "web", cols: p.cols, rows: p.rows },
+      });
+    }, 200);
+  }
+
+  function applyXtermBackfillIfReady() {
+    const runId = selectedRunId;
+    if (!runId) return;
+    if (!xtermRef || xtermRunId !== runId) return;
+
+    // Apply backfill snapshot (from API) once per selection.
+    if (xtermBackfillReady && xtermBackfillRunId === runId) {
+      xtermRef.reset();
+      if (xtermBackfillText) xtermRef.write(xtermBackfillText);
+      xtermAppliedSeq = Math.max(xtermAppliedSeq, xtermBackfillMaxSeq);
+
+      const pending = xtermBackfillPending;
+      xtermBackfillPending = [];
+      xtermBackfillText = "";
+      xtermBackfillMaxSeq = 0;
+      xtermBackfillRunId = "";
+      xtermBackfillReady = false;
+
+      for (const p of pending) {
+        if (typeof p.seq === "number" && p.seq <= xtermAppliedSeq) continue;
+        xtermRef.write(p.text);
+        if (typeof p.seq === "number") xtermAppliedSeq = Math.max(xtermAppliedSeq, p.seq);
+      }
+    }
+
+    // Flush any output received before xterm finished mounting.
+    if (xtermPreReady) {
+      xtermRef.write(xtermPreReady);
+      xtermAppliedSeq = Math.max(xtermAppliedSeq, xtermPreReadyMaxSeq);
+      xtermPreReady = "";
+      xtermPreReadyMaxSeq = 0;
+    }
   }
 
   function sendInput(text: string) {
@@ -3151,35 +3328,76 @@
         </div>
       {:else}
         <div class="output-toolbar">
-          <div class="output-searchbar">
-            <input
-              bind:this={outputSearchInputEl}
-              bind:value={outputSearchText}
-              on:keydown={handleOutputSearchKeydown}
-              placeholder=""
-            />
-            <button on:click={runOutputSearch} disabled={!outputSearchText.trim()}>搜索</button>
-            <button on:click={prevOutputMatch} disabled={outputSearchMatches.length === 0}>↑</button>
-            <button on:click={nextOutputMatch} disabled={outputSearchMatches.length === 0}>↓</button>
-            {#if outputSearchActive}
-              <div class="output-count">
-                {outputSearchMatches.length === 0 ? "0/0" : `${outputSearchCursor + 1}/${outputSearchMatches.length}`}
-              </div>
-            {/if}
-            <button on:click={clearOutputSearch} disabled={!outputSearchText && !outputSearchActive}>清空</button>
-          </div>
-          <div class="output-actions">
-            <button on:click={toggleOutputAutoScroll} disabled={!selectedRunId}>
-              {outputAutoScroll ? "暂停" : "继续"}
-            </button>
-            {#if !outputAutoScroll && !outputIsAtBottom}
-              <button on:click={jumpToLatest} disabled={!selectedRunId}>跳到最新</button>
-            {/if}
-            <button on:click={copyOutput} disabled={!selectedOutput}>复制输出</button>
-          </div>
+          {#if selectedOutputMode === "tui"}
+            <div class="output-actions">
+              <button on:click={toggleOutputAutoScroll} disabled={!selectedRunId}>
+                {outputAutoScroll ? "暂停" : "继续"}
+              </button>
+              <button class="secondary" on:click={() => queueStdin("\x03")} disabled={!selectedRunId || status !== "connected"} type="button">
+                Ctrl+C
+              </button>
+              <button class="secondary" on:click={() => queueStdin("\x1b")} disabled={!selectedRunId || status !== "connected"} type="button">
+                ESC
+              </button>
+              <button class="secondary" on:click={() => xtermRef?.focus()} disabled={!selectedRunId} type="button">聚焦</button>
+            </div>
+          {:else}
+            <div class="output-searchbar">
+              <input
+                bind:this={outputSearchInputEl}
+                bind:value={outputSearchText}
+                on:keydown={handleOutputSearchKeydown}
+                placeholder=""
+              />
+              <button on:click={runOutputSearch} disabled={!outputSearchText.trim()}>搜索</button>
+              <button on:click={prevOutputMatch} disabled={outputSearchMatches.length === 0}>↑</button>
+              <button on:click={nextOutputMatch} disabled={outputSearchMatches.length === 0}>↓</button>
+              {#if outputSearchActive}
+                <div class="output-count">
+                  {outputSearchMatches.length === 0 ? "0/0" : `${outputSearchCursor + 1}/${outputSearchMatches.length}`}
+                </div>
+              {/if}
+              <button on:click={clearOutputSearch} disabled={!outputSearchText && !outputSearchActive}>清空</button>
+            </div>
+            <div class="output-actions">
+              <button on:click={toggleOutputAutoScroll} disabled={!selectedRunId}>
+                {outputAutoScroll ? "暂停" : "继续"}
+              </button>
+              {#if !outputAutoScroll && !outputIsAtBottom}
+                <button on:click={jumpToLatest} disabled={!selectedRunId}>跳到最新</button>
+              {/if}
+              <button on:click={copyOutput} disabled={!selectedOutput}>复制输出</button>
+            </div>
+          {/if}
         </div>
-        <div class="output-feed" bind:this={outputFeedEl} on:scroll={handleOutputScroll}>
-          {#if outputSearchActive}
+        <div class="output-feed" class:tui={selectedOutputMode === "tui"} bind:this={outputFeedEl} on:scroll={handleOutputScroll}>
+          {#if selectedOutputMode === "tui"}
+            <div class="xterm-shell">
+              {#key selectedRunId}
+                <XtermTerminal
+                  bind:this={xtermRef}
+                  readOnly={status !== "connected"}
+                  autoFocus={true}
+                  on:ready={() => {
+                    const runId = selectedRunId;
+                    if (!runId) return;
+                    xtermRunId = runId;
+                    applyXtermBackfillIfReady();
+                  }}
+                  on:data={(e) => {
+                    const runId = selectedRunId;
+                    if (!runId || status !== "connected") return;
+                    queueStdin(e.detail.data);
+                  }}
+                  on:resize={(e) => {
+                    const runId = selectedRunId;
+                    if (!runId || status !== "connected") return;
+                    scheduleResize(runId, e.detail.cols, e.detail.rows);
+                  }}
+                />
+              {/key}
+            </div>
+          {:else if outputSearchActive}
             <pre class="output-pre">{@html outputHtml}</pre>
           {:else}
             <pre class="output-pre">{outputDisplayText}</pre>
@@ -4444,6 +4662,16 @@
     background: var(--surface-muted);
     padding: 0;
     position: relative;
+  }
+
+  .output-feed.tui {
+    overflow: hidden;
+    background: #0b1020;
+  }
+
+  .xterm-shell {
+    width: 100%;
+    height: clamp(320px, 60vh, 720px);
   }
 
   .output-pre {

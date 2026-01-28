@@ -338,6 +338,7 @@ struct MessagesQuery {
 #[derive(Serialize)]
 struct ChatMessage {
     id: i64,
+    seq: Option<i64>,
     ts: String,
     role: &'static str,
     kind: String,
@@ -471,6 +472,7 @@ async fn http_list_messages(
 
         out.push(ChatMessage {
             id: row.id,
+            seq: row.seq,
             ts: row.ts,
             role,
             kind: row.r#type,
@@ -640,7 +642,9 @@ async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
                         let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
                         let is_rpc = env.r#type.starts_with("rpc.");
                         if env.r#type != "run.send_input"
+                            && env.r#type != "run.send_stdin"
                             && env.r#type != "run.stop"
+                            && env.r#type != "run.resize"
                             && env.r#type != "run.permission.approve"
                             && env.r#type != "run.permission.deny"
                             && !is_rpc

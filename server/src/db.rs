@@ -580,6 +580,7 @@ LIMIT 200
 #[derive(sqlx::FromRow)]
 pub struct MessageEventRow {
     pub id: i64,
+    pub seq: Option<i64>,
     pub ts: String,
     pub r#type: String,
     pub actor: Option<String>,
@@ -598,7 +599,7 @@ pub async fn list_message_events(
     let limit = limit.clamp(1, 500);
     let rows = sqlx::query_as::<_, MessageEventRow>(
         r#"
-SELECT id, ts, type, actor, input_id, text, text_redacted, data_json
+SELECT id, seq, ts, type, actor, input_id, text, text_redacted, data_json
 FROM events
 WHERE run_id=?1
   AND type IN (
