@@ -2384,13 +2384,20 @@
     }
   }
 
+  function normalizeTerminalInput(text: string): string {
+    // For PTY-based interactive tools, the Enter key is typically '\r' (carriage return).
+    // Browser inputs naturally use '\n', so normalize to '\r' to match terminal behavior.
+    // Also collapse CRLF to CR to avoid sending two line breaks.
+    return (text ?? "").replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+  }
+
   function sendInput(text: string) {
     if (!selectedRunId) return;
     sendWs({
       type: "run.send_input",
       ts: new Date().toISOString(),
       run_id: selectedRunId,
-      data: { input_id: crypto.randomUUID(), actor: "web", text },
+      data: { input_id: crypto.randomUUID(), actor: "web", text: normalizeTerminalInput(text) },
     });
   }
 
