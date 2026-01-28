@@ -105,6 +105,22 @@ fn codex_probe_timeout() -> Duration {
     Duration::from_millis(ms.clamp(250, 60_000))
 }
 
+fn pty_output_flush_interval() -> Duration {
+    let ms = std::env::var("RELAY_PTY_OUTPUT_FLUSH_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(120);
+    Duration::from_millis(ms.clamp(20, 2_000))
+}
+
+fn pty_output_max_bytes() -> usize {
+    let v = std::env::var("RELAY_PTY_OUTPUT_MAX_BYTES")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(16 * 1024);
+    v.clamp(1024, 1024 * 1024)
+}
+
 async fn codex_rpc_request(
     run: &Arc<Run>,
     method: &str,
@@ -447,32 +463,68 @@ impl RunManager {
         let events = self.events.clone();
         let host_id = self.host_id.clone();
         let run_for_thread = run.clone();
-        std::thread::spawn(move || {
-            let mut reader = reader;
-            let mut buf = [0u8; 4096];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let is_prompt = run_for_thread.prompt_regex.is_match(&text);
-                        let mut env = WsEnvelope::new(
-                            "run.output",
-                            json!({
-                                "stream": "stdout",
-                                "text": text
-                            }),
-                        );
-                        env.host_id = Some(host_id.clone());
-                        env.run_id = Some(run_for_thread.run_id.clone());
-                        env.seq = Some(run_for_thread.next_seq());
-                        let _ = events.send(env);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(128);
 
+        std::thread::spawn({
+            let mut reader = reader;
+            move || {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if tx.send(buf[..n].to_vec()).is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+
+        std::thread::spawn(move || {
+            let flush_interval = pty_output_flush_interval();
+            let max_bytes = pty_output_max_bytes();
+            let mut pending: Vec<u8> = Vec::new();
+
+            let flush_pending = |pending: &mut Vec<u8>| {
+                if pending.is_empty() {
+                    return;
+                }
+                let text = String::from_utf8_lossy(pending).to_string();
+                pending.clear();
+
+                let mut env = WsEnvelope::new(
+                    "run.output",
+                    json!({
+                        "stream": "stdout",
+                        "text": text
+                    }),
+                );
+                env.host_id = Some(host_id.clone());
+                env.run_id = Some(run_for_thread.run_id.clone());
+                env.seq = Some(run_for_thread.next_seq());
+                let _ = events.send(env);
+            };
+
+            loop {
+                match rx.recv_timeout(flush_interval) {
+                    Ok(chunk) => {
+                        let chunk_text = String::from_utf8_lossy(&chunk).to_string();
+                        let is_prompt = run_for_thread.prompt_regex.is_match(&chunk_text);
+
+                        pending.extend_from_slice(&chunk);
+
+                        // Flush promptly if we hit a prompt, so the UI sees the prompt text before
+                        // showing the approval/input modal.
                         if is_prompt {
+                            flush_pending(&mut pending);
+
                             if let Ok(mut awaiting) = run_for_thread.awaiting_input.try_lock() {
                                 if !*awaiting {
                                     *awaiting = true;
-                                    let prompt = text.chars().take(200).collect::<String>();
+                                    let prompt = chunk_text.chars().take(200).collect::<String>();
                                     let request_id = uuid::Uuid::new_v4().to_string();
 
                                     if let Ok(mut pending) =
@@ -517,11 +569,22 @@ impl RunManager {
                                     let _ = events.send(p);
                                 }
                             }
+
+                            continue;
+                        }
+
+                        if pending.len() >= max_bytes {
+                            flush_pending(&mut pending);
                         }
                     }
-                    Err(_) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        flush_pending(&mut pending);
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
             }
+
+            flush_pending(&mut pending);
         });
 
         let events = self.events.clone();
