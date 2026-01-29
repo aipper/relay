@@ -173,6 +173,9 @@
 - 提供 WebSocket：
   - 支持 PWA 连接。
   - 支持 hostd 连接。
+- 提供会话消息 API（用于 web 的结构化消息视图）：`GET /sessions/:id/messages?limit=200`
+  - 返回按时间排序的消息列表（MVP：events 表的视图）。
+  - 对 `tool.call` / `tool.result` / `run.permission_requested` 等事件，响应中可选携带结构化 `data` 字段（来自 events.data_json 的解析结果）。
 - 提供 server 日志 tail（排障）：`GET /server/logs/tail?lines=200&max_bytes=200000`（需要 JWT；默认 docker 写入 `/data/relay-server.log`，可用 `SERVER_LOG_PATH` 覆盖）。
 - 提供密码哈希生成能力（Argon2），用于创建可登录的凭据（见 README 的 `--hash-password` 用法）。
 
@@ -187,6 +190,20 @@
     - `structured`：使用 `codex mcp-server`（兼容探测 `codex mcp serve`）启动 Codex MCP server，并通过 MCP `tools/call`（`codex` / `codex-reply`）驱动会话；输入仍走 `run.send_input`（按行作为 prompt）。
     - `auto`：自动探测 Codex MCP server 的启动参数并持久化到 `~/.relay/tool-mode-cache.json`；默认满足“运行 5 次或 24 小时”触发再次探测（可用 `RELAY_TOOL_MODE_AUTO_RUNS` / `RELAY_TOOL_MODE_AUTO_TTL_SECS` 覆盖）。
     - 探测超时可通过 `RELAY_CODEX_PROBE_TIMEOUT_MS` 配置（默认 5000ms）。
+  - OpenCode 运行模式（MVP，结构化消息优先）：
+    - 支持通过 `RELAY_OPENCODE_MODE=structured|tui` 控制 opencode 启动方式（默认 `structured`）。
+    - `structured`：
+      - hostd 在收到 `run.send_input` 后调用 `opencode run --format json`（必要时带 `--session <id>` 续聊）。
+      - 解析 opencode 的 JSONL 事件并映射为 relay 事件：
+        - `text` → `run.output`（markdown 原文）
+        - `tool_use` → `tool.call` + `tool.result`（args/result 存在 `data_json`，供 web 富渲染）
+        - `error` → `run.output`（stderr）
+      - 为避免非 TTY 下的交互式权限提示，hostd 默认注入 `OPENCODE_PERMISSION={"*":"allow"}`（若用户已显式设置则不覆盖）。
+      - `run.stop`：
+        - `signal=int`：尝试 SIGINT 当前 opencode 子进程（取消当前生成），run 继续可输入。
+        - `signal=term|kill`：结束 run 并发出 `run.exited`。
+    - `tui`：按 PTY 方式启动（类似直接在终端里运行 opencode），输出以 xterm.js 渲染为主。
+    - 二进制路径解析：支持 `RELAY_OPENCODE_BIN=/path/to/opencode` 与 shims 的 `~/.relay/bin-map.json`。
 - 事件 spooling 与重放：
   - 将待发送事件持久化到本地 SQLite spool DB。
   - 断线后重连时重放未送达事件。
@@ -237,7 +254,7 @@
   - 会话详情提供“中断（Ctrl+C）”按钮（不需要二次确认），用于发送 `run.stop signal=int`，尽量只中断当前生成而不结束会话。
   - 待审批时，以弹窗/浮层方式展示 approve/deny，弹窗展示会话工具/模型（run.tool）+ 待审批操作工具名（op_tool），并提供“查看完整参数”展开区与风险提示（读/写/执行类型）。
   - 风险类型可基于待审批操作工具名（op_tool）的静态映射（例如 `rpc.fs.read`=读，`rpc.fs.write`=写，`bash`=执行；允许带/不带 `rpc.` 前缀）。
-  - 输入通过按钮触发弹出输入框（非固定输入框）。
+  - 输入默认通过按钮触发弹出输入框；在“消息”tab 下提供底部输入框（Enter 发送 / Shift+Enter 换行），并保留“更多/弹窗”入口用于多行编辑。
   - 输入弹窗提供快捷输入按钮（固定：`y` / `n` / `continue`）。
   - 输入弹窗不保存输入历史。
   - 会话列表按机器分组展示；分组标题显示“在线状态圆点 + 机器名（缺失时用 host_id） + last_seen（始终显示）”。
@@ -295,6 +312,8 @@
   - 输出搜索支持键盘快捷键切换上一处/下一处（↑/↓），搜索框聚焦时仅用于搜索跳转。
   - 进入输出页时搜索框自动聚焦（含手机端），不影响自动滚动。
   - 待审批时，消息流内插入“审批请求卡片”（与弹窗并存）；卡片展示会话工具/模型（run.tool）+ 待审批操作工具名（op_tool）+ 参数摘要（最多 80 字符） + 发起时间。
+  - 消息流以“turn（用户输入）→ parts（工具/系统/assistant 输出）”的结构展示（对齐 opencode share 的观感）；`tool.call/tool.result` 优先展示结构化 JSON（来自 messages API 的 `data` 字段），并可展开查看详情。
+  - `tool=opencode` 的会话默认打开“消息”tab。
   - 消息流区分用户/助手/系统角色的视觉样式（用户右对齐、助手左对齐、系统居中；系统消息更小字号与弱色，且无气泡仅文本；用户/助手使用气泡背景；用户用品牌色，助手用中性灰；用户/助手/系统均显示时间戳，格式为绝对时间，位置在气泡下方小字；气泡最大宽度 70%；长文本自动换行并保留换行）。
 
 ## 配置与安全（Configuration & Security Requirements）

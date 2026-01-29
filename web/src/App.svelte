@@ -29,6 +29,7 @@
     actor?: string | null;
     request_id?: string | null;
     text: string;
+    data?: unknown;
   };
 
   type ChatMessageApi = {
@@ -40,6 +41,7 @@
     actor?: string | null;
     request_id?: string | null;
     text: string;
+    data?: unknown;
   };
 
   type HostInfo = {
@@ -244,6 +246,8 @@
   let outputSearchText = "";
   let outputSearchActive = "";
   let outputSearchCursor = 0;
+  let chatInputText = "";
+  let chatInputEl: HTMLTextAreaElement | null = null;
 
   type OutputMatch = {
     id: string;
@@ -825,7 +829,8 @@
 
   async function selectSession(runId: string) {
     selectedRunId = runId;
-    sessionDetailTab = "output";
+    const tool = runs.find((r) => r.id === runId)?.tool ?? "";
+    sessionDetailTab = tool === "opencode" ? "messages" : "output";
     outputAutoScroll = true;
     outputPausedPending = "";
     outputPausedPendingChars = 0;
@@ -856,8 +861,15 @@
     outputSearchText = "";
     outputSearchActive = "";
     outputSearchCursor = 0;
-    await focusOutputSearch();
-    if (!outputByRun[runId]) void loadMessages(runId);
+    if (sessionDetailTab === "output") {
+      await focusOutputSearch();
+      if (!outputByRun[runId]) void loadMessages(runId);
+    } else {
+      chatInputText = "";
+      if (!messagesByRun[runId]) void loadMessages(runId);
+      await tick();
+      chatInputEl?.focus();
+    }
   }
 
   function tailLines(text: string, maxLines: number): string {
@@ -1833,6 +1845,7 @@
         kind: env.type,
         actor: dataString(env, "actor"),
         text: sanitizeTerminalOutput(dataString(env, "text") ?? ""),
+        data: env.data,
       };
     }
     if (env.type === "run.input") {
@@ -1843,6 +1856,7 @@
         kind: env.type,
         actor: dataString(env, "actor"),
         text: dataString(env, "text_redacted") ?? "",
+        data: env.data,
       };
     }
     if (env.type === "run.permission_requested") {
@@ -1853,6 +1867,7 @@
         kind: env.type,
         request_id: dataString(env, "request_id"),
         text: dataString(env, "prompt") ?? "",
+        data: env.data,
       };
     }
     if (env.type === "run.started" || env.type === "run.exited") {
@@ -1862,6 +1877,7 @@
         role: "system",
         kind: env.type,
         text: env.type === "run.started" ? "run started" : "run exited",
+        data: env.data,
       };
     }
     if (env.type === "tool.call") {
@@ -1873,6 +1889,7 @@
         request_id: dataString(env, "request_id"),
         actor: dataString(env, "actor"),
         text: `tool.call ${dataString(env, "tool") ?? "unknown"} ${jsonTrunc(dataAny(env, "args"), 2000)}`,
+        data: env.data,
       };
     }
     if (env.type === "tool.result") {
@@ -1888,6 +1905,7 @@
         request_id: dataString(env, "request_id"),
         actor: dataString(env, "actor"),
         text: `${base} ${extra}`.trim(),
+        data: env.data,
       };
     }
     return null;
@@ -2172,6 +2190,7 @@
         actor: m.actor,
         request_id: m.request_id,
         text: m.kind === "run.output" ? sanitizeTerminalOutput(m.text) : m.text,
+        data: m.data,
       }));
       messagesByRun = { ...messagesByRun, [runId]: mapped };
 
@@ -2578,6 +2597,25 @@
     });
   }
 
+  function sendChatInput() {
+    if (!selectedRunId || status !== "connected") return;
+    const raw = chatInputText;
+    if (!raw.trim()) return;
+    let text = raw;
+    if (!text.includes("\n") && !text.endsWith("\r") && !text.endsWith("\n")) text += "\n";
+    sendInput(text);
+    chatInputText = "";
+    void tick().then(() => chatInputEl?.focus());
+  }
+
+  function handleChatInputKeydown(ev: KeyboardEvent) {
+    if (ev.key !== "Enter") return;
+    if ((ev as unknown as { isComposing?: boolean }).isComposing) return;
+    if (ev.shiftKey) return;
+    ev.preventDefault();
+    sendChatInput();
+  }
+
   async function openInputModal(prefill = "") {
     inputModalText = prefill;
     inputModalOpen = true;
@@ -2717,6 +2755,24 @@
       out.push({ ...m });
     }
     return out;
+  })();
+
+  type ChatTurn = { key: string; user: ChatMessage | null; parts: ChatMessage[] };
+  $: chatTurns = (() => {
+    const msgs = displayMessages ?? [];
+    const out: ChatTurn[] = [];
+    let cur: ChatTurn = { key: "init", user: null, parts: [] };
+    for (const m of msgs) {
+      if (m.kind === "run.input" && m.role === "user") {
+        if (cur.user || cur.parts.length > 0) out.push(cur);
+        cur = { key: m.key, user: m, parts: [] };
+        continue;
+      }
+      cur.parts.push(m);
+    }
+    if (cur.user || cur.parts.length > 0) out.push(cur);
+    // Stabilize keys for the "system-only" first turn.
+    return out.map((t, i) => (t.user ? t : { ...t, key: t.parts[0]?.key ?? `turn:${i}` }));
   })();
 
   function todoStorageKey(runId: string) {
@@ -3261,70 +3317,122 @@
           {#if displayMessages.length === 0}
             <div class="subtle"></div>
           {:else}
-            {#each displayMessages as m, i (m.key)}
-              {#if m.kind === "tool.call" && displayMessages[i + 1]?.kind === "tool.result" && displayMessages[i + 1]?.request_id && displayMessages[i + 1]?.request_id === m.request_id}
-                {@const callMeta = toolMetaFromText(m.kind, m.text || "")}
-                {@const res = displayMessages[i + 1]}
-                {@const resMeta = toolMetaFromText(res.kind, res.text || "")}
-                <div class="chat-row" data-role="system">
-                  <details open class="tool-card">
-                    <summary>
-                      <code>{callMeta.label}</code>
-                      {#if m.actor}<code>actor={m.actor}</code>{/if}
-                      {#if (res.text || "").includes(" ok=true")}
-                        <span style="color:#065f46">ok</span>
-                      {:else if (res.text || "").includes(" ok=false")}
-                        <span style="color:#b91c1c">error</span>
-                      {/if}
-                    </summary>
-                    <div class="tool-card-body">
-                      <div class="tool-card-label">call</div>
-                      {@html renderMarkdownBasic(callMeta.details || "")}
-                      <div class="tool-card-label" style="margin-top:10px">result</div>
-                      {@html renderMarkdownBasic(resMeta.details || "")}
-                    </div>
-                  </details>
-                </div>
-              {:else if m.kind === "tool.result" && displayMessages[i - 1]?.kind === "tool.call" && displayMessages[i - 1]?.request_id && displayMessages[i - 1]?.request_id === m.request_id}
-                <!-- paired with previous tool.call; skip rendering -->
-              {:else if m.kind === "run.permission_requested"}
-                {@const isCurrent = Boolean(selectedAwaiting?.request_id) && selectedAwaiting?.request_id === m.request_id}
-                <div class="chat-row" data-role="system">
-                  <div class="approval-card">
-                    <div class="approval-card-top">
-                      <span class="meta-pill">
-                        <span class="meta-k">tool</span>
-                        <span class="meta-v">{selectedRun.tool}</span>
-                      </span>
-                      {#if isCurrent && selectedAwaiting?.op_tool}
-                        <span class="session-op">{selectedAwaiting.op_tool}</span>
-                      {/if}
-                      {#if isCurrent && selectedAwaiting?.op_args_summary}
-                        <span class="session-op-args">{selectedAwaiting.op_args_summary}</span>
-                      {/if}
-                    </div>
-                    {#if m.text}
-                      <div class="approval-card-prompt">{m.text}</div>
-                    {/if}
+            {#each chatTurns as turn (turn.key)}
+              {#if turn.user}
+                <div class="chat-row" data-role="user">
+                  <div class="chat-bubble" data-role="user">
+                    {@html renderMarkdownBasic(turn.user.text || "")}
                   </div>
-                  <div class="chat-ts">{formatAbsTime(m.ts)}</div>
-                </div>
-              {:else}
-                <div class="chat-row" data-role={m.role}>
-                  {#if m.role === "system"}
-                    <div class="chat-system">
-                      {@html renderMarkdownBasic(m.text || "")}
-                    </div>
-                  {:else}
-                    <div class="chat-bubble" data-role={m.role}>
-                      {@html renderMarkdownBasic(m.text || "")}
-                    </div>
-                  {/if}
-                  <div class="chat-ts">{formatAbsTime(m.ts)}</div>
+                  <div class="chat-ts">{formatAbsTime(turn.user.ts)}</div>
                 </div>
               {/if}
+
+              {#each turn.parts as m, i (m.key)}
+                {#if m.kind === "tool.call" && turn.parts[i + 1]?.kind === "tool.result" && turn.parts[i + 1]?.request_id && turn.parts[i + 1]?.request_id === m.request_id}
+                  {@const callMeta = toolMetaFromText(m.kind, m.text || "")}
+                  {@const res = turn.parts[i + 1]}
+                  {@const resMeta = toolMetaFromText(res.kind, res.text || "")}
+                  {@const callData = isRecord(m.data) ? m.data : null}
+                  {@const resData = isRecord(res.data) ? res.data : null}
+                  {@const label = callData && typeof callData["tool"] === "string" ? String(callData["tool"]) : callMeta.label}
+                  {@const okState =
+                    resData && typeof resData["ok"] === "boolean"
+                      ? Boolean(resData["ok"])
+                      : (res.text || "").includes(" ok=true")
+                        ? true
+                        : (res.text || "").includes(" ok=false")
+                          ? false
+                          : null}
+                  <div class="chat-row" data-role="system">
+                    <details open class="tool-card">
+                      <summary>
+                        <code>{label}</code>
+                        {#if m.actor}<code>actor={m.actor}</code>{/if}
+                        {#if okState === true}
+                          <span style="color:#065f46">ok</span>
+                        {:else if okState === false}
+                          <span style="color:#b91c1c">error</span>
+                        {/if}
+                      </summary>
+                      <div class="tool-card-body">
+                        <div class="tool-card-label">call</div>
+                        {#if callData && "args" in callData}
+                          <pre class="tool-json">{JSON.stringify(callData.args, null, 2)}</pre>
+                        {:else}
+                          {@html renderMarkdownBasic(callMeta.details || "")}
+                        {/if}
+                        <div class="tool-card-label" style="margin-top:10px">result</div>
+                        {#if resData && okState === true && "result" in resData}
+                          <pre class="tool-json">{JSON.stringify(resData.result, null, 2)}</pre>
+                        {:else if resData && okState === false && "error" in resData}
+                          <pre class="tool-json">{JSON.stringify(resData.error, null, 2)}</pre>
+                        {:else}
+                          {@html renderMarkdownBasic(resMeta.details || "")}
+                        {/if}
+                      </div>
+                    </details>
+                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
+                  </div>
+                {:else if m.kind === "tool.result" && turn.parts[i - 1]?.kind === "tool.call" && turn.parts[i - 1]?.request_id && turn.parts[i - 1]?.request_id === m.request_id}
+                  <!-- paired with previous tool.call; skip rendering -->
+                {:else if m.kind === "run.permission_requested"}
+                  {@const isCurrent = Boolean(selectedAwaiting?.request_id) && selectedAwaiting?.request_id === m.request_id}
+                  <div class="chat-row" data-role="system">
+                    <div class="approval-card">
+                      <div class="approval-card-top">
+                        <span class="meta-pill">
+                          <span class="meta-k">tool</span>
+                          <span class="meta-v">{selectedRun.tool}</span>
+                        </span>
+                        {#if isCurrent && selectedAwaiting?.op_tool}
+                          <span class="session-op">{selectedAwaiting.op_tool}</span>
+                        {/if}
+                        {#if isCurrent && selectedAwaiting?.op_args_summary}
+                          <span class="session-op-args">{selectedAwaiting.op_args_summary}</span>
+                        {/if}
+                      </div>
+                      {#if m.text}
+                        <div class="approval-card-prompt">{m.text}</div>
+                      {/if}
+                    </div>
+                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
+                  </div>
+                {:else}
+                  <div class="chat-row" data-role={m.role}>
+                    {#if m.role === "system"}
+                      <div class="chat-system">
+                        {@html renderMarkdownBasic(m.text || "")}
+                      </div>
+                    {:else}
+                      <div class="chat-bubble" data-role={m.role}>
+                        {@html renderMarkdownBasic(m.text || "")}
+                      </div>
+                    {/if}
+                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
+                  </div>
+                {/if}
+              {/each}
             {/each}
           {/if}
+        </div>
+        <div class="chat-inputbar">
+          <textarea
+            class="chat-textarea"
+            bind:this={chatInputEl}
+            bind:value={chatInputText}
+            rows="2"
+            on:keydown={handleChatInputKeydown}
+            placeholder=""
+            disabled={!selectedRunId || status !== "connected"}
+          ></textarea>
+          <div class="chat-input-actions">
+            <button on:click={sendChatInput} disabled={!selectedRunId || status !== "connected" || !chatInputText.trim()} type="button">
+              发送
+            </button>
+            <button class="secondary" on:click={() => openInputModal(chatInputText)} disabled={!selectedRunId || status !== "connected"} type="button">
+              更多
+            </button>
+          </div>
         </div>
       {:else}
         <div class="output-toolbar">
@@ -3408,11 +3516,13 @@
         </div>
       {/if}
 
-      <div class="detail-input">
-        <button class="secondary" on:click={() => openInputModal("")} disabled={!selectedRunId || status !== "connected"} type="button">
-          输入
-        </button>
-      </div>
+      {#if sessionDetailTab !== "messages"}
+        <div class="detail-input">
+          <button class="secondary" on:click={() => openInputModal("")} disabled={!selectedRunId || status !== "connected"} type="button">
+            输入
+          </button>
+        </div>
+      {/if}
     {/if}
   </section>
 
@@ -4619,6 +4729,39 @@
     margin-bottom: 6px;
   }
 
+  .tool-json {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.04);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+    max-height: 240px;
+  }
+
+  .chat-inputbar {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+
+  .chat-textarea {
+    flex: 1;
+    min-height: 44px;
+    resize: vertical;
+  }
+
+  .chat-input-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: stretch;
+  }
+
   .output-toolbar {
     margin-top: 12px;
     display: flex;
@@ -4723,6 +4866,16 @@
     .sessions-todo {
       grid-column: 1;
       grid-row: auto;
+    }
+
+    .chat-inputbar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .chat-input-actions {
+      flex-direction: row;
+      justify-content: flex-end;
     }
   }
 

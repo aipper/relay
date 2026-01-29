@@ -280,6 +280,7 @@ async fn connect_and_run(
                                     "claude" => ("RELAY_CLAUDE_BIN", "claude"),
                                     "iflow" => ("RELAY_IFLOW_BIN", "iflow"),
                                     "gemini" => ("RELAY_GEMINI_BIN", "gemini"),
+                                    "opencode" => ("RELAY_OPENCODE_BIN", "opencode"),
                                     _ => ("", tool),
                                 };
                                 let resolved = if env_var.is_empty() {
@@ -293,7 +294,7 @@ async fn connect_and_run(
                                 json!({ "tool": tool, "bin": resolved, "ok": err.is_none(), "error": err })
                             };
 
-                            let tools = ["codex", "claude", "iflow", "gemini"]
+                            let tools = ["codex", "claude", "iflow", "gemini", "opencode"]
                                 .into_iter()
                                 .map(tool_status)
                                 .collect::<Vec<_>>();

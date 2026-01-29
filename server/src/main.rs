@@ -345,6 +345,8 @@ struct ChatMessage {
     actor: Option<String>,
     request_id: Option<String>,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<JsonValue>,
 }
 
 fn truncate_text(s: &str, max_chars: usize) -> String {
@@ -387,19 +389,21 @@ async fn http_list_messages(
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows.into_iter().rev() {
-        let (role, text, request_id) = match row.r#type.as_str() {
-            "run.output" => ("assistant", row.text.unwrap_or_default(), None),
+        let parsed_data = row
+            .data_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<JsonValue>(s).ok());
+
+        let (role, text, request_id, data) = match row.r#type.as_str() {
+            "run.output" => ("assistant", row.text.unwrap_or_default(), None, None),
             "run.input" => (
                 "user",
                 row.text_redacted.or(row.text).unwrap_or_default(),
                 row.input_id.clone(),
+                None,
             ),
             "run.permission_requested" => {
-                let parsed = row
-                    .data_json
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
-                    .unwrap_or(JsonValue::Null);
+                let parsed = parsed_data.clone().unwrap_or(JsonValue::Null);
                 let prompt = parsed
                     .get("prompt")
                     .and_then(|v| v.as_str())
@@ -409,14 +413,10 @@ async fn http_list_messages(
                     .get("request_id")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
-                ("system", prompt, req)
+                ("system", prompt, req, parsed_data)
             }
             "tool.call" => {
-                let parsed = row
-                    .data_json
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
-                    .unwrap_or(JsonValue::Null);
+                let parsed = parsed_data.clone().unwrap_or(JsonValue::Null);
                 let tool = parsed
                     .get("tool")
                     .and_then(|v| v.as_str())
@@ -427,14 +427,10 @@ async fn http_list_messages(
                     .map(|s| s.to_string());
                 let args = parsed.get("args").unwrap_or(&JsonValue::Null);
                 let args = truncate_text(&json_compact(args), 2000);
-                ("system", format!("tool.call {tool} {args}"), req)
+                ("system", format!("tool.call {tool} {args}"), req, parsed_data)
             }
             "tool.result" => {
-                let parsed = row
-                    .data_json
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
-                    .unwrap_or(JsonValue::Null);
+                let parsed = parsed_data.clone().unwrap_or(JsonValue::Null);
                 let tool = parsed
                     .get("tool")
                     .and_then(|v| v.as_str())
@@ -463,10 +459,10 @@ async fn http_list_messages(
                     text.push(' ');
                     text.push_str(&truncate_text(err, 2000));
                 }
-                ("system", text, req)
+                ("system", text, req, parsed_data)
             }
-            "run.started" => ("system", "run started".to_string(), None),
-            "run.exited" => ("system", "run exited".to_string(), None),
+            "run.started" => ("system", "run started".to_string(), None, parsed_data),
+            "run.exited" => ("system", "run exited".to_string(), None, parsed_data),
             _ => continue,
         };
 
@@ -479,6 +475,7 @@ async fn http_list_messages(
             actor: row.actor,
             request_id,
             text,
+            data,
         });
     }
 

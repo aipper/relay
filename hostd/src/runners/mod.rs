@@ -133,6 +133,7 @@ pub fn for_tool(tool: &str) -> Box<dyn Runner> {
         "codex" => Box::new(crate::runners::codex::CodexRunner {}),
         "claude" => Box::new(crate::runners::claude::ClaudeRunner {}),
         "iflow" => Box::new(crate::runners::iflow::IflowRunner {}),
+        "opencode" => Box::new(crate::runners::opencode::OpencodeRunner {}),
         _ => Box::new(crate::runners::shell::ShellRunner {}),
     }
 }
@@ -228,6 +229,7 @@ pub fn base_prompt_regex(tool: &str) -> Arc<Regex> {
 pub mod claude;
 pub mod codex;
 pub mod iflow;
+pub mod opencode;
 pub mod shell;
 
 #[cfg(test)]

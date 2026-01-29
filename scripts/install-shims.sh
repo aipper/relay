@@ -9,18 +9,18 @@ Installs command shims so you can run `codex` / `claude` / `iflow` directly in a
 and have them start a relay run (via hostd) with cwd = current directory.
 
 Important:
-  - Your machine likely already has real `codex` / `claude` / `iflow` binaries.
+  - Your machine likely already has real `codex` / `claude` / `iflow` / `gemini` / `opencode` binaries.
   - These shims intentionally shadow those names in PATH.
   - To avoid recursion (hostd calling the shim again), we record the real binary paths into:
       ~/.relay/bin-map.json
 
 Usage:
-  scripts/install-shims.sh [--dir ~/.local/bin] [--tools codex,claude,iflow]
-  scripts/install-shims.sh --uninstall [--dir ~/.local/bin] [--tools codex,claude,iflow]
+  scripts/install-shims.sh [--dir ~/.local/bin] [--tools codex,claude,iflow,gemini,opencode]
+  scripts/install-shims.sh --uninstall [--dir ~/.local/bin] [--tools codex,claude,iflow,gemini,opencode]
 
 Options:
   --dir <path>       Install directory (default: ~/.local/bin)
-  --tools <list>     Comma-separated tool list (default: codex,claude,iflow)
+  --tools <list>     Comma-separated tool list (default: codex,claude,iflow,gemini,opencode)
   --auto-path        Ensure install dir is in PATH by updating shell rc (with backup)
   --uninstall        Remove installed shims (does not delete bin-map.json)
 EOF
@@ -34,7 +34,7 @@ need() {
 }
 
 INSTALL_DIR="${HOME}/.local/bin"
-TOOLS="codex,claude,iflow"
+TOOLS="codex,claude,iflow,gemini,opencode"
 UNINSTALL="0"
 AUTO_PATH="0"
 

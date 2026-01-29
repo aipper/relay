@@ -46,6 +46,10 @@ struct Run {
     codex_mcp: Mutex<Option<CodexMcpState>>,
     codex_rpc_waiters: StdMutex<HashMap<i64, oneshot::Sender<JsonValue>>>,
     codex_call_lock: Mutex<()>,
+    opencode_structured: bool,
+    opencode_session_id: StdMutex<Option<String>>,
+    opencode_active_pid: StdMutex<Option<i32>>,
+    opencode_call_lock: Mutex<()>,
 }
 
 #[derive(Clone)]
@@ -95,6 +99,25 @@ fn codex_mode_setting() -> CodexModeSetting {
         "auto" => CodexModeSetting::Auto,
         "structured" | "mcp" => CodexModeSetting::Structured,
         _ => CodexModeSetting::Tui,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpencodeModeSetting {
+    Structured,
+    Tui,
+}
+
+fn opencode_mode_setting() -> OpencodeModeSetting {
+    let v = std::env::var("RELAY_OPENCODE_MODE")
+        .ok()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match v.as_str() {
+        "tui" | "pty" => OpencodeModeSetting::Tui,
+        "structured" | "json" => OpencodeModeSetting::Structured,
+        _ => OpencodeModeSetting::Structured,
     }
 }
 
@@ -304,6 +327,220 @@ async fn codex_mcp_submit_prompt(
     Ok(())
 }
 
+async fn opencode_submit_prompt(
+    run: Arc<Run>,
+    events: broadcast::Sender<WsEnvelope>,
+    host_id: String,
+    prompt: String,
+) -> anyhow::Result<()> {
+    let _guard = run.opencode_call_lock.lock().await;
+
+    let bin = crate::runners::resolve_tool_bin("opencode", "RELAY_OPENCODE_BIN", "opencode");
+    crate::runners::validate_bin_exists(
+        &bin,
+        "opencode (set RELAY_OPENCODE_BIN=/path/to/opencode or install shims to record real path)",
+    )?;
+
+    let session_id = run.opencode_session_id.lock().ok().and_then(|v| v.clone());
+
+    let mut child_cmd = Command::new(&bin);
+    child_cmd.arg("run").arg("--format").arg("json");
+    if let Some(session_id) = session_id.as_deref().filter(|s| !s.trim().is_empty()) {
+        child_cmd.arg("--session").arg(session_id);
+    }
+
+    // Avoid interactive permission prompts in non-TTY mode. Users can override by explicitly
+    // setting OPENCODE_PERMISSION in their environment.
+    if std::env::var_os("OPENCODE_PERMISSION").is_none() {
+        child_cmd.env("OPENCODE_PERMISSION", r#"{"*":"allow"}"#);
+    }
+
+    child_cmd.current_dir(&run.cwd);
+    child_cmd.stdin(Stdio::piped());
+    child_cmd.stdout(Stdio::piped());
+    child_cmd.stderr(Stdio::piped());
+
+    let mut child = child_cmd.spawn().context("spawn opencode run")?;
+    let pid = child.id() as i32;
+    if let Ok(mut p) = run.opencode_active_pid.lock() {
+        *p = Some(pid);
+    }
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(prompt.as_bytes())
+            .context("write opencode stdin")?;
+        stdin.write_all(b"\n").ok();
+    }
+
+    let stdout = child.stdout.take().context("take opencode stdout")?;
+    let stderr = child.stderr.take().context("take opencode stderr")?;
+
+    // Forward stderr as best-effort logs for debugging.
+    {
+        let events = events.clone();
+        let host_id = host_id.clone();
+        let run_for_thread = run.clone();
+        std::thread::spawn(move || {
+            let mut r = BufReader::new(stderr);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match r.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let mut env = WsEnvelope::new(
+                            "run.output",
+                            json!({ "stream": "stderr", "text": line }),
+                        );
+                        env.host_id = Some(host_id.clone());
+                        env.run_id = Some(run_for_thread.run_id.clone());
+                        env.seq = Some(run_for_thread.next_seq());
+                        let _ = events.send(env);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // Parse JSONL events from stdout and map them to relay events.
+    let mut r = BufReader::new(stdout);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match r.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {
+                let raw = line.trim_end_matches(&['\r', '\n'][..]);
+                if raw.is_empty() {
+                    continue;
+                }
+                let Ok(v) = serde_json::from_str::<JsonValue>(raw) else {
+                    continue;
+                };
+
+                if let Some(sid) = v.get("sessionID").and_then(|v| v.as_str()) {
+                    if let Ok(mut cur) = run.opencode_session_id.lock() {
+                        if cur.as_deref() != Some(sid) {
+                            *cur = Some(sid.to_string());
+                        }
+                    }
+                }
+
+                let t = v.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match t {
+                    "text" => {
+                        let text = v
+                            .get("part")
+                            .and_then(|p| p.get("text"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if text.trim().is_empty() {
+                            continue;
+                        }
+                        let mut out = text.to_string();
+                        if !out.ends_with('\n') {
+                            out.push('\n');
+                        }
+                        out.push('\n');
+
+                        let mut env =
+                            WsEnvelope::new("run.output", json!({ "stream": "stdout", "text": out }));
+                        env.host_id = Some(host_id.clone());
+                        env.run_id = Some(run.run_id.clone());
+                        env.seq = Some(run.next_seq());
+                        let _ = events.send(env);
+                    }
+                    "tool_use" => {
+                        let part = v.get("part").unwrap_or(&JsonValue::Null);
+                        let request_id = part
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                        let tool = part
+                            .get("tool")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let input = part
+                            .get("state")
+                            .and_then(|s| s.get("input"))
+                            .cloned()
+                            .unwrap_or(JsonValue::Null);
+                        let title = part.get("state").and_then(|s| s.get("title")).cloned();
+                        let output = part.get("state").and_then(|s| s.get("output")).cloned();
+
+                        let mut call = WsEnvelope::new(
+                            "tool.call",
+                            json!({
+                                "request_id": request_id.clone(),
+                                "tool": tool,
+                                "actor": "opencode",
+                                "args": input
+                            }),
+                        );
+                        call.host_id = Some(host_id.clone());
+                        call.run_id = Some(run.run_id.clone());
+                        call.seq = Some(run.next_seq());
+                        let _ = events.send(call);
+
+                        let mut result = WsEnvelope::new(
+                            "tool.result",
+                            json!({
+                                "request_id": request_id,
+                                "tool": tool,
+                                "actor": "opencode",
+                                "ok": true,
+                                "duration_ms": 0,
+                                "result": {
+                                    "title": title,
+                                    "output": output,
+                                    "raw_part": part
+                                }
+                            }),
+                        );
+                        result.host_id = Some(host_id.clone());
+                        result.run_id = Some(run.run_id.clone());
+                        result.seq = Some(run.next_seq());
+                        let _ = events.send(result);
+                    }
+                    "error" => {
+                        let err = v.get("error").cloned().unwrap_or(JsonValue::Null);
+                        let mut env = WsEnvelope::new(
+                            "run.output",
+                            json!({ "stream": "stderr", "text": format!("opencode error: {err}") }),
+                        );
+                        env.host_id = Some(host_id.clone());
+                        env.run_id = Some(run.run_id.clone());
+                        env.seq = Some(run.next_seq());
+                        let _ = events.send(env);
+                    }
+                    _ => {}
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let status = child.wait().context("wait opencode run")?;
+    if let Ok(mut p) = run.opencode_active_pid.lock() {
+        *p = None;
+    }
+    if !status.success() {
+        let mut env = WsEnvelope::new(
+            "run.output",
+            json!({ "stream": "stderr", "text": format!("opencode exited: {status}") }),
+        );
+        env.host_id = Some(host_id);
+        env.run_id = Some(run.run_id.clone());
+        env.seq = Some(run.next_seq());
+        let _ = events.send(env);
+    }
+
+    Ok(())
+}
+
 impl RunManager {
     pub fn new(
         host_id: String,
@@ -386,6 +623,21 @@ impl RunManager {
             }
         }
 
+        if tool == "opencode" {
+            match opencode_mode_setting() {
+                OpencodeModeSetting::Structured => {
+                    return self
+                        .start_run_opencode_structured_with_id(run_id, cmd, resolved_cwd)
+                        .await;
+                }
+                OpencodeModeSetting::Tui => {
+                    return self
+                        .start_run_pty_with_id(run_id, tool, cmd, resolved_cwd)
+                        .await;
+                }
+            }
+        }
+
         self.start_run_pty_with_id(run_id, tool, cmd, resolved_cwd)
             .await
     }
@@ -443,6 +695,10 @@ impl RunManager {
             codex_mcp: Mutex::new(None),
             codex_rpc_waiters: StdMutex::new(HashMap::new()),
             codex_call_lock: Mutex::new(()),
+            opencode_structured: false,
+            opencode_session_id: StdMutex::new(None),
+            opencode_active_pid: StdMutex::new(None),
+            opencode_call_lock: Mutex::new(()),
         });
 
         {
@@ -692,6 +948,62 @@ impl RunManager {
         Ok(run_id)
     }
 
+    async fn start_run_opencode_structured_with_id(
+        &self,
+        run_id: String,
+        cmd: String,
+        cwd: String,
+    ) -> anyhow::Result<String> {
+        let bin = crate::runners::resolve_tool_bin("opencode", "RELAY_OPENCODE_BIN", "opencode");
+        crate::runners::validate_bin_exists(
+            &bin,
+            "opencode (set RELAY_OPENCODE_BIN=/path/to/opencode or install shims to record real path)",
+        )?;
+
+        let run = Arc::new(Run {
+            run_id: run_id.clone(),
+            seq: AtomicI64::new(0),
+            pty: None,
+            writer: Mutex::new(Box::new(std::io::sink())),
+            pid: 0,
+            cwd: cwd.clone(),
+            tool: "opencode".to_string(),
+            prompt_regex: crate::runners::base_prompt_regex("opencode"),
+            awaiting_input: Mutex::new(false),
+            stdin_line_buf: Mutex::new(Vec::new()),
+            processed_input_ids: Mutex::new(HashSet::new()),
+            pending_permission: Mutex::new(None),
+            codex_mcp: Mutex::new(None),
+            codex_rpc_waiters: StdMutex::new(HashMap::new()),
+            codex_call_lock: Mutex::new(()),
+            opencode_structured: true,
+            opencode_session_id: StdMutex::new(None),
+            opencode_active_pid: StdMutex::new(None),
+            opencode_call_lock: Mutex::new(()),
+        });
+
+        {
+            let mut runs = self.runs.write().await;
+            runs.insert(run_id.clone(), run.clone());
+        }
+
+        let mut started = WsEnvelope::new(
+            "run.started",
+            json!({
+                "tool": "opencode",
+                "cwd": cwd,
+                "command": cmd,
+                "mode": "structured"
+            }),
+        );
+        started.host_id = Some(self.host_id.clone());
+        started.run_id = Some(run_id.clone());
+        started.seq = Some(run.next_seq());
+        let _ = self.events.send(started);
+
+        Ok(run_id)
+    }
+
     async fn start_run_codex_mcp_with_id(
         &self,
         run_id: String,
@@ -814,6 +1126,10 @@ impl RunManager {
             })),
             codex_rpc_waiters: StdMutex::new(HashMap::new()),
             codex_call_lock: Mutex::new(()),
+            opencode_structured: false,
+            opencode_session_id: StdMutex::new(None),
+            opencode_active_pid: StdMutex::new(None),
+            opencode_call_lock: Mutex::new(()),
         });
 
         {
@@ -1250,7 +1566,8 @@ impl RunManager {
         }
 
         let is_codex_mcp = { run.codex_mcp.lock().await.is_some() };
-        if !is_codex_mcp {
+        let is_opencode_structured = run.opencode_structured;
+        if !is_codex_mcp && !is_opencode_structured {
             let mut w = run.writer.lock().await;
             w.write_all(text.as_bytes()).context("write stdin")?;
             w.flush().ok();
@@ -1302,6 +1619,25 @@ impl RunManager {
                     }
                 });
             }
+        } else if is_opencode_structured {
+            let prompt = text.trim_end_matches(&['\r', '\n'][..]).to_string();
+            if !prompt.trim().is_empty() {
+                let run2 = run.clone();
+                let events = self.events.clone();
+                let host_id = self.host_id.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = opencode_submit_prompt(run2.clone(), events.clone(), host_id.clone(), prompt).await {
+                        let mut env = WsEnvelope::new(
+                            "run.output",
+                            json!({ "stream": "stderr", "text": format!("opencode prompt failed: {e:#}") }),
+                        );
+                        env.host_id = Some(host_id);
+                        env.run_id = Some(run2.run_id.clone());
+                        env.seq = Some(run2.next_seq());
+                        let _ = events.send(env);
+                    }
+                });
+            }
         }
 
         Ok(())
@@ -1320,7 +1656,8 @@ impl RunManager {
         .context("unknown run_id")?;
 
         let is_codex_mcp = { run.codex_mcp.lock().await.is_some() };
-        if !is_codex_mcp {
+        let is_opencode_structured = run.opencode_structured;
+        if !is_codex_mcp && !is_opencode_structured {
             let mut w = run.writer.lock().await;
             w.write_all(bytes).context("write stdin")?;
             w.flush().ok();
@@ -1410,6 +1747,25 @@ impl RunManager {
                             let mut env = WsEnvelope::new(
                                 "run.output",
                                 json!({ "stream": "stderr", "text": format!("codex mcp prompt failed: {e:#}") }),
+                            );
+                            env.host_id = Some(host_id);
+                            env.run_id = Some(run2.run_id.clone());
+                            env.seq = Some(run2.next_seq());
+                            let _ = events.send(env);
+                        }
+                    });
+                }
+            } else if is_opencode_structured {
+                let prompt = text.trim_end_matches(&['\r', '\n'][..]).to_string();
+                if !prompt.trim().is_empty() {
+                    let run2 = run.clone();
+                    let events = self.events.clone();
+                    let host_id = self.host_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = opencode_submit_prompt(run2.clone(), events.clone(), host_id.clone(), prompt).await {
+                            let mut env = WsEnvelope::new(
+                                "run.output",
+                                json!({ "stream": "stderr", "text": format!("opencode prompt failed: {e:#}") }),
                             );
                             env.host_id = Some(host_id);
                             env.run_id = Some(run2.run_id.clone());
@@ -1524,6 +1880,50 @@ impl RunManager {
         }
         .context("unknown run_id")?;
 
+        if run.opencode_structured {
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{Signal, kill};
+                use nix::unistd::Pid;
+
+                let sig = match signal {
+                    "kill" => Signal::SIGKILL,
+                    "int" => Signal::SIGINT,
+                    _ => Signal::SIGTERM,
+                };
+
+                let pid = run
+                    .opencode_active_pid
+                    .lock()
+                    .ok()
+                    .and_then(|pid| *pid);
+                if let Some(pid) = pid {
+                    let _ = kill(Pid::from_raw(pid), sig);
+                }
+            }
+
+            // "int" is treated as "cancel current prompt" and keeps the run alive.
+            if signal == "int" {
+                return Ok(());
+            }
+
+            // Mark the run exited and forget local state.
+            {
+                let mut runs = self.runs.write().await;
+                runs.remove(run_id);
+            }
+            if let Ok(mut pid) = run.opencode_active_pid.lock() {
+                *pid = None;
+            }
+
+            let mut env = WsEnvelope::new("run.exited", json!({ "exit_code": 0 }));
+            env.host_id = Some(self.host_id.clone());
+            env.run_id = Some(run.run_id.clone());
+            env.seq = Some(run.next_seq());
+            let _ = self.events.send(env);
+            return Ok(());
+        }
+
         #[cfg(unix)]
         {
             use nix::sys::signal::{Signal, kill};
@@ -1545,6 +1945,11 @@ impl RunManager {
             runs.get(run_id).cloned()
         }
         .context("unknown run_id")?;
+
+        // Structured (opencode) runs don't have a PTY to resize.
+        if run.opencode_structured {
+            return Ok(());
+        }
 
         // Structured (MCP) runs don't have a PTY to resize.
         let is_codex_mcp = { run.codex_mcp.lock().await.is_some() };

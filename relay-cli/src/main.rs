@@ -22,6 +22,7 @@ Usage:
   relay claude [--sock /path/to/relay-hostd.sock] [--cmd "claude ..."] [--cwd /path/to/project] [--attach|--no-attach]
   relay iflow  [--sock /path/to/relay-hostd.sock] [--cmd "iflow ..."] [--cwd /path/to/project] [--attach|--no-attach]
   relay gemini [--sock /path/to/relay-hostd.sock] [--cmd "gemini ..."] [--cwd /path/to/project] [--attach|--no-attach]
+  relay opencode [--sock /path/to/relay-hostd.sock] [--cmd "opencode ..."] [--cwd /path/to/project] [--attach|--no-attach]
 
   relay mcp [--root /path/to/project]
 
@@ -1275,7 +1276,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let tool = match cmd {
-        "codex" | "claude" | "iflow" | "gemini" => cmd,
+        "codex" | "claude" | "iflow" | "gemini" | "opencode" => cmd,
         _ => usage(),
     };
 
