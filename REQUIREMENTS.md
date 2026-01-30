@@ -199,6 +199,13 @@
         - `tool_use` → `tool.call` + `tool.result`（args/result 存在 `data_json`，供 web 富渲染）
         - `error` → `run.output`（stderr）
       - 为避免非 TTY 下的交互式权限提示，hostd 默认注入 `OPENCODE_PERMISSION={"*":"allow"}`（若用户已显式设置则不覆盖）。
+        - 可通过 `RELAY_OPENCODE_PERMISSION_MODE=inherit` 禁用注入，仅继承环境变量（默认：auto allow-all，保持兼容）。
+      - `run.started`（opencode structured）需携带权限模式元信息（用于 web 展示，不提供编辑）：
+        - `permission_env_set`：布尔值，表示是否用户显式设置了 `OPENCODE_PERMISSION`。
+        - `permission_mode`：`env | relay_auto_allow_all | inherit`。
+      - 结构化事件的敏感信息处理：
+        - `tool.call.args` 与 `tool.result.result.raw_part/title/output` 需经过 redaction 后再进入事件流/落库（避免 secrets 泄露）。
+        - `tool.result.duration_ms` 可选；未知时不应伪造为 0。
       - `run.stop`：
         - `signal=int`：尝试 SIGINT 当前 opencode 子进程（取消当前生成），run 继续可输入。
         - `signal=term|kill`：结束 run 并发出 `run.exited`。
@@ -284,7 +291,7 @@
   - 状态标签不提供 tooltip。
   - 会话列表不显示未读更新提示。
   - 顶部显示连接状态（圆点 + 文字）；WebSocket 断开时启用 10s 轮询刷新 runs/hosts。
-  - 会话详情提供“消息 / 输出”顶部标签切换；输出页默认自动滚动，用户手动滚动后暂停自动滚动。
+  - 会话详情提供“事件 / 终端”顶部标签切换；默认进入“事件”视图；终端仅用于查看原始上下文。
   - 响应式断点：<=640（手机单列，列表→详情全屏切换）；641–1024（平板双栏，列表+详情）；>=1025（桌面双栏，列表宽度固定 320–360px）。
   - 输出页保留最近内容按可视高度动态裁剪：`visibleLines = floor(viewHeight / lineHeight)`，`bufferLines = clamp(visibleLines * 4, 200, 2000)`。
   - 输出页自动滚动暂停时显示“跳到最新”按钮。
@@ -312,8 +319,9 @@
   - 输出搜索支持键盘快捷键切换上一处/下一处（↑/↓），搜索框聚焦时仅用于搜索跳转。
   - 进入输出页时搜索框自动聚焦（含手机端），不影响自动滚动。
   - 待审批时，消息流内插入“审批请求卡片”（与弹窗并存）；卡片展示会话工具/模型（run.tool）+ 待审批操作工具名（op_tool）+ 参数摘要（最多 80 字符） + 发起时间。
-  - 消息流以“turn（用户输入）→ parts（工具/系统/assistant 输出）”的结构展示（对齐 opencode share 的观感）；`tool.call/tool.result` 优先展示结构化 JSON（来自 messages API 的 `data` 字段），并可展开查看详情。
-  - `tool=opencode` 的会话默认打开“消息”tab。
+  - 事件流以“turn（用户输入）→ parts（工具/系统/assistant 输出）”的结构展示（对齐 opencode share 的观感）；`tool.call/tool.result` 优先展示结构化 JSON（来自 messages API 的 `data` 字段），并可展开查看详情。
+  - 事件视图默认不展示海量 `run.output`（避免淹没结构化事件）；默认仅对 `tool=opencode` 的会话保留 `run.output` 作为结构化 text 的承载。
+  - 事件视图顶部提供“输出摘要（tail）”与“打开终端”入口；TUI 输出默认仅在终端视图查看。
   - 消息流区分用户/助手/系统角色的视觉样式（用户右对齐、助手左对齐、系统居中；系统消息更小字号与弱色，且无气泡仅文本；用户/助手使用气泡背景；用户用品牌色，助手用中性灰；用户/助手/系统均显示时间戳，格式为绝对时间，位置在气泡下方小字；气泡最大宽度 70%；长文本自动换行并保留换行）。
 
 ## 配置与安全（Configuration & Security Requirements）

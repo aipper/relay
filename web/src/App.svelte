@@ -207,7 +207,8 @@
   let todoSuggestions: string[] = [];
   let todoSuggestionsTimer: ReturnType<typeof setTimeout> | null = null;
 
-  let sessionDetailTab: "output" | "messages" = "output";
+  // Monitor-first: default to structured events view.
+  let sessionDetailTab: "output" | "messages" = "messages";
   let outputAutoScroll = true;
   let outputIsAtBottom = true;
   let outputBufferLines = 400;
@@ -829,8 +830,8 @@
 
   async function selectSession(runId: string) {
     selectedRunId = runId;
-    const tool = runs.find((r) => r.id === runId)?.tool ?? "";
-    sessionDetailTab = tool === "opencode" ? "messages" : "output";
+    // Default to events view; terminal is available via the tab.
+    sessionDetailTab = "messages";
     outputAutoScroll = true;
     outputPausedPending = "";
     outputPausedPendingChars = 0;
@@ -2745,8 +2746,15 @@
 
   $: displayMessages = (() => {
     const msgs = selectedMessages ?? [];
+    const tool = selectedRunId ? (runs.find((r) => r.id === selectedRunId)?.tool ?? "") : "";
+    const includeOutputInEvents = tool === "opencode";
     const out: ChatMessage[] = [];
     for (const m of msgs) {
+      // Keep event timeline compact: show raw output only for opencode (its structured text comes
+      // through as run.output today). Other tools can be inspected via the Terminal tab.
+      if (!includeOutputInEvents && m.kind === "run.output") {
+        continue;
+      }
       const prev = out[out.length - 1];
       if (prev && prev.kind === "run.output" && m.kind === "run.output" && prev.role === "assistant" && m.role === "assistant") {
         prev.text = `${prev.text ?? ""}${m.text ?? ""}`;
@@ -3274,7 +3282,7 @@
             await focusOutputSearch();
           }}
         >
-          输出
+          终端
         </button>
         <button
           class:active={sessionDetailTab === "messages"}
@@ -3284,7 +3292,7 @@
             if (selectedRunId) void loadMessages(selectedRunId);
           }}
         >
-          消息
+          事件
         </button>
         <button on:click={() => selectedRunId && loadMessages(selectedRunId)} disabled={!selectedRunId || !token} style="margin-left:auto">
           刷新
@@ -3313,6 +3321,29 @@
       {/if}
 
       {#if sessionDetailTab === "messages"}
+        <div class="events-tail" style="margin:10px 0 12px">
+          <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+            <div style="font-weight:600">输出摘要</div>
+            <button
+              class="secondary"
+              on:click={async () => {
+                sessionDetailTab = "output";
+                await focusOutputSearch();
+              }}
+              disabled={!selectedRunId}
+              type="button"
+            >
+              打开终端
+            </button>
+          </div>
+          {#if !selectedRunId}
+            <div class="subtle"></div>
+          {:else if selectedOutputMode === "tui"}
+            <div class="subtle">(TUI 终端输出请在“终端”里查看)</div>
+          {:else}
+            <pre class="output-pre" style="max-height:160px;overflow:auto">{tailLines(selectedOutput || "", 40)}</pre>
+          {/if}
+        </div>
         <div class="chat-feed">
           {#if displayMessages.length === 0}
             <div class="subtle"></div>

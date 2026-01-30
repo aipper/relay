@@ -121,6 +121,28 @@ fn opencode_mode_setting() -> OpencodeModeSetting {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpencodePermissionSetting {
+    /// Preserve existing behavior: if OPENCODE_PERMISSION is unset, inject an allow-all policy so
+    /// non-TTY structured runs don't block on interactive permission prompts.
+    AutoAllowAll,
+    /// Never inject OPENCODE_PERMISSION; rely on whatever the user/exported environment provides.
+    Inherit,
+}
+
+fn opencode_permission_setting() -> OpencodePermissionSetting {
+    let v = std::env::var("RELAY_OPENCODE_PERMISSION_MODE")
+        .ok()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match v.as_str() {
+        "inherit" | "env" => OpencodePermissionSetting::Inherit,
+        "auto" | "allow" | "allow_all" | "allow-all" | "" => OpencodePermissionSetting::AutoAllowAll,
+        _ => OpencodePermissionSetting::AutoAllowAll,
+    }
+}
+
 fn codex_probe_timeout() -> Duration {
     let ms = std::env::var("RELAY_CODEX_PROBE_TIMEOUT_MS")
         .ok()
@@ -329,11 +351,26 @@ async fn codex_mcp_submit_prompt(
 
 async fn opencode_submit_prompt(
     run: Arc<Run>,
+    redactor: Arc<Redactor>,
     events: broadcast::Sender<WsEnvelope>,
     host_id: String,
     prompt: String,
 ) -> anyhow::Result<()> {
     let _guard = run.opencode_call_lock.lock().await;
+
+    fn redact_json_value(redactor: &Redactor, v: &JsonValue) -> JsonValue {
+        fn walk(redactor: &Redactor, v: &JsonValue) -> JsonValue {
+            match v {
+                JsonValue::String(s) => JsonValue::String(redactor.redact(s).text_redacted),
+                JsonValue::Array(arr) => JsonValue::Array(arr.iter().map(|x| walk(redactor, x)).collect()),
+                JsonValue::Object(map) => {
+                    JsonValue::Object(map.iter().map(|(k, val)| (k.clone(), walk(redactor, val))).collect())
+                }
+                _ => v.clone(),
+            }
+        }
+        walk(redactor, v)
+    }
 
     let bin = crate::runners::resolve_tool_bin("opencode", "RELAY_OPENCODE_BIN", "opencode");
     crate::runners::validate_bin_exists(
@@ -349,9 +386,11 @@ async fn opencode_submit_prompt(
         child_cmd.arg("--session").arg(session_id);
     }
 
-    // Avoid interactive permission prompts in non-TTY mode. Users can override by explicitly
-    // setting OPENCODE_PERMISSION in their environment.
-    if std::env::var_os("OPENCODE_PERMISSION").is_none() {
+    // Avoid interactive permission prompts in non-TTY mode.
+    // Default remains auto-allow (for backward compatibility), but can be disabled.
+    if std::env::var_os("OPENCODE_PERMISSION").is_none()
+        && opencode_permission_setting() == OpencodePermissionSetting::AutoAllowAll
+    {
         child_cmd.env("OPENCODE_PERMISSION", r#"{"*":"allow"}"#);
     }
 
@@ -471,13 +510,18 @@ async fn opencode_submit_prompt(
                         let title = part.get("state").and_then(|s| s.get("title")).cloned();
                         let output = part.get("state").and_then(|s| s.get("output")).cloned();
 
+                        let input_redacted = redact_json_value(&redactor, &input);
+                        let part_redacted = redact_json_value(&redactor, part);
+                        let title_redacted = title.as_ref().map(|v| redact_json_value(&redactor, v));
+                        let output_redacted = output.as_ref().map(|v| redact_json_value(&redactor, v));
+
                         let mut call = WsEnvelope::new(
                             "tool.call",
                             json!({
                                 "request_id": request_id.clone(),
                                 "tool": tool,
                                 "actor": "opencode",
-                                "args": input
+                                "args": input_redacted
                             }),
                         );
                         call.host_id = Some(host_id.clone());
@@ -492,11 +536,10 @@ async fn opencode_submit_prompt(
                                 "tool": tool,
                                 "actor": "opencode",
                                 "ok": true,
-                                "duration_ms": 0,
                                 "result": {
-                                    "title": title,
-                                    "output": output,
-                                    "raw_part": part
+                                    "title": title_redacted,
+                                    "output": output_redacted,
+                                    "raw_part": part_redacted
                                 }
                             }),
                         );
@@ -993,7 +1036,15 @@ impl RunManager {
                 "tool": "opencode",
                 "cwd": cwd,
                 "command": cmd,
-                "mode": "structured"
+                "mode": "structured",
+                "permission_env_set": std::env::var_os("OPENCODE_PERMISSION").is_some(),
+                "permission_mode": if std::env::var_os("OPENCODE_PERMISSION").is_some() {
+                    "env"
+                } else if opencode_permission_setting() == OpencodePermissionSetting::AutoAllowAll {
+                    "relay_auto_allow_all"
+                } else {
+                    "inherit"
+                }
             }),
         );
         started.host_id = Some(self.host_id.clone());
@@ -1623,10 +1674,14 @@ impl RunManager {
             let prompt = text.trim_end_matches(&['\r', '\n'][..]).to_string();
             if !prompt.trim().is_empty() {
                 let run2 = run.clone();
+                let redactor = self.redactor.clone();
                 let events = self.events.clone();
                 let host_id = self.host_id.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = opencode_submit_prompt(run2.clone(), events.clone(), host_id.clone(), prompt).await {
+                    if let Err(e) =
+                        opencode_submit_prompt(run2.clone(), redactor.clone(), events.clone(), host_id.clone(), prompt)
+                            .await
+                    {
                         let mut env = WsEnvelope::new(
                             "run.output",
                             json!({ "stream": "stderr", "text": format!("opencode prompt failed: {e:#}") }),
@@ -1759,14 +1814,18 @@ impl RunManager {
                 let prompt = text.trim_end_matches(&['\r', '\n'][..]).to_string();
                 if !prompt.trim().is_empty() {
                     let run2 = run.clone();
+                    let redactor = self.redactor.clone();
                     let events = self.events.clone();
                     let host_id = self.host_id.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = opencode_submit_prompt(run2.clone(), events.clone(), host_id.clone(), prompt).await {
-                            let mut env = WsEnvelope::new(
-                                "run.output",
-                                json!({ "stream": "stderr", "text": format!("opencode prompt failed: {e:#}") }),
-                            );
+                        if let Err(e) =
+                            opencode_submit_prompt(run2.clone(), redactor.clone(), events.clone(), host_id.clone(), prompt)
+                                .await
+                    {
+                        let mut env = WsEnvelope::new(
+                            "run.output",
+                            json!({ "stream": "stderr", "text": format!("opencode prompt failed: {e:#}") }),
+                        );
                             env.host_id = Some(host_id);
                             env.run_id = Some(run2.run_id.clone());
                             env.seq = Some(run2.next_seq());
