@@ -1,0 +1,27 @@
+# Command: server:fix-and-commit
+# Description: 自动修复闭环，全部通过后提交子模块（仅 test 环境）
+# Category: server
+# Version: 1
+
+description = "自动修复闭环，全部通过后提交子模块（仅 test 环境）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：减少人工干预，一条命令完成：
+1) `/server-fix` 自动闭环（必要时自动补齐计划与产物，runner 生成 report）
+2) 若全部 DONE/SKIP，则自动执行 `/server-commit`
+
+边界：
+- 只允许在测试环境执行自动提交：AI_WORKSPACE.md 中必须声明 `environment: \"test\"`
+- 若仍有 BLOCKED/TODO/DOING，则禁止提交
+- 禁止提交敏感文件（.env、secrets/ 等）；若检测到应停止并提示整改
+- 不做 push
+
+执行步骤（按顺序）：
+1) 先执行 `/server-fix`，直到：
+   - 全部 DONE/SKIP（通过），或
+   - 达到迭代上限（失败停止）
+2) 若通过：立即执行 `/server-commit`
+3) 若未通过：输出剩余 BLOCKED 清单与证据路径（report.json / *.out / *.log.txt），不要提交
+"""

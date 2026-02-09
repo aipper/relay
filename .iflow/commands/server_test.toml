@@ -1,0 +1,12 @@
+# Command: server_test
+# Description: 与 /server-test 等价的下划线别名
+# Category: server
+# Version: 1
+
+description = "与 /server-test 等价的下划线别名"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+等价于 `/server-test`：请按相同规则在当前工作区执行接口测试闭环（runner 优先，BLOCKED 自动进入修复建议/闭环）。
+"""

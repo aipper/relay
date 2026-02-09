@@ -1,0 +1,27 @@
+# Command: server:commit
+# Description: 提交 server 子模块并更新 workspace gitlink（安全，优先 Linux）
+# Category: server
+# Version: 1
+
+description = "提交 server 子模块并更新 workspace gitlink（安全，优先 Linux）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在“目录A工作区”根目录下，对 `AI_WORKSPACE.md` 指定的 `server_dirs` 进行安全提交：
+1) 在每个 server 子仓库（git submodule）内提交代码变更
+2) 在工作区根仓库提交 submodule 指针更新（gitlink bump）
+
+边界（必须遵守）：
+- 只允许在 `server_dirs` 指定的目录里提交（不自动扫描未知目录）
+- 若 `issues/server-api-issues.csv` 仍存在 TODO/DOING/BLOCKED，则拒绝提交（避免“未验收就提交”）
+- 禁止提交敏感文件：`.env`、`secrets/`、`*token*`、`*key*`、`*credential*` 等（发现则拒绝提交并提示整改）
+- 不执行 push，只做 commit
+- 若设置 `IFLOW_DRY_RUN=1`，只打印将执行的 git 命令，不实际提交
+
+执行：
+!{bash -lc '
+set -euo pipefail
+bash "$HOME/.iflow/hooks/server_commit.sh"
+'}
+"""

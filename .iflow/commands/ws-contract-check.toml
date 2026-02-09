@@ -1,0 +1,69 @@
+# Command: ws:contract-check
+# Description: 在任何写入前确认已读取需求/规则（生成 stamp 供 pre_tool_guard 放行）
+# Category: workspace
+# Version: 1
+
+description = "在任何写入前确认已读取需求/规则（生成 stamp 供 pre_tool_guard 放行）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在开始任何代码/配置写入前，强制完成一次“工作区 contract 预检”，并写入 stamp 文件供 iFlow `pre_tool_guard.sh` 放行。
+
+执行（会检查/提示缺失项，并写入 `.agentdocs/tmp/.iflow-contract-checked`）：
+!{bash -lc '
+set -euo pipefail
+
+ws_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$ws_root"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: python3 not found (required for contract-check stamp)" >&2
+  exit 2
+fi
+
+mkdir -p .agentdocs/tmp
+
+python3 - <<'PY'
+import datetime
+import hashlib
+import json
+import os
+import pathlib
+
+ws_root = pathlib.Path(os.getcwd()).resolve()
+
+def sha256(p: pathlib.Path) -> str:
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+truth_files = {}
+missing = []
+for name in ("REQUIREMENTS.md", "AI_PROJECT.md", "AI_WORKSPACE.md"):
+    p = ws_root / name
+    key = f"{name}_sha256"
+    if p.exists():
+        truth_files[key] = sha256(p)
+    else:
+        truth_files[key] = ""
+        missing.append(name)
+
+data = {
+    "generated_at": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+    "workspace_root": str(ws_root),
+    "truth_files": truth_files,
+}
+
+stamp = ws_root / ".agentdocs" / "tmp" / ".iflow-contract-checked"
+stamp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+print(f"OK: wrote {stamp}")
+if missing:
+    print("WARN: missing truth files: " + ", ".join(missing))
+    print("HINT: run aiws init to bootstrap (e.g. `npx @aipper/aiws init .`)")
+PY
+'}
+
+边界：
+- 不打印任何 secrets（尤其是 `secrets/test-accounts.json`）。
+- 本命令只负责预检与写 stamp，不做实现、不跑测试、不提交。
+"""

@@ -1,0 +1,18 @@
+# Command: aiws:validate
+# Description: aiws 强门禁校验（required 结构 + 漂移检测 + python3 gate）
+# Category: aiws
+# Version: 1
+
+description = "aiws 强门禁校验（required 结构 + 漂移检测 + python3 gate）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：
+- 作为 CI/本地门禁：校验 required 文件结构、托管块、`.aiws/manifest.json` 漂移
+- 强门禁：缺 `python3`/缺 required 脚本也应失败
+
+建议执行：
+- `npx @aipper/aiws validate .`
+"""
+

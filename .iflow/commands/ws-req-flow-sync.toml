@@ -1,0 +1,36 @@
+# Command: ws:req-flow-sync
+# Description: 从 REQUIREMENTS.md FlowSpec 生成流程图与场景 CSV
+# Category: requirements
+# Version: 1
+
+description = "从 REQUIREMENTS.md FlowSpec 生成流程图与场景 CSV"
+
+prompt = """
+用中文输出；命令与路径保持原样不翻译。
+
+目标：在工作区根目录基于 `REQUIREMENTS.md` 内的 FlowSpec（FLOW_SPEC_BEGIN/END 标记）生成：
+- `docs/api-flow.mmd`（简短逻辑图，Mermaid）
+- `issues/server-scenario-issues.csv`（场景执行合同：TODO/DONE/BLOCKED）
+
+要求：
+- 不读取/不打印 secrets
+- 输出要短：只打印生成的文件路径与下一步命令
+
+Execute:
+!{bash -lc '
+set -euo pipefail
+
+[[ -f REQUIREMENTS.md ]] || { echo "缺少 REQUIREMENTS.md（请先 /aiws-init 或补齐需求文件）" >&2; exit 2; }
+
+if [[ -f tools/requirements_flow_gen.py ]]; then
+  python3 tools/requirements_flow_gen.py --workspace .
+  echo ""
+  echo "下一步:"
+  echo "  - 查看逻辑图: cat docs/api-flow.mmd"
+  echo "  - 查看场景合同: cat issues/server-scenario-issues.csv"
+else
+  echo "缺少工具: tools/requirements_flow_gen.py（建议运行 /aiws-init 或从模板复制）" >&2
+  exit 2
+fi
+'}
+"""

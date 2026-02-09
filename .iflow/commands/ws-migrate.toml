@@ -1,0 +1,59 @@
+# Command: ws:migrate
+# Description: 将当前目录迁移到最新的 workspace-A 约定（安全，默认不覆盖）
+# Category: workspace
+# Version: 1
+
+description = "迁移当前目录为 workspace-A 约定（补齐 AI_PROJECT.md 与 .gitignore managed block，默认不覆盖）"
+
+prompt = """
+用中文输出；命令与路径保持原样不翻译。
+
+目标：将“当前目录”迁移/补齐为最新的 aiws `workspace` 约定（以 `.aiws/manifest.json` 与模板托管面为准）。
+
+安全规则：
+- 不要打印 secrets；不要创建真实 secrets。
+- 只通过 `aiws init/update/validate` 更新托管面（replace_file + managed blocks）。
+
+迁移完成后建议运行 `/ws-doctor` 并手工检查 `AI_PROJECT.md` 的“项目特有规则”段是否符合本项目约束。
+
+Execute:
+!{bash -lc '
+set -euo pipefail
+
+root="$(pwd)"
+
+run_aiws() {
+  local subcmd="$1"
+  shift
+
+  if [[ -x "$root/node_modules/.bin/aiws" ]]; then
+    "$root/node_modules/.bin/aiws" "$subcmd" "$@"
+    return 0
+  fi
+  if command -v aiws >/dev/null 2>&1; then
+    aiws "$subcmd" "$@"
+    return 0
+  fi
+  if command -v npx >/dev/null 2>&1; then
+    npx -y @aipper/aiws "$subcmd" "$@"
+    return 0
+  fi
+
+  echo "error: aiws not found (install @aipper/aiws or ensure npx is available)" >&2
+  exit 2
+}
+
+if [[ -f ".aiws/manifest.json" ]]; then
+  run_aiws update .
+else
+  run_aiws init .
+fi
+run_aiws validate .
+
+echo
+echo "下一步:"
+echo "  - 运行: /ws-doctor"
+echo "  - 手工检查: AI_PROJECT.md（把本项目的特殊约束补齐进去）"
+echo "  - 如启用了 iFlow pre_tool_guard：执行 /ws-contract-check（写入 stamp）"
+'}
+"""

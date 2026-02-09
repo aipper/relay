@@ -1,0 +1,653 @@
+{
+  "manifest_version": 1,
+  "template_id": "workspace",
+  "spec_version": "0.0.10",
+  "aiws_version": "0.0.10",
+  "installed_at": "2026-02-08T08:20:29Z",
+  "updated_at": "2026-02-08T11:02:24Z",
+  "tools": [
+    "claude",
+    "opencode",
+    "codex",
+    "iflow"
+  ],
+  "managed": [
+    {
+      "path": ".agents/skills/aiws-change-archive/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "a8466b04a30edc79d8103c44e1601c9dc2916d0d2ba019f3435d0b6849c8e0a2"
+    },
+    {
+      "path": ".agents/skills/aiws-change-finish/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "70f69381b2e1cbaf99e3621e8cda51d9dfe297a3dea6441a4c2aeaaba7ced5b0"
+    },
+    {
+      "path": ".agents/skills/aiws-change-list/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "d2af3489fe638917ad441a8c352fb6354b1b7c426b6ded187afffab77ee37694"
+    },
+    {
+      "path": ".agents/skills/aiws-change-new/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "b59839eeac1fa5f775b8ae05af0a5b7a6d796c858bad9004ba2eeabebcf37392"
+    },
+    {
+      "path": ".agents/skills/aiws-change-next/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "c0cc61d39e4c399d85ffb94643f6a572507528ac459b7454ac188e7490f6d519"
+    },
+    {
+      "path": ".agents/skills/aiws-change-start/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "da3574940f6a7a2ce6de7516781c0b573cfe9f8bfed37a236aa83351b28a6e51"
+    },
+    {
+      "path": ".agents/skills/aiws-change-status/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "a97932e12aa46b77caf8edbc9631e58819f82ed3b848d5b63217d5a2ce93b0e3"
+    },
+    {
+      "path": ".agents/skills/aiws-change-sync/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "717d500e8c3cfc0a68e9d58d6afdb00db84a4974fc4bc4effb49f8b0fb3926a2"
+    },
+    {
+      "path": ".agents/skills/aiws-change-templates-init/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "94371272e88e6f7460b3bb90904616c9bf06804a06a4aed1a7abbb8f6fed4066"
+    },
+    {
+      "path": ".agents/skills/aiws-change-templates-which/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "3676abec4bf904daeb1f4f8f61f23f40c815574182fc44f79bc92e98347952e2"
+    },
+    {
+      "path": ".agents/skills/aiws-change-validate/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "aed3de73c53cffe977f186d84345f18f73c3771f8f3223ddb52c782a01266d31"
+    },
+    {
+      "path": ".agents/skills/aiws-hooks-install/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "323791683720ba6b8705812d0a47d246858a6c327b88eac27b1b3b92130179df"
+    },
+    {
+      "path": ".agents/skills/aiws-hooks-status/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "5977359322b2db87ac615b5f752b0955f0bd0fb129d3cf8f05aee3055794d64f"
+    },
+    {
+      "path": ".agents/skills/aiws-init/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "1c17307e0af873e9a5e7874ff174024936a5901b5ad5a65209d2702eadb2f716"
+    },
+    {
+      "path": ".agents/skills/aiws-rollback/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "55ce3605ef7c54751257534f8e7607b96a30cd44de3c3c3e45c56e3df7c7fdc2"
+    },
+    {
+      "path": ".agents/skills/aiws-update/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "34407f8efcb3cdde623bc6d834b70b1c5035eebe0baebd8105278285ea00ab6a"
+    },
+    {
+      "path": ".agents/skills/aiws-validate/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "c10a85852bafa6206057acd7bf09ffbf512f329392a8318d888f9ff26d42d33f"
+    },
+    {
+      "path": ".agents/skills/ws-analyze/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "82609bdaf050725d9f0de3e53469cc5d707e00044c7bb554e532c6ff700aab6b"
+    },
+    {
+      "path": ".agents/skills/ws-commit/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "49ab2e6b7d4ce242ede9133477af10e9be9b4df6b94ef2dc11c3f6fe199bf9cc"
+    },
+    {
+      "path": ".agents/skills/ws-deliver/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "a3934f852e8abe3dc60747fa607d7c3f1366c00cdff32e61f6c92648c6028936"
+    },
+    {
+      "path": ".agents/skills/ws-dev/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "d31e8753b22ebe03c60aa7b680c2f2bfc834fce2015752bde1d320be26005c2a"
+    },
+    {
+      "path": ".agents/skills/ws-finish/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "f70322b78223eb7a5d8c7d4eaecbcdf15dbb8aeb1b93a105ea3dedfdfdc4131a"
+    },
+    {
+      "path": ".agents/skills/ws-migrate/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "b73e457428d2459b0c3588c19417a1eac427011108228564f5b17374a159d148"
+    },
+    {
+      "path": ".agents/skills/ws-plan/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "f40d6da78d686ae456051e6263f75511c4a5826cbd5598b25cb7c503fee418b0"
+    },
+    {
+      "path": ".agents/skills/ws-preflight/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "200b60f912694b5cc0b419b4b7f246aa3c26b318b4c168a8896f2493dd12913f"
+    },
+    {
+      "path": ".agents/skills/ws-req-change/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "90c8ed17d99d1005adeba328670ece50fa2c4593d5a3ef79d195a6cfdd4eb387"
+    },
+    {
+      "path": ".agents/skills/ws-req-contract-sync/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "78cdb980f9c8a20593afcee6d5135356ae97f16939fb256e460f00f51462dedc"
+    },
+    {
+      "path": ".agents/skills/ws-req-contract-validate/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "2caa6116d2a11c4f6b64028a09546531b61d618d03f13ce0f9e51acaf006879d"
+    },
+    {
+      "path": ".agents/skills/ws-req-flow-sync/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "e7e7fa6f376c3bcc274f708837a8f36bf4cb6e9e6ce37033bd1bcbf30dde6a87"
+    },
+    {
+      "path": ".agents/skills/ws-req-review/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "a4b4db4aa718cdc1911df948a9129b7601eb9407aa4e2e35717092e8bff92767"
+    },
+    {
+      "path": ".agents/skills/ws-review/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "228e099b0b30e2fca822f6eb7a95a76e50018ad4920437c1bd04043fbc6c1e18"
+    },
+    {
+      "path": ".agents/skills/ws-rule/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "7921f2e7365f746b9f6d6518d285b96182442d1e2261b0e46d349450f26b9841"
+    },
+    {
+      "path": ".claude/commands/aiws-init.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:aiws-init": "a9fc97330c8fd27ba1e7468b53ce9de8e4a0d03d42bcc2818ed493ed3af92905"
+      }
+    },
+    {
+      "path": ".claude/commands/aiws-rollback.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:aiws-rollback": "25425f04db4e9eecd629dcee810a05c65fb3d218ce42ea53a2f182c6d347caaf"
+      }
+    },
+    {
+      "path": ".claude/commands/aiws-update.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:aiws-update": "5e34a05720f1342d8380604cabf750860e678a6cb60dc8028d8b467b2a29621b"
+      }
+    },
+    {
+      "path": ".claude/commands/aiws-validate.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:aiws-validate": "d422a6b2f2c431c3e93f2f2d991a3cb2530c969aae419b621aea96db5e3be306"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-analyze.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-analyze": "c321687351cd22f89e4a69d99325ee7b48c218fe6a9a2d9000608ae07cac2094"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-commit.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-commit": "ef140af3d1e0607e193facbd81bc1501fb5f2a41e0091c6524042c5136973ed1"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-deliver.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-deliver": "0baefbf6bdd14463983c0754a9efabe317ef5d9508b5bf87734da5a806944732"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-dev.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-dev": "7b5985fc2d3db36a579efae9f02dcbb6c5c2d88a104157dab79825439ff42464"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-finish.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-finish": "a81d7fc6b15b12e147381c43c2ffd2293ecb9d6ed4f9542da9c5408abf902bb7"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-migrate.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-migrate": "b4727f004de214c22a24383afa8b4bef1f4ea3781e96ce19d934fcb2984b2813"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-preflight.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-preflight": "3ac3617cf0bc9d80c4f3dd1da7865d67e2e8db1c87de2da2af1915bfd596178d"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-req-change.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-req-change": "b2aefcd88ebae5f8748b586d585b6c0d4d78bb16b8f81b9ea9e9c0e3f4a553ce"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-req-contract-sync.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-req-contract-sync": "c61bf210cff5dbf29223fe12baf51877c7eeeccf282c0c12f5b9c91bea726360"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-req-contract-validate.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-req-contract-validate": "acd3feace99c6cfb2ea8b4ea20346687967d8dda8d4ec604e50dfd4cb3303bec"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-req-flow-sync.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-req-flow-sync": "913d34f22f5f1895d4f4a4df5b3be3ce63707c3adee3c2081f7507502ef2cc00"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-req-review.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-req-review": "1c2c1007d3b5380304446086110dfe252c3b92f5a2c99443361722bf6664a4a8"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-review.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-review": "e55d0974c66fdc97dbbd7196919b6f6abf5ad611f0f9b4032a966e04bf41f193"
+      }
+    },
+    {
+      "path": ".claude/commands/ws-rule.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "claude:ws-rule": "b97ffd12dd3c44f4cc1c5ec90ab3ea1b523c5771062f878369c2ba25b01ca91e"
+      }
+    },
+    {
+      "path": ".githooks/pre-commit",
+      "mode": "replace_file",
+      "sha256": "8e7c5d1e52e15aeba977a6f419fdf355b52934077814090a0227277158e8c242"
+    },
+    {
+      "path": ".githooks/pre-push",
+      "mode": "replace_file",
+      "sha256": "2f502531e7ee4ff1b5419d22400e58e93664550061b68a0ca50a01e77ec54d9a"
+    },
+    {
+      "path": ".gitignore",
+      "mode": "managed_blocks",
+      "blocks": {
+        "gitignore": "0644ed3c13aaa29c4e213189a24781a6032a7ea57f3a6ef979e8694c3cff392a"
+      }
+    },
+    {
+      "path": ".iflow/commands/aiws-init.toml",
+      "mode": "replace_file",
+      "sha256": "5c15c7e542224119dddbb0846e1365012e55d695d545c4b6d28baa3e3c9bdc80"
+    },
+    {
+      "path": ".iflow/commands/aiws-rollback.toml",
+      "mode": "replace_file",
+      "sha256": "dd60772c6a57188e958566f152458badc20e46d42267368e093abf44ee88e438"
+    },
+    {
+      "path": ".iflow/commands/aiws-update.toml",
+      "mode": "replace_file",
+      "sha256": "63ea9b26c3276dedb652870dcaee3e85f1eccf407b9d5c1d9bb4bee2b31f2e1b"
+    },
+    {
+      "path": ".iflow/commands/aiws-validate.toml",
+      "mode": "replace_file",
+      "sha256": "f4a27f58e608a02fb33e73761525b4c7d1d334a8f488bc8e26c03938cbd4abec"
+    },
+    {
+      "path": ".iflow/commands/server_test-plan.toml",
+      "mode": "replace_file",
+      "sha256": "fc872bf1e25e71be66e346d5a0ad273e5369bbfbd65d53c07c97a1f065f8830c"
+    },
+    {
+      "path": ".iflow/commands/server_test.toml",
+      "mode": "replace_file",
+      "sha256": "86c305e0150ffe2fe7900a72446b9535d3ee344cea8e4d82f995b0f0d4692f56"
+    },
+    {
+      "path": ".iflow/commands/server-commit.toml",
+      "mode": "replace_file",
+      "sha256": "d23844c313eeb17b02743040a8f1c251a07c404dc5dc1f257d8cc1ba538be715"
+    },
+    {
+      "path": ".iflow/commands/server-drain.toml",
+      "mode": "replace_file",
+      "sha256": "3c2bfc1c8d1d162f9600c90ad1b6b5571f8703173b0f5c326aa047e657e12119"
+    },
+    {
+      "path": ".iflow/commands/server-fix-and-commit.toml",
+      "mode": "replace_file",
+      "sha256": "c3d62bfbfa820844689f353ca40e7fd3801c9bcf422e50cc369ff597533c8b29"
+    },
+    {
+      "path": ".iflow/commands/server-fix.toml",
+      "mode": "replace_file",
+      "sha256": "7ec46ec1da7e6a39f0014fafd9f657c396ca98cbed801684bebda000ed5c90ad"
+    },
+    {
+      "path": ".iflow/commands/server-test-plan.toml",
+      "mode": "replace_file",
+      "sha256": "9f1a43699bee8c56ea87b3f97cd57e54c00d25e241affb694d916d387d3543ae"
+    },
+    {
+      "path": ".iflow/commands/server-test.toml",
+      "mode": "replace_file",
+      "sha256": "56779ead2ebdabfecddcc57c5a27b25cd61d0df57abb4883ca7a8dfbefea19ca"
+    },
+    {
+      "path": ".iflow/commands/server-triage.toml",
+      "mode": "replace_file",
+      "sha256": "d387b44f5cb05ec7f6543a9fffed66b97232f80bcaf4e5e1cea375a381e985e8"
+    },
+    {
+      "path": ".iflow/commands/ws-analyze.toml",
+      "mode": "replace_file",
+      "sha256": "ab195079b90ec6520d3e228a93052081316dbe3a2b3363f15d053f2347347149"
+    },
+    {
+      "path": ".iflow/commands/ws-commit.toml",
+      "mode": "replace_file",
+      "sha256": "5f7cd8509fda5ffbe833811f8808d9301b440e215cc8c35650f92a515dd5b9dc"
+    },
+    {
+      "path": ".iflow/commands/ws-contract-check.toml",
+      "mode": "replace_file",
+      "sha256": "d539fbcd36b2b27b914aee276632ca15effe06482fb08b6ec1c8f020717bdba8"
+    },
+    {
+      "path": ".iflow/commands/ws-deliver.toml",
+      "mode": "replace_file",
+      "sha256": "9d94397f5ede768078cdf474ad0e68046d18f1bb8153893fe2520fef05c7cd5e"
+    },
+    {
+      "path": ".iflow/commands/ws-dev.toml",
+      "mode": "replace_file",
+      "sha256": "4f2d50bc1952d1f9f35afcc3a70a7f3de7289751cb544a6ea498e884506bae28"
+    },
+    {
+      "path": ".iflow/commands/ws-doctor.toml",
+      "mode": "replace_file",
+      "sha256": "3d77e3347a13430d6ba32f4b8f3ab261d87b4620e56b191299a5a9684db388ca"
+    },
+    {
+      "path": ".iflow/commands/ws-env-doctor.toml",
+      "mode": "replace_file",
+      "sha256": "0f8c691b5bdf862cdaf9a48c07dbf90112f2ee9cebb9c0ad5c02a477c27747cb"
+    },
+    {
+      "path": ".iflow/commands/ws-feature-deliver.toml",
+      "mode": "replace_file",
+      "sha256": "be31d0f68320fa77d473411f7867bfd4c70d7947f26af4bb2d840d23e48d6a66"
+    },
+    {
+      "path": ".iflow/commands/ws-feature-plan.toml",
+      "mode": "replace_file",
+      "sha256": "16e93b1a35c58de091e3f03212e575a5fd678643e17e06544ea429c73a3813ef"
+    },
+    {
+      "path": ".iflow/commands/ws-finish.toml",
+      "mode": "replace_file",
+      "sha256": "98015b69f8402866a8370f91d79a2fb13085a78777e7db02317acb2f459b839d"
+    },
+    {
+      "path": ".iflow/commands/ws-init.toml",
+      "mode": "replace_file",
+      "sha256": "8624b74640e6b874228e613c955acfc5893fe248689d8fbcda2c69bbdb0af5ab"
+    },
+    {
+      "path": ".iflow/commands/ws-memory-bank-init.toml",
+      "mode": "replace_file",
+      "sha256": "a2873becd91f7aac2efa0095c12577bc6562d7768366c7e093979f6969698d3e"
+    },
+    {
+      "path": ".iflow/commands/ws-migrate.toml",
+      "mode": "replace_file",
+      "sha256": "6359680553a378e1089bd9d97ddc44caf30b1146ee82d29c768f3268b7c4db94"
+    },
+    {
+      "path": ".iflow/commands/ws-preflight.toml",
+      "mode": "replace_file",
+      "sha256": "dd160ed3562f112ebcf8ea75f512fadb25f9024f90f7b56ac4442336c269f9d5"
+    },
+    {
+      "path": ".iflow/commands/ws-req-change.toml",
+      "mode": "replace_file",
+      "sha256": "98457bb28ab1ea3d5be9b15854af2b746a5d6c3eb371201c4ddd298f9e568799"
+    },
+    {
+      "path": ".iflow/commands/ws-req-contract-sync.toml",
+      "mode": "replace_file",
+      "sha256": "e85036b63e75a62300bf43052ab082dbc4a50f7f737dd10ff5244b9a1f0d1af7"
+    },
+    {
+      "path": ".iflow/commands/ws-req-contract-validate.toml",
+      "mode": "replace_file",
+      "sha256": "42c1282d7a79d63358078a726937e8ca6e5f297df586580091c2d58fa156ad66"
+    },
+    {
+      "path": ".iflow/commands/ws-req-flow-sync.toml",
+      "mode": "replace_file",
+      "sha256": "2f71592177d0b03b76977fa3b0d545e99c49a375ecd90be3e64458dff18dfa2f"
+    },
+    {
+      "path": ".iflow/commands/ws-req-review.toml",
+      "mode": "replace_file",
+      "sha256": "406ac405bbdfbee4e38e153929aeeb1a67a6e2e38adcabcddbd288969802ebd2"
+    },
+    {
+      "path": ".iflow/commands/ws-review.toml",
+      "mode": "replace_file",
+      "sha256": "e1feb6c0f7e6fc07c6188eaa6d0a2ff317774d8e118171a62e5643db3d8cc965"
+    },
+    {
+      "path": ".iflow/commands/ws-rule.toml",
+      "mode": "replace_file",
+      "sha256": "70ec2e7bddfffd49f21ae68187ed9acaf0ac472fa8f0c59af547c37bc492069c"
+    },
+    {
+      "path": ".opencode/command/aiws-init.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:aiws-init": "a9fc97330c8fd27ba1e7468b53ce9de8e4a0d03d42bcc2818ed493ed3af92905"
+      }
+    },
+    {
+      "path": ".opencode/command/aiws-rollback.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:aiws-rollback": "25425f04db4e9eecd629dcee810a05c65fb3d218ce42ea53a2f182c6d347caaf"
+      }
+    },
+    {
+      "path": ".opencode/command/aiws-update.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:aiws-update": "5e34a05720f1342d8380604cabf750860e678a6cb60dc8028d8b467b2a29621b"
+      }
+    },
+    {
+      "path": ".opencode/command/aiws-validate.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:aiws-validate": "d422a6b2f2c431c3e93f2f2d991a3cb2530c969aae419b621aea96db5e3be306"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-analyze.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-analyze": "50838a5b89c52990e7286875a927ac1331f4527ba5a0fc477936dd2a98fd81e7"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-commit.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-commit": "ef140af3d1e0607e193facbd81bc1501fb5f2a41e0091c6524042c5136973ed1"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-deliver.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-deliver": "0baefbf6bdd14463983c0754a9efabe317ef5d9508b5bf87734da5a806944732"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-dev.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-dev": "7b5985fc2d3db36a579efae9f02dcbb6c5c2d88a104157dab79825439ff42464"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-finish.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-finish": "a81d7fc6b15b12e147381c43c2ffd2293ecb9d6ed4f9542da9c5408abf902bb7"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-migrate.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-migrate": "b4727f004de214c22a24383afa8b4bef1f4ea3781e96ce19d934fcb2984b2813"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-preflight.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-preflight": "3ac3617cf0bc9d80c4f3dd1da7865d67e2e8db1c87de2da2af1915bfd596178d"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-req-change.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-req-change": "b2aefcd88ebae5f8748b586d585b6c0d4d78bb16b8f81b9ea9e9c0e3f4a553ce"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-req-contract-sync.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-req-contract-sync": "c61bf210cff5dbf29223fe12baf51877c7eeeccf282c0c12f5b9c91bea726360"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-req-contract-validate.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-req-contract-validate": "acd3feace99c6cfb2ea8b4ea20346687967d8dda8d4ec604e50dfd4cb3303bec"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-req-flow-sync.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-req-flow-sync": "913d34f22f5f1895d4f4a4df5b3be3ce63707c3adee3c2081f7507502ef2cc00"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-req-review.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-req-review": "1c2c1007d3b5380304446086110dfe252c3b92f5a2c99443361722bf6664a4a8"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-review.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-review": "ad0264f1b165e79681966257ce2308b5ebee401074562ed551404a1b34bb2dae"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-rule.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-rule": "b97ffd12dd3c44f4cc1c5ec90ab3ea1b523c5771062f878369c2ba25b01ca91e"
+      }
+    },
+    {
+      "path": "AGENTS.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "agents": "14e10facf0d56129fd60669efbc0e664b6fc25ce7fe017d81ebc032b7ff5e9d9"
+      }
+    },
+    {
+      "path": "AI_PROJECT.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "ai-project:core": "783e965502ce42aa6d16733d147df16604a079e23cbad9e2c3537e3e8b693f10"
+      }
+    },
+    {
+      "path": "AI_WORKSPACE.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "ai-workspace:core": "1d6b0c427b7b56b3f090704cad2288daa3dd5d42e1e451cb9eb2ee06b20067fc"
+      }
+    },
+    {
+      "path": "REQUIREMENTS.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "requirements:contract": "323d6b9878fcd459e6bfcba4db1ada60e5d029c93fd1e48ca28b353114101a0d"
+      }
+    },
+    {
+      "path": "tools/requirements_contract.py",
+      "mode": "replace_file",
+      "sha256": "779dbb443ff35f374b5f700d71e2f0f526d750720f0562388f465cbdf49eb322"
+    },
+    {
+      "path": "tools/ws_change_check.py",
+      "mode": "replace_file",
+      "sha256": "1da5424d1658614ebf6b80ea20478fa643ac3331040a151a4c1e8863eba79cde"
+    }
+  ]
+}

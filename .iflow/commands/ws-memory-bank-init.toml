@@ -1,0 +1,100 @@
+# Command: ws:memory-bank-init
+# Description: 初始化 memory-bank/（用于固定上下文，避免会话跑偏）
+# Category: workspace
+# Version: 1
+
+description = "初始化 memory-bank/（用于固定上下文，避免会话跑偏）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在当前 git workspace 根目录创建/更新 `memory-bank/` 的模板文件（非需求真值），用于固定工程上下文。
+
+执行：
+!{bash -lc '
+set -euo pipefail
+
+ws_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$ws_root"
+
+mkdir -p memory-bank
+
+write_if_missing() {
+  local p="$1"
+  shift
+  if [[ -f "$p" ]]; then
+    echo "OK: exists: $p"
+    return 0
+  fi
+  mkdir -p "$(dirname "$p")"
+  cat >"$p" <<EOF
+$*
+EOF
+  echo "OK: created: $p"
+}
+
+write_if_missing "memory-bank/README.md" "# Memory Bank（工作区上下文）
+
+目的：给 iFlow/Codex/Claude 一个“固定且可持续更新”的上下文集合，避免每次会话重新讲一遍导致跑偏。
+
+在你的工作区中：
+- \`REQUIREMENTS.md\` 仍是**需求真值**（不要复制到这里）。
+- \`AI_PROJECT.md\` / \`AI_WORKSPACE.md\` 是**边界与运行真值**。
+- 本目录补齐的是“实现过程中的稳定上下文”（更偏工程视角）。
+
+建议规则：
+- 改代码前：先看 \`REQUIREMENTS.md\` + \`AI_PROJECT.md\` + \`AI_WORKSPACE.md\`，再结合本目录的 \`architecture.md\`/\`progress.md\`。
+- 每次完成一个可验证的小步：更新 \`progress.md\`（写清：做了什么、证据路径、下一步）。
+- 发生重大结构变化：更新 \`architecture.md\`（只写高层关系，不要堆细节）。
+"
+
+write_if_missing "memory-bank/tech-stack.md" "# Tech Stack
+
+填写原则：只写“确实在用且影响决策”的信息，避免长篇大论。
+
+建议包含：
+- 语言/运行时版本（例如 Java/Node/Python）
+- 构建工具链（Gradle/Maven、pnpm、uv 等）
+- 关键框架与约束（Spring Boot、Ktor、Vue、React 等）
+- 数据层（DB/Redis/MQ）与迁移方式
+- 本地/测试环境切换方式（引用 \`AI_WORKSPACE.md\` 的命令即可）
+"
+
+write_if_missing "memory-bank/architecture.md" "# Architecture
+
+目标：记录“模块关系与关键边界”，让新的会话可以快速对齐代码布局。
+
+建议包含：
+- 目录/模块分层（例如 server/web/app）
+- 核心数据流（请求入口 → service → repo → DB）
+- 关键约束（鉴权、request-id、幂等、事务）
+"
+
+write_if_missing "memory-bank/implementation-plan.md" "# Implementation Plan
+
+目标：把需求拆成可验证的小步（每步都有验证命令与期望结果）。
+
+模板（示例字段）：
+- Step 1: …
+  - Scope:
+  - Files:
+  - Verify: \`...\`
+  - Expected:
+"
+
+write_if_missing "memory-bank/progress.md" "# Progress
+
+每次完成一个可验证小步就追加一条：
+
+- YYYY-MM-DD HH:MM: 做了什么（关联 Issue_ID/验收项）
+  - Changed: \`path/to/file\`
+  - Verify: \`command\`
+  - Evidence: \`path/to/log_or_report\`
+  - Next:
+"
+'}
+
+说明：
+- `REQUIREMENTS.md` 仍是需求真值；不要把需求复制进 memory-bank。
+- 建议完成后立刻执行：`/ws-contract-check`（让 pre_tool_guard 放行写入类工具）。
+"""

@@ -1,0 +1,43 @@
+# Command: ws:rule
+# Description: 整理项目规则写入 AI_PROJECT.md 的 managed block
+# Category: workspace
+# Version: 1
+
+description = "整理项目规则写入 AI_PROJECT.md 的 managed block"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：当用户提出“项目规则/约束/边界”时，将其整理为结构化条款，并写入工作区根目录的 `AI_PROJECT.md`。
+
+约定真值：
+- `AI_PROJECT.md`：项目约束真值（本命令只维护其中的 managed block）
+- `REQUIREMENTS.md`：需求真值（本命令不改需求）
+- `AI_WORKSPACE.md`：运行/测试真值（本命令不改运行方式）
+
+安全规则（强制）：
+- 不打印 secrets；不把 token/密钥/内网地址写入 `AI_PROJECT.md`。
+- 不进行破坏性命令。
+- 写入前必须创建备份：`.aiws/backups/manual/AI_PROJECT.md.bak.<timestamp>`
+
+写入位置（强制）：
+- 仅修改 `AI_PROJECT.md` 中 `<!-- AI_PROJECT_RULES_BEGIN -->` 与 `<!-- AI_PROJECT_RULES_END -->` 之间的内容。
+- 若文件/标记不存在：先运行 `/aiws-init`（或 `aiws init .`）补齐模板，再继续。
+
+工作流：
+1) 读取（或创建）`AI_PROJECT.md`，并定位 managed block。
+2) 如果用户还没给出明确的规则文本：最多问 3 个澄清问题（例如：允许改动目录白名单/必须跑哪些测试/是否允许有副作用接口/是否允许自动提交）。
+3) 将用户输入整理为短而硬的条款（建议按以下结构）：
+   - 范围/目录白名单
+   - 必须执行的验证命令（含期望结果）
+   - 禁止项（危险操作/敏感文件/越界访问）
+   - 交付产物（必须更新哪些文件：issues/证据/文档）
+4) 更新 managed block：合并去重（同义合并）、保持条款可执行；避免重写文件其它部分。
+4.1) 写入前必须复述“将写入的规则清单”，并要求用户回复 `CONFIRM` 后再落盘（避免误写/误删）。
+5) 输出必须包含：
+   - 更新了哪些文件（路径）
+   - 回滚方式（恢复备份文件）
+   - 下一步建议（例如运行 `/ws-doctor`）
+
+提示：用户的“规则”可能零散，优先把它们变成可检查的条款（能落到命令/文件/目录）。
+"""

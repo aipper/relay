@@ -1,0 +1,43 @@
+{
+  "ws_change_version": 1,
+  "id": "mobile-structured-first",
+  "title": "mobile-structured-first",
+  "created_at": "2026-02-08T08:29:43Z",
+  "base_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1770537577,
+      "sha256": "f23241aa0c6f220c4f8270fb3a648b21eac372fbc34e266c0522066828b417bb"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1770537577,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1770537906,
+      "sha256": "bfb003cd59a68e2c817c75a23d1849f38cae53ff5b4894e817646f476b0841a6"
+    }
+  },
+  "synced_at": "2026-02-08T08:29:43Z",
+  "synced_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1770537577,
+      "sha256": "f23241aa0c6f220c4f8270fb3a648b21eac372fbc34e266c0522066828b417bb"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1770537577,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1770537906,
+      "sha256": "bfb003cd59a68e2c817c75a23d1849f38cae53ff5b4894e817646f476b0841a6"
+    }
+  },
+  "sync_events": [
+    {
+      "synced_at": "2026-02-08T08:29:43Z",
+      "baseline_from": "creation",
+      "baseline_at": "2026-02-08T08:29:43Z",
+      "changed": []
+    }
+  ]
+}

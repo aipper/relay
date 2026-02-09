@@ -1,0 +1,58 @@
+# Command: server:test
+# Description: 执行 workspace 级 server API 测试循环（构建/运行/请求/日志/迭代）
+# Category: server
+# Version: 1
+
+description = "执行 workspace 级 server API 测试循环（构建/运行/请求/日志/迭代）"
+
+prompt = """
+IMPORTANT:
+- Use Chinese for all narrative output (status, summaries, next steps).
+- Keep commands/paths/code identifiers in their original form.
+
+Execute the workspace-level server API test loop in the current directory.
+
+Preflight (must do):
+- Read AI_WORKSPACE.md and REQUIREMENTS.md if present.
+- Ensure secrets/test-accounts.json exists; if missing, ask user to create it from ai-workspace/templates/secrets/test-accounts.example.json.
+- Never print secrets from secrets/test-accounts.json.
+ - Generate a per-request X-Request-Id and include it in every request; prefer correlating logs by request_id / X-Request-Id.
+
+Working dirs / artifacts:
+- Create .agentdocs/tmp/server-test/ for logs and outputs.
+- Maintain docs/api.md and issues/server-api-issues.csv as the execution contract.
+- Maintain issues/server-fix-issues.csv as the "next fix" list when any endpoint is BLOCKED.
+
+Steps:
+1) Discover server dirs (AI_WORKSPACE.md server_dirs or marker-based detection).
+   - If tools/server_test_runner.py exists, prefer using it (uv + python runner) to generate/update issues/server-api-issues.csv and execute requests.
+   - The runner will use docs/openapi.json as source of truth and enforce Expected_Status when present; keep Expected_Status aligned with OpenAPI/requirements.
+2) For each server:
+   a) Determine build/test/start commands (prefer explicit overrides).
+   b) Build and start in background, capturing stdout/stderr to .agentdocs/tmp/server-test/<service>.log
+   c) Wait for health endpoint (AI_WORKSPACE.md health_path + base_url; fallback /health).
+   d) Inventory endpoints (source of truth):
+      - Prefer docs/openapi.json if present
+      - Else export OpenAPI from running server (AI_WORKSPACE.md openapi_url) into docs/openapi.json
+      - Else fallback to route dump / code scan
+      Then ensure endpoints exist in issues/server-api-issues.csv (add missing rows).
+   e) For each endpoint row with Test_Status in TODO/BLOCKED:
+      - Set Test_Status=DOING
+      - Execute request (curl preferred; python3 httpx/requests acceptable if installed), always include X-Request-Id header
+      - Save response to .agentdocs/tmp/server-test/<service>__<endpoint-slug>.out
+      - Prefer grepping logs by request_id / X-Request-Id; fallback to ERROR|Exception|Stacktrace time-window grep; update Notes with evidence (no secrets)
+      - Mark DONE if passes, else BLOCKED
+   f) Stop the server cleanly (do not leave background processes).
+3) If anything is BLOCKED:
+   - Propose the smallest fix to satisfy REQUIREMENTS.md, implement it, and rerun ONLY blocked endpoints.
+   - Do not stop at "needs next step": keep the loop until all DONE/SKIP or you hit the iteration cap; keep issues/server-fix-issues.csv current.
+4) Finish when all endpoints are DONE/SKIP and build has no errors.
+
+Hard rules:
+- Linux-first commands.
+- If AI_WORKSPACE.md declares environment=test and allow_mutations=true, mutating endpoint tests are allowed,
+  but only for endpoints explicitly listed/required by REQUIREMENTS.md.
+- Otherwise, no destructive tests unless explicitly permitted.
+- No leaking of secrets or tokens.
+- Do not claim tests passed unless commands were executed and outputs observed.
+"""

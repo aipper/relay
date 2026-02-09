@@ -1,0 +1,12 @@
+# Command: server_test-plan
+# Description: 与 /server-test-plan 等价的下划线别名
+# Category: server
+# Version: 1
+
+description = "与 /server-test-plan 等价的下划线别名"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+等价于 `/server-test-plan`：请按相同规则生成工作区后端接口测试计划（OpenAPI -> issues CSV -> 闭环执行）。
+"""

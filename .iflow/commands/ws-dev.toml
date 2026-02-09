@@ -1,0 +1,34 @@
+# Command: ws:dev
+# Description: AI Workspace Claude-first 开发闭环（分析→确认→实施→审计→证据落盘）
+# Category: workspace
+# Version: 1
+
+description = "AI Workspace Claude-first 开发闭环（分析→确认→实施→审计→证据落盘）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在 AI Workspace 约束下完成一个可回放、可验证的小步交付。
+
+输入：
+- 本命令参数（如有）视为本次交付主题（topic）。
+
+强制流程：
+1) 预检：读取 `AI_PROJECT.md`、`REQUIREMENTS.md`、`AI_WORKSPACE.md`（缺失则先运行 `/aiws-init`，或在 shell 执行 `aiws init .`）。
+2) 若 iFlow 拦截写入（缺少 contract-check stamp）：先执行 `/ws-contract-check`，再继续。
+3) 明确 GOALS / NON-GOALS，并把改动归因到：
+   - `requirements/requirements-issues.csv` 的 `Req_ID`，或
+   - `issues/problem-issues.csv` 的 `Problem_ID`。
+4) 先输出“将改动的文件清单 + 回滚方案 + 验证命令”，并等待用户确认继续（Y/N）。
+5) 用户确认后再实施最小改动（遵守 `AI_PROJECT.md` 的安全边界；不要引入任何 secrets）。
+6) 运行门禁并给出结果：
+   - `aiws validate .`（若未安装全局 aiws，可用 `npx @aipper/aiws validate .`）
+7) 产出证据（至少一个）：
+   - 更新 `changes/<change-id>/...`，或
+   - 更新 `issues/*.csv` 的状态机，或
+   - 写入 `.agentdocs/tmp/...` 的 report/log/resp（不要包含 secrets）。
+
+边界：
+- 不打印任何 secrets（尤其是 `secrets/test-accounts.json`）。
+- 不执行破坏性命令。
+"""

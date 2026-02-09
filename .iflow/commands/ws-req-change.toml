@@ -1,0 +1,64 @@
+# Command: ws:req-change
+# Description: 记录需求变更到 requirements/CHANGELOG.md 并更新 REQUIREMENTS.md
+# Category: requirements
+# Version: 1
+
+description = "记录需求变更到 requirements/CHANGELOG.md 并更新 REQUIREMENTS.md"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：处理“进行中的需求变更”，并把变更记录到独立的变更文件中，避免 REQUIREMENTS.md 的历史被覆盖。
+
+约定：
+- `REQUIREMENTS.md`：当前有效需求（唯一真值）
+- `requirements/CHANGELOG.md`：需求变更历史（追加记录，不改旧记录）
+- `requirements/requirements-issues.csv`：需求拆解执行合同（机器可读；用于审核/回放/状态机）
+
+步骤（必须按顺序）：
+1) 读取 `REQUIREMENTS.md` 与 `requirements/CHANGELOG.md`（若不存在则创建 changelog 文件与目录）
+2) 明确本次变更的类型：
+   - Clarify：补充不清晰的验收字段（不改变语义）
+   - Change：修改/新增/删除需求（改变语义）
+3) 产出“变更摘要”（1-5 条）并在执行前确认边界：
+   - 是否影响 API（OpenAPI/状态码/鉴权/字段）
+   - 是否影响自动化测试边界（allow_mutations/dangerous_disabled/base_url_allowlist）
+4) 对比与冲突检查（强制，不写文件）：
+   - 对比“变更前 vs 拟变更后”的差异清单（新增/删除/语义变化）
+   - 整理潜在冲突/不确定点（只列“最可能影响验收/实现”的，避免噪音）
+5) 逐条澄清（强制，避免一次问完）：
+   - 若存在潜在冲突/不确定点：本轮只问 1 个最高优先级问题（给出 2–4 个可选答案或二选一），然后停止，等待用户回复；不要继续问下一题，也不要写文件。
+   - 收到用户回复后：更新拟变更方案，回到步骤 4) 重新对比，直至没有未决问题。
+6) 强制停下来让用户确认：是否继续落盘？(Y/N)
+7) 用户确认 Y 后再写入：
+   - 更新 `REQUIREMENTS.md`（只留下当前有效版本；不要在文件中堆历史表格）
+   - 追加一条 changelog 记录到 `requirements/CHANGELOG.md`（必须包含：日期、变更内容、原因、影响范围、关联 issues/PR、记录人）
+8) 需求拆解到 CSV 执行合同（强制）：
+   - 确保存在 `requirements/requirements-issues.csv`（若无则初始化）：
+     - `python3 tools/requirements_contract.py init`
+   - 为本次变更新增/更新 1..N 条 Req 行，并拆到“可实现、可测试”的粒度：
+     - 每条至少写清：CRUD、Scenario、Inputs、Outputs、Business_Logic、Tests
+     - 状态机：
+       - `Spec_Status`: DRAFT(未完善)/READY(已完善可开工)
+       - `Impl_Status`: TODO/DOING/DONE/BLOCKED/SKIP
+   - 完成后必须跑一次校验（READY/DONE 的必填字段会被检查）：
+     - `python3 tools/requirements_contract.py validate`
+9) 同步/补齐需求执行合同（强制，自动处理 FlowSpec 有/无两种情况）：
+   - `python3 tools/requirements_contract_sync.py --workspace .`
+   - 说明：若 `REQUIREMENTS.md` 中不存在 FlowSpec（或 flows 为空），该命令只会确保 `requirements/requirements-issues.csv` 表头存在并给出 WARN（这是预期行为，不要当成失败）。
+10) 同步执行合同（至少做到其中之一）：
+   - 更新 `issues/feature-issues.csv`（新增/调整对应任务，并关联 Req_ID）
+   - 若涉及 API：运行/更新 runner 产物并修正 `issues/server-api-issues.csv` 的验收字段
+11) 生成简短逻辑图与场景执行合同（可选，但若存在 FlowSpec 则强烈建议自动执行）：
+   - 若 `REQUIREMENTS.md` 同时包含 `<!-- FLOW_SPEC_BEGIN -->` 与 `<!-- FLOW_SPEC_END -->`：运行 `/ws-req-flow-sync` 生成/更新 `docs/api-flow.mmd` 与 `issues/server-scenario-issues.csv`
+   - 否则：跳过，并提示用户“可以先不维护 FlowSpec；后续需要场景回归时再补”
+
+输出必须包含：
+- 本次更新的文件清单（路径）
+- 回滚方案（如何撤销本次需求变更）
+- 下一步建议命令（若存在 FlowSpec：包含 `/ws-req-flow-sync`；以及 `/server-fix` 或 runner 命令）
+
+安全规则：
+- 不打印 secrets/test-accounts.json
+- 不引入任何 token/密钥到仓库
+"""

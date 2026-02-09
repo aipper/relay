@@ -1,0 +1,65 @@
+# Command: server:fix
+# Description: 自动修复闭环：分诊 -> 最小修复 -> 复测直到 DONE/SKIP
+# Category: server
+# Version: 1
+
+description = "自动修复闭环：分诊 -> 最小修复 -> 复测直到 DONE/SKIP"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在测试环境（AI_WORKSPACE.md: environment=test）中，针对“单服务”为主的工作区，自动进入闭环：
+（计划）->（执行测试）->（更新 issues CSV + 证据）->（定位）->（修复）->（复测），直到验收通过或达到迭代上限。
+
+自动化（减少人工干预）：
+- 不要求先手动执行 `/server-test-plan`：如果检测到“计划/执行合同产物缺失”，本命令会先按 `/server-test-plan` 的规则自动补齐计划与产物，再进入闭环。
+
+前置（必须满足）：
+- 当前目录为工作区根目录（目录A）
+- 已存在 AI_WORKSPACE.md、REQUIREMENTS.md
+- 已存在 tools/server_test_runner.py（uv 可用）
+- 已存在 secrets/test-accounts.json（敏感，不展示内容）
+
+你日常只需要关注的产物（其余可忽略）：
+- `issues/server-fix-issues.csv`：修复清单（runner 自动生成/更新，包含证据与建议）
+- `issues/server-triage-issues.csv`：需要人工介入的条目（证据不足/需业务判断/日志缺 request_id 等）
+- `.agentdocs/tmp/server-test/report.{json,md}`：证据包与汇总
+
+说明（避免混乱）：
+- `issues/server-api-issues.csv` 是 runner 的“执行合同/端点账本”，用于记录每个 endpoint 的状态机与期望字段，便于跳过 DONE、聚焦 BLOCKED；你不需要手工维护它。
+- 如你希望尽量减少 LLM 参与、降低 token：可先运行 `/server-drain` 把 TODO 推进到 DONE/SKIP，遇到 BLOCKED 再进入本命令。
+
+闭环策略（必须按此执行）：
+0) 计划/执行合同预检（若缺失则先补齐）：
+   - 若 `issues/server-api-issues.csv` 不存在：先从 OpenAPI 生成（runner 会自动 upsert）
+   - 若 `.agentdocs/tmp/server-test/report.json` 不存在：先运行 runner 生成证据包
+   - 若 `docs/openapi.json` 不存在：优先通过 AI_WORKSPACE.md:openapi_url 从运行服务导出（runner 的 --refresh-openapi）
+   - 若 REQUIREMENTS.md 的接口需求未填：先把 REQUIREMENTS.md 补齐到“可验收”（否则修复会跑偏）
+1) 运行 runner（默认小批量，避免长时间运行导致上下文/输出膨胀；需要时重复运行多轮）：
+   - 单服务推荐默认：`uv run tools/server_test_runner.py --workspace . --manage-service --max-endpoints 30 --max-response-bytes 65536 --max-report-blocked 50`
+   - 若需要刷新 OpenAPI：在上述命令后追加 `--refresh-openapi`
+2) 只读取“摘要与清单”，不要读取大文件全文（防止 token 爆炸）：
+   - 先读 `.agentdocs/tmp/server-test/report.md`（摘要）
+   - 再读 `issues/server-fix-issues.csv` 与 `issues/server-triage-issues.csv`
+   - 只在需要时，按证据路径打开单个 `*.out` 或 `*.log.txt`（最多 1-2 个 BLOCKED）
+3) 若存在 BLOCKED：
+   a) 只处理 Top 3 BLOCKED：对每个 BLOCKED，按 Evidence 读取证据文件路径（resp=... / log_snippet=...），不要把文件内容整段贴回输出
+   b) 判断是“需求/业务对齐”还是“代码/配置问题”
+   c) 对代码/配置问题：先用 Context7 查对应栈（按 server_dir 检测：pom.xml/gradle/go.mod/Cargo.toml），再做最小修复
+   d) 单服务默认直接复测；多服务时只复测相关 service（设置 CSV 对应项为 TODO/BLOCKED 即可；runner 会跳过 DONE）
+4) 每轮最多修复 3 个 BLOCKED，最多迭代 5 轮；超出则停止并给出剩余问题清单与建议
+
+输出限制（防止 iFlow 崩溃）：
+- 每轮输出只包含：汇总数字 + Top 3 BLOCKED（Issue_ID/Method/Path/证据路径）+ 1-3 条下一步命令
+- 不要输出任何日志/响应正文；一律用文件路径引用
+
+边界：
+- 不做破坏性数据操作；除非 AI_WORKSPACE.md allow_mutations=true 且 REQUIREMENTS.md 明确允许
+- 不泄露 secrets
+- 不做 git commit（提交由 /server-commit 负责）
+- 反死循环：连续 2 轮 BLOCKED 数不下降时，必须缩小范围（只跑单 service/单 endpoint）或先修环境/先补齐 REQUIREMENTS，不能继续盲改
+
+当全部 DONE/SKIP：
+- 默认输出：可以执行 `/server-commit`
+- 若希望“一条命令自动提交”，使用 `/server-fix-and-commit`（仅限 environment=test）
+"""

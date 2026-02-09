@@ -1,0 +1,30 @@
+# Command: ws:preflight
+# Description: AI Workspace 预检：读 AI_PROJECT/REQUIREMENTS/AI_WORKSPACE 并输出约束摘要
+# Category: workspace
+# Version: 1
+
+description = "AI Workspace 预检：读 AI_PROJECT/REQUIREMENTS/AI_WORKSPACE 并输出约束摘要"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在开始“写代码/改配置/给补丁”之前，先把工作区真值文件读全并对齐，避免规则漂移。
+
+执行步骤（强制）：
+1) 定位项目根目录：
+   - 优先：`git rev-parse --show-toplevel`
+   - 若失败：说明无法判断项目根；请用户确认当前目录是否为项目根（不要猜测）。
+2) 在项目根目录读取以下文件（存在则必须读取；缺失则明确报告缺失项，不要臆测内容）：
+   - `AI_PROJECT.md`
+   - `REQUIREMENTS.md`
+   - `AI_WORKSPACE.md`
+3) 输出：
+   - `Root:` <项目根路径>
+   - `Found:` 列出实际读取到的文件列表
+   - `Missing:` 列出缺失文件（若缺失 `AI_PROJECT.md`，建议用户先运行 `/ws-migrate` 或 `/aiws-init` 补齐）
+   - `Key rules:` 用 3–8 条 bullet 摘要关键约束（范围/禁止项/必须产物/必须验证命令）
+
+安全规则：
+- 不打印 secrets；遇到疑似敏感值仅提示并建议迁移到本地私密文件（不要复述原文）。
+- 不执行破坏性命令。
+"""

@@ -1,0 +1,53 @@
+# Command: ws:init
+# Description: 初始化当前目录为 workspace-A（AI_WORKSPACE/REQUIREMENTS/tools/secrets 示例）
+# Category: workspace
+# Version: 1
+
+description = "初始化当前目录为 workspace-A（AI_WORKSPACE/REQUIREMENTS/tools/secrets 示例）"
+
+prompt = """
+用中文输出；命令与路径保持原样不翻译。
+
+目标：把“当前目录”初始化为 aiws `workspace` 模板（真值文件 + 门禁 + tool-native commands）。
+
+约束：
+- 不创建/不打印真实 secrets；只生成 `secrets/test-accounts.example.json` 示例文件。
+- 默认不做破坏性操作。
+
+执行：
+!{bash -lc '
+set -euo pipefail
+
+root="$(pwd)"
+
+run_aiws() {
+  local subcmd="$1"
+  shift
+
+  if [[ -x "$root/node_modules/.bin/aiws" ]]; then
+    "$root/node_modules/.bin/aiws" "$subcmd" "$@"
+    return 0
+  fi
+  if command -v aiws >/dev/null 2>&1; then
+    aiws "$subcmd" "$@"
+    return 0
+  fi
+  if command -v npx >/dev/null 2>&1; then
+    npx -y @aipper/aiws "$subcmd" "$@"
+    return 0
+  fi
+
+  echo "error: aiws not found (install @aipper/aiws or ensure npx is available)" >&2
+  exit 2
+}
+
+run_aiws init .
+run_aiws validate .
+
+echo "下一步:"
+echo "  - 启用本机 hooks：git config core.hooksPath .githooks"
+echo "  - 如启用了 iFlow pre_tool_guard：执行 /ws-contract-check（写入 stamp）"
+echo "  - 创建 secrets：cp -n secrets/test-accounts.example.json secrets/test-accounts.json"
+echo "  - 重新运行门禁：aiws validate ."
+'}
+"""

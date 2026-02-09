@@ -1,0 +1,23 @@
+---
+name: aiws-change-archive
+description: 归档变更工件（会先做严格校验）
+---
+
+目标：
+- 将 `changes/<change-id>/` 归档到 `changes/archive/<YYYY-MM-DD>/...`
+
+执行（在仓库根目录）：
+```bash
+change_id="<change-id>"
+if [[ -x "./node_modules/.bin/aiws" ]]; then
+  ./node_modules/.bin/aiws change archive "$change_id"
+elif command -v aiws >/dev/null 2>&1; then
+  aiws change archive "$change_id"
+else
+  npx @aipper/aiws change archive "$change_id"
+fi
+```
+
+说明：
+- `archive` 默认会先跑严格校验并要求 tasks 全部勾选
+- `--force` 会绕过部分门禁（不推荐）

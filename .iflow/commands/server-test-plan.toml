@@ -1,0 +1,62 @@
+# Command: server:test-plan
+# Description: 规划 workspace 级 server API 测试（发现服务目录、记录接口、生成 issues CSV）
+# Category: server
+# Version: 1
+
+description = "规划 workspace 级 server API 测试（发现服务目录、记录接口、生成 issues CSV）"
+
+prompt = """
+IMPORTANT:
+- Use Chinese for all narrative output (plans, explanations, headings).
+- Keep commands/paths/code identifiers in their original form.
+
+Create a concrete, executable plan to test server APIs in a workspace directory that may contain multiple projects (backend/frontend) with non-fixed names.
+
+First, read these workspace-standard files (if present in cwd):
+- AI_WORKSPACE.md (workspace discovery and run overrides)
+- REQUIREMENTS.md (single source of truth for requirements)
+If AI_WORKSPACE.md defines a Request-ID convention, follow it (default: X-Request-Id and log field request_id=<id>).
+If AI_WORKSPACE.md defines OpenAPI conventions, follow them (default: docs/openapi.json).
+
+Secrets:
+- If secrets/test-accounts.json exists, treat it as sensitive. Never print its contents.
+- Use it only to know headers/base_url/accounts for testing.
+
+Output format:
+1) GOALS / NON-GOALS (must match REQUIREMENTS.md)
+2) Discovery strategy:
+   - Identify server directories (non-fixed names) using AI_WORKSPACE.md server_dirs if provided,
+     else detect by markers: Cargo.toml (Rust), go.mod (Go), pom.xml/gradle (Java).
+   - For each server dir, detect build/test/start commands (prefer explicit overrides in AI_WORKSPACE.md).
+3) API inventory strategy (pick in order, per server):
+   - OpenAPI spec as source of truth:
+     - Prefer docs/openapi.json if present
+     - Else export from running server (AI_WORKSPACE.md openapi_url) into docs/openapi.json
+   - Runtime route dump endpoint if available (framework-specific)
+   - Code scan fallback (list routes from framework conventions)
+4) Artifacts (execution contract):
+   - docs/api.md: API document draft (method/path/auth/request/response/error)
+   - issues/server-api-issues.csv: rows for each endpoint with a state machine (no percentages)
+     Columns MUST include:
+       Issue_ID, Service, Title, Method, Path, Auth, Request_Example, Expected_Status,
+       Expected_Body_Checks, Log_Checks, Test_Status, Review_Status, Notes
+     Test_Status: TODO | DOING | DONE | BLOCKED | SKIP
+     Review_Status: PENDING | REVIEWING | APPROVED
+5) Execution loop:
+   - Build -> start (capture logs) -> wait health -> for each endpoint: request -> check response -> check logs -> update CSV
+   - If fail: smallest fix, implement, rerun only failing items
+   - Requests MUST include X-Request-Id; log checks should prefer grepping by that id (fallback to time-window grep)
+   - If tools/server_test_runner.py exists and uv is available, prefer using:
+     - uv run tools/server_test_runner.py --workspace .
+     - (optional) uv run tools/server_test_runner.py --workspace . --refresh-openapi
+     - (optional) uv run tools/server_test_runner.py --workspace . --manage-service
+6) Rollback plan (git restore / revert / stop processes)
+7) Verification commands + expected results
+
+Constraints:
+- Assume Linux. Avoid docker-compose (not used).
+- If AI_WORKSPACE.md declares environment=test and allow_mutations=true, you may include mutating endpoints in the plan,
+  but still require explicit coverage and expectations in REQUIREMENTS.md.
+- Otherwise, do not hit destructive endpoints unless explicitly allowed in REQUIREMENTS.md.
+- Ask 1-2 clarification questions only if required info is missing.
+"""

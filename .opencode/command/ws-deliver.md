@@ -1,0 +1,47 @@
+---
+description: 交付：submodules+superproject 分步提交并安全合并回 base
+---
+<!-- AIWS_MANAGED_BEGIN:opencode:ws-deliver -->
+# ws deliver
+
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：适配 superproject + submodule（数量不固定）的交付收尾，降低“提交顺序/合并回 base 分支”出错概率：
+1) 先逐个提交 submodule（每个 repo 单独确认 commit message；默认 `git add -p`）
+2) 再提交 superproject（包含 submodule gitlink 指针更新 + 自身改动/变更工件）
+3) 最后 fast-forward 合并回目标分支（复用 `aiws change finish`；建议用 `/ws-finish`）
+
+强制约束：
+- 不自动 `git add -A`。
+- 不自动 push。
+- 不自动删除分支。
+
+建议流程（按顺序）：
+1) 先运行 `/ws-preflight`。
+2) 发现 submodules：
+   - `git submodule status --recursive`
+3) 逐个提交 submodules（按上一步顺序）：
+   - `git -C "<sub_path>" status --porcelain`
+   - `git -C "<sub_path>" add -p`
+   - `git -C "<sub_path>" diff --staged --stat`
+   - 生成并让用户确认该 submodule 的 commit message（每个 repo 单独确认）
+   - `git -C "<sub_path>" commit -m "<message>"`
+4) 提交 superproject（gitlinks + 自身改动）：
+   - `git diff --submodule`
+   - `git add <submodule-path-1> <submodule-path-2> ...`
+   - `git add -p`
+   - 生成并让用户确认 superproject 的 commit message
+   - `git commit -m "<message>"`
+5) （推荐）门禁 + 证据：
+   - `aiws validate . --stamp`（未安装全局 aiws 时可用 `npx @aipper/aiws validate . --stamp`）
+6) 安全合并回目标分支：
+   - 优先运行 `/ws-finish`（底层调用 `aiws change finish`，默认 `--ff-only`）
+
+输出要求：
+- `Submodules:` 每个 submodule 的 commit 摘要（repo/path → sha → message）
+- `Superproject:` commit 摘要
+- `Merge:` `/ws-finish` 输出（into/from）
+- `Evidence:` `.agentdocs/tmp/aiws-validate/*.json`（若使用 --stamp）
+<!-- AIWS_MANAGED_END:opencode:ws-deliver -->
+
+可在下方追加本项目对 OpenCode 的额外说明（托管块外内容会被保留）。

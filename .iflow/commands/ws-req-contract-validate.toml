@@ -1,0 +1,16 @@
+# Command: ws:req-contract-validate
+# Description: 校验 requirements/requirements-issues.csv（READY/DONE 必填字段）
+# Category: requirements
+# Version: 1
+
+description = "校验 requirements/requirements-issues.csv（READY/DONE 必填字段）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+执行（失败则修正 CSV 再重试）：
+!{bash -lc '
+set -euo pipefail
+python3 tools/requirements_contract.py validate
+'}
+"""

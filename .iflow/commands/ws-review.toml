@@ -1,0 +1,32 @@
+# Command: ws:review
+# Description: AI Workspace 交叉审计交付（Claude + Codex + Gemini），证据落盘到 .agentdocs/tmp/review/
+# Category: workspace
+# Version: 1
+
+description = "AI Workspace 交叉审计交付（Claude + Codex + Gemini），证据落盘到 .agentdocs/tmp/review/"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在实现/提交前，对当前工作区改动进行交叉审计，并把审计结论落盘到 `.agentdocs/tmp/review/`，便于回放与追责。
+
+强制步骤：
+1) 读取真值文件：`AI_PROJECT.md`、`REQUIREMENTS.md`、`AI_WORKSPACE.md`。
+2) 若 iFlow 拦截写入：先执行 `/ws-contract-check`，再继续。
+3) 审计输入（按优先级）：
+   - `git diff`（或变更工件 `changes/<change-id>/`）
+   - `issues/*.csv`（状态机是否存在 TODO/DOING/BLOCKED）
+   - 最近一次门禁输出（如 `aiws validate .`）
+4) 输出（必须）：
+   - Findings：问题清单（按严重性排序，引用具体文件路径）
+   - Risks：3–8 条
+   - Next：最小修复清单 + 最小验证命令
+5) 证据落盘（必须）：
+   - 在 `.agentdocs/tmp/review/` 写入一份 `review.<timestamp>.md`
+6) 如果目标是提交前门禁：
+   - 建议运行：`aiws validate .`（或 `npx @aipper/aiws validate .`）
+
+边界：
+- 不打印任何 secrets（尤其是 `secrets/test-accounts.json`）。
+- 不执行破坏性命令。
+"""

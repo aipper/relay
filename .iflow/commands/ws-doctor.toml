@@ -1,0 +1,141 @@
+# Command: ws:doctor
+# Description: 检查 workspace-A 约定并给出可执行的下一步
+# Category: workspace
+# Version: 1
+
+description = "检查 workspace-A 约定并给出可执行的下一步"
+
+prompt = """
+用中文输出。检查当前目录是否符合 AIWS workspace 约定，并给出可执行的下一步建议。
+
+Rules:
+- Do not print secrets (especially secrets/test-accounts.json).
+- Only report presence/absence and safe guidance.
+- Prefer Linux-first commands.
+
+Execute:
+!{bash -lc '
+set -euo pipefail
+
+ok()   { printf "OK: %s\n" "$*"; }
+warn() { printf "警告: %s\n" "$*"; }
+miss() { printf "缺失: %s\n" "$*"; }
+note() { printf "说明: %s\n" "$*"; }
+
+project_root() {
+  local root
+  root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "${root:-}" ]]; then
+    echo "$root"
+  else
+    pwd
+  fi
+}
+
+workspace_root() {
+  local d="$PWD"
+  while true; do
+    if [[ -f "$d/AI_WORKSPACE.md" || -f "$d/REQUIREMENTS.md" || -f "$d/AI_PROJECT.md" ]]; then
+      echo "$d"
+      return 0
+    fi
+    [[ "$d" == "/" ]] && break
+    d="$(dirname "$d")"
+  done
+  project_root
+}
+
+workspace_env() {
+  [[ -f AI_WORKSPACE.md ]] || return 0
+  local line
+  line="$(grep -m1 -E "^[[:space:]]*- environment:[[:space:]]*" AI_WORKSPACE.md 2>/dev/null || true)"
+  [[ -n "${line:-}" ]] || return 0
+  printf "%s\n" "$line" | sed -E "s/.*environment:[[:space:]]*\\\"?([^\\\"#[:space:]]+).*/\\1/"
+}
+
+subdir="$(pwd)"
+root="$(workspace_root)"
+cd "$root"
+
+echo "工作目录: $root"
+if [[ "$subdir" != "$root" ]]; then
+  echo "当前子目录: $subdir"
+fi
+echo
+
+need_init=0
+
+if [[ -f AGENTS.md ]]; then ok "AGENTS.md"; else warn "AGENTS.md 未发现（建议运行 /aiws-init 补齐）"; fi
+if [[ -f AI_PROJECT.md ]]; then ok "AI_PROJECT.md"; else miss "AI_PROJECT.md"; need_init=1; fi
+if [[ -f AI_WORKSPACE.md ]]; then ok "AI_WORKSPACE.md"; else miss "AI_WORKSPACE.md"; need_init=1; fi
+if [[ -f REQUIREMENTS.md ]]; then ok "REQUIREMENTS.md"; else miss "REQUIREMENTS.md"; need_init=1; fi
+
+if [[ -f requirements/CHANGELOG.md ]]; then ok "requirements/CHANGELOG.md"; else warn "requirements/CHANGELOG.md 未发现"; fi
+if [[ -f requirements/requirements-issues.csv ]]; then ok "requirements/requirements-issues.csv"; else warn "requirements/requirements-issues.csv 未发现"; fi
+if [[ -f issues/problem-issues.csv ]]; then ok "issues/problem-issues.csv"; else warn "issues/problem-issues.csv 未发现"; fi
+
+if [[ -f .aiws/manifest.json ]]; then ok ".aiws/manifest.json"; else miss ".aiws/manifest.json"; need_init=1; fi
+if [[ -f .githooks/pre-commit ]]; then ok ".githooks/pre-commit"; else warn ".githooks/pre-commit 未发现"; fi
+if [[ -f .githooks/pre-push ]]; then ok ".githooks/pre-push"; else warn ".githooks/pre-push 未发现"; fi
+
+echo
+echo "工具链:"
+if command -v python3 >/dev/null 2>&1; then ok "python3"; else warn "python3 未发现（aiws validate 需要）"; fi
+if command -v uv >/dev/null 2>&1; then ok "uv"; else note "uv 未发现（可选；用于运行 tools/server_test_runner.py）"; fi
+if command -v aiws >/dev/null 2>&1; then ok "aiws"; else note "aiws 未发现（可用 npx @aipper/aiws ...）"; fi
+
+echo
+echo "git hooks:"
+git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "${git_root:-}" ]]; then
+  hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
+  if [[ "$hooks_path" == ".githooks" ]]; then
+    ok "core.hooksPath=.githooks（提交/推送将自动运行 aiws validate）"
+  else
+    warn "core.hooksPath 未设置为 .githooks（当前：${hooks_path:-<unset>}）"
+    note "可执行：git config core.hooksPath .githooks"
+  fi
+else
+  note "未检测到 git 仓库（跳过 hooks 检查）"
+fi
+
+echo
+echo ".gitignore:"
+if [[ -f .gitignore ]]; then
+  if grep -qF "# AIWS_MANAGED_BEGIN:gitignore" .gitignore; then
+    ok ".gitignore 已包含 AIWS managed block"
+  else
+    warn ".gitignore 缺少 AIWS managed block（建议运行 /aiws-init 或 /aiws-update 修复）"
+  fi
+else
+  warn "未找到 .gitignore"
+fi
+
+echo
+env="$(workspace_env || true)"
+if [[ -n "${env:-}" ]]; then
+  echo "environment: ${env}"
+fi
+
+echo
+echo "下一步建议:"
+if [[ "$need_init" -eq 1 ]]; then
+  echo "  - 执行: /aiws-init（或 `npx @aipper/aiws init .`）"
+else
+  echo "  - 运行门禁: aiws validate .（或 `npx @aipper/aiws validate .`）"
+fi
+echo "  - 如 iFlow 拦截写入：/ws-contract-check（写入 stamp）"
+if [[ ! -f secrets/test-accounts.json && -f secrets/test-accounts.example.json ]]; then
+  echo "  - 创建 secrets：cp -n secrets/test-accounts.example.json secrets/test-accounts.json"
+fi
+if [[ -f tools/server_test_runner.py ]]; then
+  echo "  - 接口闭环（自动修复）：/server-fix"
+  echo "  - 仅执行 runner：uv run tools/server_test_runner.py --workspace . --manage-service"
+fi
+if [[ -d memory-bank ]]; then
+  echo "  - 固定上下文：更新 memory-bank/progress.md"
+else
+  echo "  - 初始化 memory-bank：/ws-memory-bank-init"
+fi
+'}
+"""

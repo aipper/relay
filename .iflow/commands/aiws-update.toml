@@ -1,0 +1,23 @@
+# Command: aiws:update
+# Description: 更新 aiws workspace 托管面（仅更新 replace_file/托管块）
+# Category: aiws
+# Version: 1
+
+description = "更新 aiws workspace 托管面（仅更新 replace_file/托管块）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：
+- 从当前安装的 `@aipper/aiws-spec` 刷新模板托管面（replace_file + managed blocks）
+- 更新前备份到 `.aiws/backups/<timestamp>/`
+
+建议执行：
+1) `npx @aipper/aiws update .`
+2) `npx @aipper/aiws validate .`
+
+约束：
+- 不写入任何 secrets
+- 若托管块 marker 被破坏，`aiws update` 必须失败（提示重新 `aiws init` 或手工修复）
+"""
+

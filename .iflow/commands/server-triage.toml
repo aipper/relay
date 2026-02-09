@@ -1,0 +1,38 @@
+# Command: server:triage
+# Description: 基于 report.json + issues CSV 分诊失败项，给出与 REQUIREMENTS 对齐的修复建议
+# Category: server
+# Version: 1
+
+description = "基于 report.json + issues CSV 分诊失败项，给出与 REQUIREMENTS 对齐的修复建议"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：把“测试结果 → 可执行修复清单”自动化，减少人工判断。
+
+输入（在 cwd/workspace 根目录）：
+- AI_WORKSPACE.md（server_dirs、base_url、openapi 约定、Request-Id 约定）
+- REQUIREMENTS.md（唯一真值：业务边界/验收标准）
+- issues/server-api-issues.csv（执行合同）
+- issues/server-fix-issues.csv（runner 自动生成的“下一步修复清单”，用于聚焦 BLOCKED）
+- .agentdocs/tmp/server-test/report.json（runner 自动生成；若缺失，先运行 runner 生成）
+
+规则：
+- 不打印 secrets/test-accounts.json 内容
+- 若 report.json 不存在：直接运行
+  `uv run tools/server_test_runner.py --workspace . --manage-service`
+  再继续 triage
+- triage 结束时：必须确保 `issues/server-fix-issues.csv` 已更新（若缺失则重新运行 runner）
+- 将 BLOCKED 分成两类，并给出下一步：
+  A) 需求/业务对齐问题：Expected_Status/Expected_Body_Checks 与 REQUIREMENTS.md 不一致 → 先更新 REQUIREMENTS/CSV，再改代码
+  B) 代码/配置问题：500/解析异常/安全链路/日志缺 request_id 等 → 先用 Context7 查对应技术文档，再给最小修复点
+- 反死循环：若同一 BLOCKED 连续出现且证据不变，优先缩小范围（只跑单 service/单 endpoint）或先修环境/先补齐 REQUIREMENTS
+
+输出必须包含：
+1) 结论：当前是否可以进入提交阶段（是否全部 DONE/SKIP）
+2) BLOCKED Top 列表（按影响排序，引用 Issue_ID + endpoint + 证据文件路径，如 report.json / *.out / *.log.txt）
+3) 每个 BLOCKED 的“修复动作”：
+   - 需要改哪些文件（给相对路径）
+   - 建议如何验证（优先 rerun runner；必要时只跑对应 service）
+4) 若涉及请求日志关联：明确要求服务端输出 `request_id=<id>` 或按 AI_WORKSPACE.md 的约定
+"""

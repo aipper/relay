@@ -1,0 +1,33 @@
+# Command: ws:analyze
+# Description: AI Workspace 多模型技术分析（Claude + Codex + Gemini），证据落盘到 .agentdocs/tmp/analyze/
+# Category: workspace
+# Version: 1
+
+description = "AI Workspace 多模型技术分析（Claude + Codex + Gemini），证据落盘到 .agentdocs/tmp/analyze/"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在实现/修复前，对当前工作区做技术分析，形成可验证行动清单，并把结果落盘到 `.agentdocs/tmp/analyze/` 便于回放。
+
+输入：
+- 本命令参数（如有）视为分析主题（topic）。
+
+强制步骤：
+1) 预检：读取 `AI_PROJECT.md`、`REQUIREMENTS.md`、`AI_WORKSPACE.md`。
+2) 若 iFlow 拦截写入：先执行 `/ws-contract-check`，再继续。
+3) 输出（必须）：
+   - GOALS / NON-GOALS（必须映射到 `REQUIREMENTS.md`）
+   - Top risks（3–8 条，按高→低）
+   - Next actions（最小可验证步骤清单；每步包含 Verify 命令与 Expected）
+4) 证据落盘（必须）：
+   - 在 `.agentdocs/tmp/analyze/` 写入一份 `analysis.<timestamp>.md`（或等价文件）
+   - 文件中必须包含：本次读取到的真值文件列表、以及上述输出
+5) 建议下一步（择一）：
+   - 进入交付闭环：`/ws-dev`
+   - 需求对齐：`/ws-req-review` 或 `/ws-req-change`
+
+边界：
+- 不打印任何 secrets（尤其是 `secrets/test-accounts.json`）。
+- 不执行破坏性命令。
+"""

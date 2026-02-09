@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${WS_CHANGE_HOOK_BYPASS:-0}" == "1" ]]; then
+  echo "warn: WS_CHANGE_HOOK_BYPASS=1; skip aiws pre-push hook" >&2
+  exit 0
+fi
+
+root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n "${root:-}" ]] || exit 0
+
+cd "$root"
+
+# Write validate evidence stamp to: .agentdocs/tmp/aiws-validate/*.json
+export AIWS_VALIDATE_STAMP=1
+
+aiws_bin=""
+if [[ -x "$root/node_modules/.bin/aiws" ]]; then
+  aiws_bin="$root/node_modules/.bin/aiws"
+elif command -v aiws >/dev/null 2>&1; then
+  aiws_bin="aiws"
+fi
+
+if [[ -z "${aiws_bin:-}" ]]; then
+  echo "error: aiws CLI not found (required for git hook validation)" >&2
+  echo "hint: install @aipper/aiws then retry:" >&2
+  echo "  - npm i -g @aipper/aiws" >&2
+  echo "  - or: npm i -D @aipper/aiws" >&2
+  exit 1
+fi
+
+"$aiws_bin" validate .

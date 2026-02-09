@@ -1,0 +1,99 @@
+# Command: server:drain
+# Description: 低输出 runner 循环：小批量执行直到出现 BLOCKED 或全部 DONE/SKIP
+# Category: server
+# Version: 1
+
+description = "低输出 runner 循环：小批量执行直到出现 BLOCKED 或全部 DONE/SKIP"
+
+prompt = """
+用中文输出；命令与路径保持原样不翻译。
+
+目标：用**极少输出**把 TODO 推进到 DONE/SKIP，避免长时间让 LLM 参与导致 token 膨胀或 iFlow 崩溃。
+
+行为：
+- 只循环运行 `tools/server_test_runner.py`（小批量：--max-endpoints）。
+- 一旦检测到 `issues/server-api-issues.csv` 出现 BLOCKED：立即停止，并提示用户进入 `/server-fix`（修复闭环）。
+- 不读取/不打印 `.out` / `.log.txt` 正文；只输出汇总数字与下一步命令。
+
+无人值守（可选）：
+- 推荐用外部 watchdog（systemd/cron）启动本命令；当检测到 BLOCKED 或 iFlow 崩溃时，由 watchdog 决定是否触发 `/server-fix`。
+
+前置：
+- 当前目录为 workspace 根目录（目录A）
+- 已存在 AI_WORKSPACE.md、REQUIREMENTS.md、tools/server_test_runner.py、secrets/test-accounts.json
+- 已安装 uv
+
+Execute:
+!{bash -lc '
+set -euo pipefail
+
+die() { echo "error: $*" >&2; exit 2; }
+need() { [[ -f "$1" ]] || die "missing: $1"; }
+
+need "AI_WORKSPACE.md"
+need "REQUIREMENTS.md"
+need "tools/server_test_runner.py"
+need "secrets/test-accounts.json"
+command -v uv >/dev/null 2>&1 || die "missing: uv"
+
+csv="issues/server-api-issues.csv"
+max_rounds="${IFLOW_DRAIN_MAX_ROUNDS:-50}"
+max_endpoints="${IFLOW_DRAIN_MAX_ENDPOINTS:-30}"
+sleep_s="${IFLOW_DRAIN_SLEEP_S:-0}"
+
+runner_args=(--workspace . --manage-service --max-endpoints "$max_endpoints" --max-response-bytes 65536 --max-report-blocked 50)
+
+lock_dir=".agentdocs/tmp/server-test/.drain.lock"
+mkdir -p ".agentdocs/tmp/server-test"
+if ! mkdir "$lock_dir" 2>/dev/null; then
+  echo "error: another /server-drain is running (lock: $lock_dir)" >&2
+  exit 2
+fi
+cleanup() { rmdir "$lock_dir" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
+
+echo "drain: max_rounds=$max_rounds max_endpoints=$max_endpoints auto_fix=$auto_fix auto_fix_max=$auto_fix_max sleep_s=$sleep_s"
+echo "drain: max_rounds=$max_rounds max_endpoints=$max_endpoints sleep_s=$sleep_s"
+
+i=1
+while [[ "$i" -le "$max_rounds" ]]; do
+  echo ""
+  echo "== round $i =="
+  uv run tools/server_test_runner.py "${runner_args[@]}" >/dev/null
+
+  if [[ ! -f "$csv" ]]; then
+    die "missing after runner: $csv"
+  fi
+
+  # Print minimal summary (no bodies/logs).
+  python3 - <<PY 2>/dev/null || true
+import csv
+from collections import Counter
+path="$csv"
+with open(path, newline="", encoding="utf-8") as f:
+    rows=list(csv.DictReader(f))
+c=Counter((r.get("Test_Status","") or "").strip().upper() for r in rows)
+print("summary:", " ".join(f"{k}={c.get(k,0)}" for k in ["DONE","BLOCKED","SKIP","TODO","DOING"]))
+PY
+
+  if grep -qE ",BLOCKED," "$csv"; then
+    echo "blocked: detected BLOCKED in $csv"
+    echo "next: /server-fix"
+    exit 3
+  fi
+
+  if grep -qE ",(TODO|DOING)," "$csv"; then
+    if [[ "$sleep_s" -gt 0 ]]; then sleep "$sleep_s" || true; fi
+    i=$((i+1))
+    continue
+  fi
+
+  echo "ok: all DONE/SKIP (no TODO/DOING/BLOCKED)"
+  exit 0
+done
+
+echo "warn: reached max rounds ($max_rounds) with remaining TODO/DOING"
+echo "next: re-run /server-drain (or switch to /server-fix if you suspect hidden failures)"
+exit 1
+'}
+"""

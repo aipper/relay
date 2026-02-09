@@ -1,0 +1,25 @@
+# Command: ws:req-contract-sync
+# Description: 从 REQUIREMENTS.md 的 FlowSpec 补齐 requirements/requirements-issues.csv（半自动）
+# Category: requirements
+# Version: 1
+
+description = "从 REQUIREMENTS.md 的 FlowSpec 补齐 requirements/requirements-issues.csv（半自动）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+用途：当项目已经做了一部分，但 `requirements/requirements-issues.csv` 还没建立/没补齐时，用本命令从 `REQUIREMENTS.md` 的 FlowSpec（机器可读）生成/补齐需求条目骨架。
+
+说明：
+- 本命令只做“补齐骨架”：把每条 Flow 变成一条 Req（默认 `Spec_Status=DRAFT`、`Impl_Status=TODO`），不会猜测你已完成哪些。
+- 生成后请手工补齐 CRUD/Inputs/Outputs/Business_Logic/Tests，并把可开工的条目标为 `Spec_Status=READY`。
+
+执行：
+!{bash -lc '
+set -euo pipefail
+python3 tools/requirements_contract_sync.py --workspace .
+'}
+
+下一步：
+- 运行：`/ws-req-contract-validate`
+"""

@@ -1,0 +1,25 @@
+<!-- AIWS_MANAGED_BEGIN:claude:ws-dev -->
+# ws dev
+
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：在 AIWS 约束下完成一个可回放、可验证的小步交付。
+
+建议流程：
+1) 先运行 `/ws-preflight`（读真值文件并输出约束摘要）。
+2) 建立变更归因（推荐）：
+   - 切分支：`git switch -c change/<change-id>`
+   - 初始化变更工件：创建 `changes/<change-id>/proposal.md` 与 `changes/<change-id>/tasks.md`（参考 `changes/README.md`）
+3) 如涉及需求调整：先 `/ws-req-review` → 用户确认后再 `/ws-req-change`（避免需求漂移）。
+4) 实施最小改动：任何改动都要能归因到 `REQUIREMENTS.md`（验收）或 `issues/problem-issues.csv`（问题）。
+5) 运行 `AI_WORKSPACE.md` 里声明的验证命令；未运行不声称已运行。
+6) 提交前强制：`aiws validate .`（commit/push hooks 也会阻断）。
+7) 交付收尾（推荐，减少手动 merge 出错）：运行 `/ws-finish`（底层调用 `aiws change finish`，默认 fast-forward 安全合并回目标分支）。
+
+输出要求：
+- `Changed:` 文件清单
+- `Verify:` 实际运行的命令 + 期望结果
+- `Evidence:` 证据路径（例如 `.agentdocs/tmp/...` 或 `changes/<change-id>/...`）
+<!-- AIWS_MANAGED_END:claude:ws-dev -->
+
+可在下方追加本项目对 Claude Code 的额外说明（托管块外内容会被保留）。

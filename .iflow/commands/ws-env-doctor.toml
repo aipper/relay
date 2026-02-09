@@ -1,0 +1,74 @@
+# Command: ws:env-doctor
+# Description: 检查工具链并给出 node/java/python/uv 切换建议（workspace-A）
+# Category: workspace
+# Version: 1
+
+description = "检查工具链并给出 node/java/python/uv 切换建议（workspace-A）"
+
+prompt = """
+用中文输出。检查当前环境的工具链与版本，并根据 AI_WORKSPACE.md 给出可执行的切换建议。
+
+规则：
+- 只读检查，不修改系统状态
+- 优先 Linux-first
+
+Execute:
+!{bash -lc '
+set -euo pipefail
+
+say() { printf "%s\n" "$*"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+ws="$(pwd)"
+say "工作目录: $ws"
+
+if [[ -f AI_WORKSPACE.md ]]; then
+  say "OK: 发现 AI_WORKSPACE.md"
+else
+  say "警告: 未发现 AI_WORKSPACE.md（建议先 /aiws-init）"
+fi
+
+say ""
+say "== 工具可用性 =="
+for c in git uv node npm pnpm yarn java javac mvn gradle python3 mise asdf nvm sdk jenv; do
+  if have "$c"; then
+    say "OK: $c"
+  else
+    say "缺失: $c"
+  fi
+done
+
+say ""
+say "== 版本信息 =="
+have node && say "node: $(node -v 2>/dev/null || true)" || true
+have npm && say "npm: $(npm -v 2>/dev/null || true)" || true
+have pnpm && say "pnpm: $(pnpm -v 2>/dev/null || true)" || true
+have java && say "java: $(java -version 2>&1 | head -n 1)" || true
+have javac && say "javac: $(javac -version 2>&1 | head -n 1)" || true
+have python3 && say "python3: $(python3 -V 2>/dev/null || true)" || true
+have uv && say "uv: $(uv --version 2>/dev/null || true)" || true
+
+say ""
+say "== AI_WORKSPACE.md 建议执行的切换命令（如果已配置） =="
+extract_cmd() {
+  local key="$1"
+  rg -n \"^\\s*-\\s*${key}\\s*:\\s*\\\"(.*)\\\"\\s*$\" AI_WORKSPACE.md 2>/dev/null | sed -E \"s/.*\\\"(.*)\\\".*/\\1/\" | head -n 1
+}
+
+if [[ -f AI_WORKSPACE.md ]]; then
+  boot="$(extract_cmd toolchain_bootstrap_cmd || true)"
+  node_use="$(extract_cmd node_use_cmd || true)"
+  java_use="$(extract_cmd java_use_cmd || true)"
+
+  [[ -n \"$boot\" ]] && say \"toolchain_bootstrap_cmd: $boot\"
+  [[ -n \"$node_use\" ]] && say \"node_use_cmd: $node_use\"
+  [[ -n \"$java_use\" ]] && say \"java_use_cmd: $java_use\"
+fi
+
+say ""
+say "下一步建议："
+say "- 若版本不匹配：把 node/java 的版本与切换命令写进 AI_WORKSPACE.md 的 3.3 节"
+say "- 跑服务端接口测试：uv run tools/server_test_runner.py --workspace . --manage-service"
+say "- 跑需求交付闭环：/ws-feature-plan -> /ws-feature-deliver"
+'}
+"""

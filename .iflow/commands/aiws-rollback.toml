@@ -1,0 +1,18 @@
+# Command: aiws:rollback
+# Description: 从 `.aiws/backups/` 回滚到某次快照（latest|timestamp）
+# Category: aiws
+# Version: 1
+
+description = "从 `.aiws/backups/` 回滚到某次快照（latest|timestamp）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+用法：
+- `npx @aipper/aiws rollback . latest`
+- `npx @aipper/aiws rollback . <timestamp>`
+
+说明：
+- 仅恢复 aiws 备份过的文件；不会做额外推断或重建
+"""
+
