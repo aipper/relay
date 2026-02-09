@@ -1,5 +1,16 @@
 # relay — REQUIREMENTS
 
+<!-- AIWS_MANAGED_BEGIN:requirements:contract -->
+本文件是工作区需求的唯一真值来源。AI 在制定计划与执行测试时必须以此为准。
+
+约束：
+- 不写入任何 secrets（token、账号、内网端点等）
+- `aiws update` 只维护本托管块；其余内容由项目自由编辑
+
+相关合同：
+- `requirements/requirements-issues.csv`：需求拆解执行合同（校验：`python3 tools/requirements_contract.py validate`）
+<!-- AIWS_MANAGED_END:requirements:contract -->
+
 本文件用于把当前项目在文档中已经明确写出的“目标/范围/约束/验收方式”固化为可执行的需求清单，便于后续迭代与回滚。
 
 ## 需求来源（当前唯一来源）
@@ -292,6 +303,10 @@
   - 会话列表不显示未读更新提示。
   - 顶部显示连接状态（圆点 + 文字）；WebSocket 断开时启用 10s 轮询刷新 runs/hosts。
   - 会话详情提供“事件 / 终端”顶部标签切换；默认进入“事件”视图；终端仅用于查看原始上下文。
+  - 移动端（<=640）打开会话时，默认始终进入“事件（会话卡片流）”视图（对齐 hapi 的 structured-first 体验），不得自动进入“终端”视图。
+  - 移动端在以下场景必须回到“事件（会话卡片流）”作为优先视图：首次进入会话、刷新后恢复会话、从列表切换到其他会话。
+  - 移动端“终端”入口为次级入口，仅在用户主动点击“终端/输出”入口后进入；再次切换会话时不继承到新会话。
+  - 移动端会话卡片流中，`run.permission_requested`、`run.awaiting_input`、`tool.call/tool.result` 等结构化卡片优先展示，不应被原始终端输出默认淹没。
   - 响应式断点：<=640（手机单列，列表→详情全屏切换）；641–1024（平板双栏，列表+详情）；>=1025（桌面双栏，列表宽度固定 320–360px）。
   - 输出页保留最近内容按可视高度动态裁剪：`visibleLines = floor(viewHeight / lineHeight)`，`bufferLines = clamp(visibleLines * 4, 200, 2000)`。
   - 输出页自动滚动暂停时显示“跳到最新”按钮。
@@ -322,6 +337,13 @@
   - 事件流以“turn（用户输入）→ parts（工具/系统/assistant 输出）”的结构展示（对齐 opencode share 的观感）；`tool.call/tool.result` 优先展示结构化 JSON（来自 messages API 的 `data` 字段），并可展开查看详情。
   - 事件视图默认不展示海量 `run.output`（避免淹没结构化事件）；默认仅对 `tool=opencode` 的会话保留 `run.output` 作为结构化 text 的承载。
   - 事件视图顶部提供“输出摘要（tail）”与“打开终端”入口；TUI 输出默认仅在终端视图查看。
+  -（hapi 对齐：卡片可操作性）移动端会话卡片流中，结构化卡片需要提供可操作 footer（参考 hapi 的 ToolCard/PermissionFooter/AskUserQuestionFooter 体验）：
+    - `tool.call` / `tool.result`：以 ToolCard 展示 tool 名称、参数摘要、运行状态（pending/success/error）、耗时；支持“展开/折叠详情”和“复制 JSON/文本”。
+    - `run.permission_requested`：以 PermissionCard 展示 `op_tool` / `op_args_summary` / 风险提示；footer 提供 approve/deny。
+    - `run.permission_requested` 若携带结构化问答（新增字段 `questions`，详见协议扩展条款），web 必须在卡片内渲染表单并随 approve 一并提交 `answers`（而不是要求用户去终端复制粘贴）。
+    -（hapi 对齐：会话级允许）web 的 approve 支持可选决策字段 `decision=approve_for_session`，并可携带 `allow_tools=[...]`（操作工具白名单）。hostd 在同一 run 生命周期内缓存该白名单，对匹配的后续 `op_tool` 自动通过审批（仍需生成可审计事件）。
+    - 审批决定（decision/allow_tools/answers）必须可回放：server 落库并在 messages API 中返回（MVP：允许挂在 `tool.result.data` 或新增 `run.permission_decided` 事件；不允许仅存在于前端内存）。
+    - 向后兼容：上述字段均以“新增字段”方式扩展；旧版本 client/hostd 必须忽略未知字段并保持 approve/deny 基本闭环可用。
   - 消息流区分用户/助手/系统角色的视觉样式（用户右对齐、助手左对齐、系统居中；系统消息更小字号与弱色，且无气泡仅文本；用户/助手使用气泡背景；用户用品牌色，助手用中性灰；用户/助手/系统均显示时间戳，格式为绝对时间，位置在气泡下方小字；气泡最大宽度 70%；长文本自动换行并保留换行）。
 
 ## 配置与安全（Configuration & Security Requirements）

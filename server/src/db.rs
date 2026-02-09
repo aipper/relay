@@ -606,6 +606,7 @@ WHERE run_id=?1
     'run.started',
     'run.output',
     'run.permission_requested',
+    'run.permission_decided',
     'run.input',
     'run.exited',
     'tool.call',

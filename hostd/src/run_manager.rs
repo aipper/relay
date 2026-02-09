@@ -42,6 +42,7 @@ struct Run {
     awaiting_input: Mutex<bool>,
     stdin_line_buf: Mutex<Vec<u8>>,
     processed_input_ids: Mutex<HashSet<String>>,
+    session_allow_tools: Mutex<HashSet<String>>,
     pending_permission: Mutex<Option<PendingPermission>>,
     codex_mcp: Mutex<Option<CodexMcpState>>,
     codex_rpc_waiters: StdMutex<HashMap<i64, oneshot::Sender<JsonValue>>>,
@@ -630,6 +631,43 @@ impl RunManager {
         walk(&self.redactor, v)
     }
 
+    pub async fn add_session_allow_tools(&self, run_id: &str, tools: &[String]) -> anyhow::Result<()> {
+        fn valid_tool_name(s: &str) -> bool {
+            let s = s.trim();
+            if s.is_empty() || s.len() > 128 {
+                return false;
+            }
+            s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == ':')
+        }
+
+        let run = {
+            let runs = self.runs.read().await;
+            runs.get(run_id).cloned()
+        }
+        .context("unknown run_id")?;
+
+        let mut set = run.session_allow_tools.lock().await;
+        for t in tools {
+            if valid_tool_name(t) {
+                set.insert(t.trim().to_string());
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn is_tool_allowlisted(&self, run_id: &str, tool: &str) -> bool {
+        let run = {
+            let runs = self.runs.read().await;
+            runs.get(run_id).cloned()
+        };
+        let Some(run) = run else {
+            return false;
+        };
+        let set = run.session_allow_tools.lock().await;
+        set.contains(tool)
+    }
+
     pub async fn start_run(
         &self,
         tool: String,
@@ -734,6 +772,7 @@ impl RunManager {
             awaiting_input: Mutex::new(false),
             stdin_line_buf: Mutex::new(Vec::new()),
             processed_input_ids: Mutex::new(HashSet::new()),
+            session_allow_tools: Mutex::new(HashSet::new()),
             pending_permission: Mutex::new(None),
             codex_mcp: Mutex::new(None),
             codex_rpc_waiters: StdMutex::new(HashMap::new()),
@@ -1015,6 +1054,7 @@ impl RunManager {
             awaiting_input: Mutex::new(false),
             stdin_line_buf: Mutex::new(Vec::new()),
             processed_input_ids: Mutex::new(HashSet::new()),
+            session_allow_tools: Mutex::new(HashSet::new()),
             pending_permission: Mutex::new(None),
             codex_mcp: Mutex::new(None),
             codex_rpc_waiters: StdMutex::new(HashMap::new()),
@@ -1167,6 +1207,7 @@ impl RunManager {
             awaiting_input: Mutex::new(false),
             stdin_line_buf: Mutex::new(Vec::new()),
             processed_input_ids: Mutex::new(HashSet::new()),
+            session_allow_tools: Mutex::new(HashSet::new()),
             pending_permission: Mutex::new(None),
             codex_mcp: Mutex::new(Some(CodexMcpState {
                 next_id: 1,

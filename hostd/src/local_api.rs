@@ -698,53 +698,59 @@ async fn fs_write(
         format!("需要审批：rpc.fs.write {op_args_summary}")
     };
 
-    let key = format!("{run_id}:{request_id}");
-    let (tx, rx) = oneshot::channel::<bool>();
-    {
-        let mut map = state.pending_tool_permissions.lock().await;
-        map.insert(key.clone(), tx);
-    }
-    let _ = state
-        .rm
-        .emit_run_event(
-            &run_id,
-            "run.permission_requested",
-            json!({
-                "request_id": request_id,
-                "reason": "permission",
-                "prompt": prompt,
-                "op_tool": "rpc.fs.write",
-                "op_args": args_for_event,
-                "op_args_summary": op_args_summary,
-                "approve_text": "",
-                "deny_text": ""
-            }),
-        )
-        .await;
+    let auto_approved = state.rm.is_tool_allowlisted(&run_id, "rpc.fs.write").await;
 
-    let approved = match tokio::time::timeout(Duration::from_secs(600), rx).await {
-        Ok(Ok(v)) => v,
-        Ok(Err(_)) => false,
-        Err(_) => {
+    let approved = if auto_approved {
+        true
+    } else {
+        let key = format!("{run_id}:{request_id}");
+        let (tx, rx) = oneshot::channel::<bool>();
+        {
             let mut map = state.pending_tool_permissions.lock().await;
-            map.remove(&key);
-            let duration_ms = started.elapsed().as_millis() as i64;
-            let _ = state
-                .rm
-                .emit_run_event(
-                    &run_id,
-                    "tool.result",
-                    json!({
-                        "request_id": request_id,
-                        "tool": "rpc.fs.write",
-                        "actor": actor,
-                        "ok": false,
-                        "duration_ms": duration_ms,
-                        "error": "timeout"
-                    }),
-                )
-                .await;
-            return Err((StatusCode::REQUEST_TIMEOUT, "timeout".into()));
+            map.insert(key.clone(), tx);
+        }
+        let _ = state
+            .rm
+            .emit_run_event(
+                &run_id,
+                "run.permission_requested",
+                json!({
+                    "request_id": request_id,
+                    "reason": "permission",
+                    "prompt": prompt,
+                    "op_tool": "rpc.fs.write",
+                    "op_args": args_for_event,
+                    "op_args_summary": op_args_summary,
+                    "approve_text": "",
+                    "deny_text": ""
+                }),
+            )
+            .await;
+
+        match tokio::time::timeout(Duration::from_secs(600), rx).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                let mut map = state.pending_tool_permissions.lock().await;
+                map.remove(&key);
+                let duration_ms = started.elapsed().as_millis() as i64;
+                let _ = state
+                    .rm
+                    .emit_run_event(
+                        &run_id,
+                        "tool.result",
+                        json!({
+                            "request_id": request_id,
+                            "tool": "rpc.fs.write",
+                            "actor": actor,
+                            "ok": false,
+                            "duration_ms": duration_ms,
+                            "error": "timeout"
+                        }),
+                    )
+                    .await;
+                return Err((StatusCode::REQUEST_TIMEOUT, "timeout".into()));
+            }
         }
     };
 
@@ -892,53 +898,59 @@ async fn bash_run(
         format!("需要审批：bash {op_args_summary}")
     };
 
-    let key = format!("{run_id}:{request_id}");
-    let (tx, rx) = oneshot::channel::<bool>();
-    {
-        let mut map = state.pending_tool_permissions.lock().await;
-        map.insert(key.clone(), tx);
-    }
-    let _ = state
-        .rm
-        .emit_run_event(
-            &run_id,
-            "run.permission_requested",
-            json!({
-                "request_id": request_id,
-                "reason": "permission",
-                "prompt": prompt,
-                "op_tool": "bash",
-                "op_args": args_for_event,
-                "op_args_summary": op_args_summary,
-                "approve_text": "",
-                "deny_text": ""
-            }),
-        )
-        .await;
+    let auto_approved = state.rm.is_tool_allowlisted(&run_id, "bash").await;
 
-    let approved = match tokio::time::timeout(Duration::from_secs(600), rx).await {
-        Ok(Ok(v)) => v,
-        Ok(Err(_)) => false,
-        Err(_) => {
+    let approved = if auto_approved {
+        true
+    } else {
+        let key = format!("{run_id}:{request_id}");
+        let (tx, rx) = oneshot::channel::<bool>();
+        {
             let mut map = state.pending_tool_permissions.lock().await;
-            map.remove(&key);
-            let duration_ms = started.elapsed().as_millis() as i64;
-            let _ = state
-                .rm
-                .emit_run_event(
-                    &run_id,
-                    "tool.result",
-                    json!({
-                        "request_id": request_id,
-                        "tool": "rpc.bash",
-                        "actor": actor,
-                        "ok": false,
-                        "duration_ms": duration_ms,
-                        "error": "timeout"
-                    }),
-                )
-                .await;
-            return Err((StatusCode::REQUEST_TIMEOUT, "timeout".into()));
+            map.insert(key.clone(), tx);
+        }
+        let _ = state
+            .rm
+            .emit_run_event(
+                &run_id,
+                "run.permission_requested",
+                json!({
+                    "request_id": request_id,
+                    "reason": "permission",
+                    "prompt": prompt,
+                    "op_tool": "bash",
+                    "op_args": args_for_event,
+                    "op_args_summary": op_args_summary,
+                    "approve_text": "",
+                    "deny_text": ""
+                }),
+            )
+            .await;
+
+        match tokio::time::timeout(Duration::from_secs(600), rx).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                let mut map = state.pending_tool_permissions.lock().await;
+                map.remove(&key);
+                let duration_ms = started.elapsed().as_millis() as i64;
+                let _ = state
+                    .rm
+                    .emit_run_event(
+                        &run_id,
+                        "tool.result",
+                        json!({
+                            "request_id": request_id,
+                            "tool": "rpc.bash",
+                            "actor": actor,
+                            "ok": false,
+                            "duration_ms": duration_ms,
+                            "error": "timeout"
+                        }),
+                    )
+                    .await;
+                return Err((StatusCode::REQUEST_TIMEOUT, "timeout".into()));
+            }
         }
     };
 

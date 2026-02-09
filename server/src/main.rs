@@ -461,6 +461,22 @@ async fn http_list_messages(
                 }
                 ("system", text, req, parsed_data)
             }
+            "run.permission_decided" => {
+                let parsed = parsed_data.clone().unwrap_or(JsonValue::Null);
+                let req = parsed
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let decision = parsed
+                    .get("decision")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let text = format!(
+                    "permission.decided decision={decision} request_id={}",
+                    req.clone().unwrap_or_else(|| "unknown".to_string())
+                );
+                ("system", text, req, parsed_data)
+            }
             "run.started" => ("system", "run started".to_string(), None, parsed_data),
             "run.exited" => ("system", "run exited".to_string(), None, parsed_data),
             _ => continue,
@@ -511,6 +527,23 @@ fn sha256_hex(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+fn redact_json_strings(redactor: &Redactor, v: &serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::String(s) => serde_json::Value::String(redactor.redact(s).text_redacted),
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(|x| redact_json_strings(redactor, x)).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (k, val) in map.iter() {
+                out.insert(k.clone(), redact_json_strings(redactor, val));
+            }
+            serde_json::Value::Object(out)
+        }
+        _ => v.clone(),
+    }
 }
 
 async fn tofu_register_or_verify_host(
@@ -685,9 +718,50 @@ async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
                             (host_id, Some(run_id))
                         };
 
-                        let mut cmd = WsEnvelope::new(env.r#type.clone(), env.data.clone());
-                        cmd.host_id = Some(host_id.clone());
-                        cmd.run_id = run_id;
+                            let mut cmd = WsEnvelope::new(env.r#type.clone(), env.data.clone());
+                            cmd.host_id = Some(host_id.clone());
+                            cmd.run_id = run_id;
+
+                            // Persist permission decisions for replay (SRV-020).
+                            if cmd.r#type == "run.permission.approve" || cmd.r#type == "run.permission.deny" {
+                                if let Some(run_id) = cmd.run_id.as_deref() {
+                                    let mut data = cmd.data.clone();
+                                    // Ensure there is an explicit decision field.
+                                    if data.get("decision").is_none() {
+                                        let decision = if cmd.r#type == "run.permission.approve" {
+                                            "approve"
+                                        } else {
+                                            "deny"
+                                        };
+                                        if let serde_json::Value::Object(map) = &mut data {
+                                            map.insert("decision".to_string(), serde_json::Value::String(decision.to_string()));
+                                        }
+                                    }
+                                    // Redact any free-text answers before persistence.
+                                    if let serde_json::Value::Object(map) = &mut data {
+                                        if let Some(ans) = map.get("answers").cloned() {
+                                            map.insert("answers".to_string(), redact_json_strings(&state.redactor, &ans));
+                                        }
+                                    }
+                                    let actor = data.get("actor").and_then(|v| v.as_str());
+                                    let data_json = serde_json::to_string(&data).ok();
+                                    let _ = db::insert_event(
+                                        &state.db,
+                                        run_id,
+                                        None,
+                                        cmd.ts,
+                                        "run.permission_decided",
+                                        None,
+                                        actor,
+                                        None,
+                                        None,
+                                        None,
+                                        None,
+                                        data_json.as_deref(),
+                                    )
+                                    .await;
+                                }
+                            }
 
                         let payload = match serde_json::to_string(&cmd) {
                             Ok(p) => p,

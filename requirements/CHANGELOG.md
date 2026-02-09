@@ -1,5 +1,12 @@
 # Requirements Changelog
 
+## 2026-02-08
+- Add mobile-first structured session cards requirement: on <=640 screens, opening/restoring/switching sessions defaults to Events (card stream), not Terminal.
+- Clarify mobile Terminal is secondary entry only and requires explicit user action.
+- Clarify mobile card stream prioritizes structured cards (`run.permission_requested` / `run.awaiting_input` / `tool.call` / `tool.result`) over raw terminal output by default.
+- Add hapi-aligned actionable card requirements: ToolCard / PermissionCard footer / AskUserQuestion-style footer, plus session-level allowlist semantics (`decision=approve_for_session`, `allow_tools`, `answers`) with server-side persistence for replay.
+- Rebuild `requirements/requirements-issues.csv` execution contract to cover existing web MVP interaction requirements (contract strategy B).
+
 ## 2026-01-17
 - Add PWA interaction MVP requirements for session list, approval modal, and input modal behavior.
 - Add execution contract `requirements/requirements-issues.csv` for the new web interaction items.

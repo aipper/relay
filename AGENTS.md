@@ -1,5 +1,26 @@
 # Repository Guidelines
 
+<!-- AIWS_MANAGED_BEGIN:agents -->
+本仓库启用 AIWS（AI Workspace）约定，请先读取并遵守（按优先级）：
+1) `AI_PROJECT.md`（规则/边界）
+2) `REQUIREMENTS.md`（需求与验收真值）
+3) `AI_WORKSPACE.md`（运行/测试入口真值）
+4) `changes/README.md`（变更工件流程与归档）
+
+协作约束（建议最小集）：
+- 每次变更使用分支 `change/<change-id>`，并维护 `changes/<change-id>/proposal.md`、`tasks.md`（可选 `design.md`）
+- 启用本机门禁（推荐）：`aiws hooks install .`（或手工：`git config core.hooksPath .githooks`；`git commit`/`git push` 会自动跑 `aiws validate .`）
+- 提交前校验（强制门禁）：`aiws validate .`（包含：漂移检测 + `ws_change_check` + `requirements_contract`）
+- Codex（推荐）：本仓库内置 repo skills：`.agents/skills/`（可显式 `$ws-dev`，也可隐式套用工作流）
+- Codex skills（常用）：`$ws-preflight` / `$ws-plan` / `$ws-dev` / `$ws-review` / `$ws-commit` / `$aiws-init` / `$aiws-validate` / `$aiws-hooks-install` / `$aiws-change-new`
+- Codex CLI（推荐，可选）：安装全局 skills：`npx @aipper/aiws codex install-skills`（写入 `~/.codex/skills/` 或 `$CODEX_HOME/skills`）
+- Codex CLI（遗留，可选）：安装全局 prompts：`npx @aipper/aiws codex install-prompts`（写入 `~/.codex/prompts/` 或 `$CODEX_HOME/prompts`；prompts 已 deprecated）
+- 不要把敏感信息写入 git：`secrets/test-accounts.json`、`.env*`、token、内网地址等
+
+如果缺文件：运行 `npx @aipper/aiws init`（或 `aiws init`）。
+（如你仍在使用 dotfiles 的 `ws` wrappers，也可用 `ws init/ws migrate`；但本模板默认不依赖 dotfiles。）
+<!-- AIWS_MANAGED_END:agents -->
+
 ## Overview
 
 This repo is a multi-component system to run AI coding CLIs on host machines and manage them remotely from a PWA.

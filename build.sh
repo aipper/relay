@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build and push relay-server Docker image to Aliyun ACR.
+# Build and push relay-server Docker image to a Docker Registry.
+#
+# Default target: self-hosted registry https://registry.aipper.de
 #
 # Usage:
 #   bash build.sh
 #   REPO_NAME=relay SERVER_PLATFORM=linux/amd64 bash build.sh
 #
-# Auth:
-#   export ACR_USERNAME="aipper@qq.com"
-#   export ACR_PASSWORD="<your-acr-password>"   # avoid putting secrets in shell history
+# Auth (optional; for basic auth / htpasswd, etc):
+#   export REGISTRY_USERNAME="<user>"
+#   export REGISTRY_PASSWORD="<password>"   # avoid putting secrets in shell history
 
-REPO_URL="${REPO_URL:-registry.cn-hangzhou.aliyuncs.com}"
+REPO_URL="${REPO_URL:-registry.aipper.de}"
 NAMESPACE="${NAMESPACE:-aipper}"
 REPO_NAME="${REPO_NAME:-relay-server}"
 IMAGE_TAG="${IMAGE_TAG:-$(date +"%Y%m%d%H%M")}"
@@ -19,7 +21,10 @@ IMAGE_TAG="${IMAGE_TAG:-$(date +"%Y%m%d%H%M")}"
 # Single-platform by default; set to "linux/amd64,linux/arm64" if needed.
 SERVER_PLATFORM="${SERVER_PLATFORM:-linux/amd64}"
 
-ACR_USERNAME="${ACR_USERNAME:-aipper@qq.com}"
+# Backward compatible aliases:
+# - old: ACR_USERNAME / ACR_PASSWORD
+REGISTRY_USERNAME="${REGISTRY_USERNAME:-${ACR_USERNAME:-}}"
+REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-${ACR_PASSWORD:-}}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "error: docker not found" >&2
@@ -30,21 +35,26 @@ if ! docker buildx version >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -z "${ACR_PASSWORD:-}" ]]; then
-  # Read from TTY so pipelines don't accidentally capture it.
-  if [[ -t 0 ]]; then
-    read -r -s -p "ACR password for ${ACR_USERNAME}@${REPO_URL}: " ACR_PASSWORD
-    echo
-  else
-    echo "error: ACR_PASSWORD is not set (and no TTY available to prompt)" >&2
-    exit 1
-  fi
+REPO_URL_LOGIN="${REPO_URL#http://}"
+REPO_URL_LOGIN="${REPO_URL_LOGIN#https://}"
+
+if [[ -z "${REGISTRY_USERNAME:-}" ]]; then
+  REGISTRY_USERNAME="${USER:-}"
 fi
 
-FULL_IMAGE="${REPO_URL}/${NAMESPACE}/${REPO_NAME}:${IMAGE_TAG}"
+FULL_IMAGE="${REPO_URL_LOGIN}/${NAMESPACE}/${REPO_NAME}:${IMAGE_TAG}"
 
-echo "Login: ${REPO_URL}"
-echo "${ACR_PASSWORD}" | docker login --username="${ACR_USERNAME}" --password-stdin "${REPO_URL}"
+if [[ -n "${REGISTRY_PASSWORD:-}" || -n "${REGISTRY_USERNAME:-}" ]]; then
+  if [[ -z "${REGISTRY_PASSWORD:-}" ]]; then
+    # If registry is anonymous, don't prompt; just skip login.
+    echo "Login: skipped (no REGISTRY_PASSWORD set)"
+  else
+    echo "Login: ${REPO_URL_LOGIN}"
+    echo "${REGISTRY_PASSWORD}" | docker login --username="${REGISTRY_USERNAME}" --password-stdin "${REPO_URL_LOGIN}"
+  fi
+else
+  echo "Login: skipped (anonymous registry)"
+fi
 
 echo "Build+push: ${FULL_IMAGE} (platform: ${SERVER_PLATFORM})"
 docker buildx build \

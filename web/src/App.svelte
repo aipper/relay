@@ -154,6 +154,11 @@
   let stopConfirmOpen = false;
   let approvalModalOpen = false;
   let approvalModalShowArgs = false;
+  let approvalForSession = false;
+  let approvalAnswersJson = "";
+  let inlineAwaitingText = "";
+  let approvalDraftKey = "";
+  let awaitingDraftKey = "";
   let lastSeenApprovalRequest: Record<string, string> = {};
   let lastError = "";
   let outputByRun: Record<string, string> = {};
@@ -168,6 +173,7 @@
         op_args_summary?: string;
         approve_text?: string;
         deny_text?: string;
+        questions?: unknown;
       }
     | undefined
   > = {};
@@ -209,6 +215,17 @@
 
   // Monitor-first: default to structured events view.
   let sessionDetailTab: "output" | "messages" = "messages";
+  // Mobile: do not inherit terminal view across sessions.
+  // When the selected session changes (including run start), default back to messages (card stream).
+  let mobileTabResetRunId = "";
+  $: if (isMobile) {
+    if (!selectedRunId) {
+      mobileTabResetRunId = "";
+    } else if (selectedRunId !== mobileTabResetRunId) {
+      sessionDetailTab = "messages";
+      mobileTabResetRunId = selectedRunId;
+    }
+  }
   let outputAutoScroll = true;
   let outputIsAtBottom = true;
   let outputBufferLines = 400;
@@ -379,6 +396,15 @@
     }, 1500);
   }
 
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text || "");
+      setToast("已复制");
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "复制失败");
+    }
+  }
+
   function connLabel(s: string): string {
     if (s === "connected") return "已连接";
     if (s === "checking") return "检查中";
@@ -412,6 +438,7 @@
     op_args_summary?: string;
     approve_text?: string;
     deny_text?: string;
+    questions?: unknown;
   } | null {
     if (!r) return null;
     if (!r.pending_request_id && !r.pending_prompt && !r.pending_op_tool && !r.pending_op_args_summary) return null;
@@ -645,6 +672,7 @@
           op_args_summary: dataString(msg, "op_args_summary"),
           approve_text: dataString(msg, "approve_text"),
           deny_text: dataString(msg, "deny_text"),
+          questions: dataAny(msg, "questions"),
         };
       }
       if (msg.run_id && msg.type === "run.input") {
@@ -862,15 +890,11 @@
     outputSearchText = "";
     outputSearchActive = "";
     outputSearchCursor = 0;
-    if (sessionDetailTab === "output") {
-      await focusOutputSearch();
-      if (!outputByRun[runId]) void loadMessages(runId);
-    } else {
-      chatInputText = "";
-      if (!messagesByRun[runId]) void loadMessages(runId);
-      await tick();
-      chatInputEl?.focus();
-    }
+    chatInputText = "";
+    inlineAwaitingText = "";
+    if (!messagesByRun[runId]) void loadMessages(runId);
+    await tick();
+    chatInputEl?.focus();
   }
 
   function tailLines(text: string, maxLines: number): string {
@@ -2325,7 +2349,7 @@
       if (!ok) throw new Error(dataString(resp, "error") ?? "rpc failed");
       if (resp.run_id) {
         await refreshRuns();
-        selectedRunId = resp.run_id;
+        selectSession(resp.run_id);
       }
     } catch (e) {
       startError = e instanceof Error ? e.message : String(e);
@@ -2648,11 +2672,37 @@
       sendInput(decision === "approve" ? "y\n" : "n\n");
       return;
     }
+
+    const data: Record<string, unknown> = { request_id: reqId, actor: "web" };
+
+    if (decision === "approve") {
+      if (approvalForSession) {
+        data["decision"] = "approve_for_session";
+        if (selectedAwaiting?.op_tool) {
+          data["allow_tools"] = [selectedAwaiting.op_tool];
+        }
+      }
+
+      if (selectedAwaiting?.questions !== undefined && selectedAwaiting?.questions !== null) {
+        const raw = (approvalAnswersJson ?? "").trim();
+        if (!raw) {
+          setToast(`需要填写 answers（JSON）`);
+          return;
+        }
+        try {
+          data["answers"] = JSON.parse(raw) as unknown;
+        } catch {
+          setToast(`answers JSON 解析失败`);
+          return;
+        }
+      }
+    }
+
     sendWs({
       type: decision === "approve" ? "run.permission.approve" : "run.permission.deny",
       ts: new Date().toISOString(),
       run_id: selectedRunId,
-      data: { request_id: reqId, actor: "web" },
+      data,
     });
   }
 
@@ -2673,20 +2723,57 @@
   $: selectedMessages = selectedRunId ? messagesByRun[selectedRunId] ?? [] : [];
   $: hostsById = Object.fromEntries(hosts.map((h) => [h.id, h] as const)) as Record<string, HostInfo>;
 
-  $: if (selectedRunId && selectedAwaiting && awaitingIsApproval(selectedAwaiting) && !approvalModalOpen) {
-    const key = (selectedAwaiting.request_id ?? selectedAwaiting.op_tool ?? "").trim();
-    if (key && lastSeenApprovalRequest[selectedRunId] !== key) {
-      lastSeenApprovalRequest = { ...lastSeenApprovalRequest, [selectedRunId]: key };
-      approvalModalShowArgs = false;
-      approvalModalOpen = true;
+  // Keep card footer + modal drafts consistent for the same request.
+  $: {
+    const a = selectedAwaiting;
+    if (selectedRunId && a && awaitingIsApproval(a)) {
+      const key = `${selectedRunId}:${a.request_id ?? ""}`;
+      if (key !== approvalDraftKey) {
+        approvalForSession = false;
+        approvalAnswersJson = "";
+        approvalDraftKey = key;
+      }
+    } else {
+      approvalForSession = false;
+      approvalAnswersJson = "";
+      approvalDraftKey = "";
     }
   }
 
-  $: if (selectedRunId && selectedAwaiting && awaitingIsPrompt(selectedAwaiting) && !inputModalOpen) {
-    const key = (selectedAwaiting.request_id ?? "").trim();
-    if (key && lastSeenPromptRequest[selectedRunId] !== key) {
-      lastSeenPromptRequest = { ...lastSeenPromptRequest, [selectedRunId]: key };
-      openInputModal("");
+  $: {
+    const a = selectedAwaiting;
+    if (selectedRunId && a && awaitingIsPrompt(a)) {
+      const key = `${selectedRunId}:${a.request_id ?? ""}`;
+      if (key !== awaitingDraftKey) {
+        inlineAwaitingText = "";
+        awaitingDraftKey = key;
+      }
+    } else {
+      inlineAwaitingText = "";
+      awaitingDraftKey = "";
+    }
+  }
+
+  $: {
+    const a = selectedAwaiting;
+    if (selectedRunId && a && awaitingIsApproval(a) && !approvalModalOpen && !isMobile) {
+      const key = (a.request_id ?? a.op_tool ?? "").trim();
+      if (key && lastSeenApprovalRequest[selectedRunId] !== key) {
+        lastSeenApprovalRequest = { ...lastSeenApprovalRequest, [selectedRunId]: key };
+        approvalModalShowArgs = false;
+        approvalModalOpen = true;
+      }
+    }
+  }
+
+  $: {
+    const a = selectedAwaiting;
+    if (selectedRunId && a && awaitingIsPrompt(a) && !inputModalOpen && !isMobile) {
+      const key = (a.request_id ?? "").trim();
+      if (key && lastSeenPromptRequest[selectedRunId] !== key) {
+        lastSeenPromptRequest = { ...lastSeenPromptRequest, [selectedRunId]: key };
+        openInputModal("");
+      }
     }
   }
 
@@ -3308,19 +3395,98 @@
         </div>
       {/if}
 
-      {#if selectedAwaiting && (selectedAwaiting.op_tool || selectedAwaiting.op_args_summary || selectedAwaiting.prompt)}
-        <div class="awaiting-banner">
-          <div class="awaiting-banner-top">
-            {#if selectedAwaiting.op_tool}<span class="session-op">{selectedAwaiting.op_tool}</span>{/if}
-            {#if selectedAwaiting.op_args_summary}<span class="session-op-args">{selectedAwaiting.op_args_summary}</span>{/if}
-          </div>
-          {#if selectedAwaiting.prompt}
-            <div class="awaiting-banner-prompt">{selectedAwaiting.prompt}</div>
-          {/if}
-        </div>
-      {/if}
-
       {#if sessionDetailTab === "messages"}
+        {#if selectedAwaiting}
+          <div class="pinned-actions">
+            {#if awaitingIsApproval(selectedAwaiting)}
+              <div class="approval-card">
+                <div class="approval-card-top">
+                  <span class="meta-pill">
+                    <span class="meta-k">tool</span>
+                    <span class="meta-v">{selectedRun.tool}</span>
+                  </span>
+                  {#if selectedAwaiting.op_tool}
+                    <span class="session-op">{selectedAwaiting.op_tool}</span>
+                  {/if}
+                  {#if selectedAwaiting.op_args_summary}
+                    <span class="session-op-args">{selectedAwaiting.op_args_summary}</span>
+                  {/if}
+                </div>
+                {#if selectedAwaiting.prompt}
+                  <div class="approval-card-prompt">{selectedAwaiting.prompt}</div>
+                {/if}
+
+                <div class="approval-card-footer">
+                  <label class="checkbox">
+                    <input type="checkbox" bind:checked={approvalForSession} disabled={!selectedAwaiting.op_tool || status !== "connected"} />
+                    本会话允许{#if selectedAwaiting.op_tool}（<code>{selectedAwaiting.op_tool}</code>）{/if}
+                  </label>
+
+                  {#if selectedAwaiting.questions !== undefined && selectedAwaiting.questions !== null}
+                    <div class="approval-questions">
+                      <div class="approval-questions-title">需要回答</div>
+                      <pre class="approval-questions-json">{JSON.stringify(selectedAwaiting.questions, null, 2)}</pre>
+                      <div class="approval-answers-label">answers（JSON）</div>
+                      <textarea
+                        class="approval-answers"
+                        rows="5"
+                        bind:value={approvalAnswersJson}
+                        placeholder={"{}"}
+                        disabled={status !== "connected"}
+                      ></textarea>
+                    </div>
+                  {/if}
+
+                  <div class="approval-card-actions">
+                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendDecision("deny")}>拒绝</button>
+                    <button type="button" disabled={status !== "connected"} on:click={() => sendDecision("approve")}>同意</button>
+                  </div>
+                </div>
+              </div>
+            {:else if awaitingIsPrompt(selectedAwaiting)}
+              <div class="awaiting-card">
+                {#if selectedAwaiting.prompt}
+                  <div class="awaiting-card-prompt">{selectedAwaiting.prompt}</div>
+                {/if}
+                <div class="awaiting-card-footer">
+                  <textarea
+                    class="awaiting-card-input"
+                    rows="2"
+                    bind:value={inlineAwaitingText}
+                    disabled={status !== "connected"}
+                    on:keydown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        const text = (inlineAwaitingText || "").trimEnd();
+                        if (!text.trim()) return;
+                        sendInput(text.endsWith("\n") ? text : `${text}\n`);
+                        inlineAwaitingText = "";
+                      }
+                    }}
+                  ></textarea>
+                  <div class="awaiting-card-actions">
+                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("y\n")}>y</button>
+                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("n\n")}>n</button>
+                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("continue\n")}>continue</button>
+                    <button
+                      type="button"
+                      disabled={status !== "connected" || !inlineAwaitingText.trim()}
+                      on:click={() => {
+                        const text = (inlineAwaitingText || "").trimEnd();
+                        if (!text.trim()) return;
+                        sendInput(text.endsWith("\n") ? text : `${text}\n`);
+                        inlineAwaitingText = "";
+                      }}
+                    >
+                      发送
+                    </button>
+                  </div>
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/if}
+
         <div class="events-tail" style="margin:10px 0 12px">
           <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
             <div style="font-weight:600">输出摘要</div>
@@ -3386,6 +3552,37 @@
                         {/if}
                       </summary>
                       <div class="tool-card-body">
+                        <div class="tool-card-actions">
+                          <button
+                            class="secondary"
+                            type="button"
+                            on:click={() =>
+                              void copyText(
+                                callData && "args" in callData
+                                  ? JSON.stringify(callData.args, null, 2)
+                                  : (callMeta.details || ""),
+                              )}
+                          >
+                            复制 call
+                          </button>
+                          <button
+                            class="secondary"
+                            type="button"
+                            on:click={() =>
+                              void copyText(
+                                resData && okState === true && "result" in resData
+                                  ? JSON.stringify(resData.result, null, 2)
+                                  : resData && okState === false && "error" in resData
+                                    ? JSON.stringify(resData.error, null, 2)
+                                    : (resMeta.details || ""),
+                              )}
+                          >
+                            复制 result
+                          </button>
+                          {#if m.request_id}
+                            <button class="secondary" type="button" on:click={() => void copyText(m.request_id || "")}>复制 request_id</button>
+                          {/if}
+                        </div>
                         <div class="tool-card-label">call</div>
                         {#if callData && "args" in callData}
                           <pre class="tool-json">{JSON.stringify(callData.args, null, 2)}</pre>
@@ -3408,6 +3605,9 @@
                   <!-- paired with previous tool.call; skip rendering -->
                 {:else if m.kind === "run.permission_requested"}
                   {@const isCurrent = Boolean(selectedAwaiting?.request_id) && selectedAwaiting?.request_id === m.request_id}
+                  {#if isCurrent}
+                    <!-- current actionable permission is pinned above; skip duplicate -->
+                  {:else}
                   <div class="chat-row" data-role="system">
                     <div class="approval-card">
                       <div class="approval-card-top">
@@ -3425,9 +3625,99 @@
                       {#if m.text}
                         <div class="approval-card-prompt">{m.text}</div>
                       {/if}
+
+                      {#if isCurrent}
+                        <div class="approval-card-footer">
+                          <label class="checkbox">
+                            <input type="checkbox" bind:checked={approvalForSession} disabled={!selectedAwaiting?.op_tool || status !== "connected"} />
+                            本会话允许{#if selectedAwaiting?.op_tool}（<code>{selectedAwaiting.op_tool}</code>）{/if}
+                          </label>
+
+                          {#if selectedAwaiting?.questions !== undefined && selectedAwaiting?.questions !== null}
+                            <div class="approval-questions">
+                              <div class="approval-questions-title">需要回答</div>
+                              <pre class="approval-questions-json">{JSON.stringify(selectedAwaiting.questions, null, 2)}</pre>
+                              <div class="approval-answers-label">answers（JSON）</div>
+                              <textarea
+                                class="approval-answers"
+                                rows="5"
+                                bind:value={approvalAnswersJson}
+                                placeholder={"{}"}
+                                disabled={status !== "connected"}
+                              ></textarea>
+                            </div>
+                          {/if}
+
+                          <div class="approval-card-actions">
+                            <button
+                              class="secondary"
+                              type="button"
+                              disabled={status !== "connected"}
+                              on:click={() => sendDecision("deny")}
+                            >
+                              拒绝
+                            </button>
+                            <button type="button" disabled={status !== "connected"} on:click={() => sendDecision("approve")}>同意</button>
+                          </div>
+                        </div>
+                      {/if}
                     </div>
                     <div class="chat-ts">{formatAbsTime(m.ts)}</div>
                   </div>
+                  {/if}
+                {:else if m.kind === "run.awaiting_input"}
+                  {@const isCurrent =
+                    selectedAwaiting
+                      ? awaitingIsPrompt(selectedAwaiting) && (!m.request_id || selectedAwaiting.request_id === m.request_id)
+                      : false}
+                  {#if isCurrent}
+                    <!-- current actionable prompt is pinned above; skip duplicate -->
+                  {:else}
+                  <div class="chat-row" data-role="system">
+                    <div class="awaiting-card">
+                      {#if m.text}
+                        <div class="awaiting-card-prompt">{m.text}</div>
+                      {/if}
+                      {#if isCurrent}
+                        <div class="awaiting-card-footer">
+                          <textarea
+                            class="awaiting-card-input"
+                            rows="2"
+                            bind:value={inlineAwaitingText}
+                            disabled={status !== "connected"}
+                            on:keydown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                const text = (inlineAwaitingText || "").trimEnd();
+                                if (!text.trim()) return;
+                                sendInput(text.endsWith("\n") ? text : `${text}\n`);
+                                inlineAwaitingText = "";
+                              }
+                            }}
+                          ></textarea>
+                          <div class="awaiting-card-actions">
+                            <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("y\n")}>y</button>
+                            <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("n\n")}>n</button>
+                            <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("continue\n")}>continue</button>
+                            <button
+                              type="button"
+                              disabled={status !== "connected" || !inlineAwaitingText.trim()}
+                              on:click={() => {
+                                const text = (inlineAwaitingText || "").trimEnd();
+                                if (!text.trim()) return;
+                                sendInput(text.endsWith("\n") ? text : `${text}\n`);
+                                inlineAwaitingText = "";
+                              }}
+                            >
+                              发送
+                            </button>
+                          </div>
+                        </div>
+                      {/if}
+                    </div>
+                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
+                  </div>
+                  {/if}
                 {:else}
                   <div class="chat-row" data-role={m.role}>
                     {#if m.role === "system"}
@@ -3848,6 +4138,22 @@
 
           {#if selectedAwaiting.prompt}
             <div class="approval-prompt">{selectedAwaiting.prompt}</div>
+          {/if}
+
+          <div class="approval-extra">
+            <label class="checkbox">
+              <input type="checkbox" bind:checked={approvalForSession} disabled={!selectedAwaiting.op_tool} />
+              本会话允许{#if selectedAwaiting.op_tool}（<code>{selectedAwaiting.op_tool}</code>）{/if}
+            </label>
+          </div>
+
+          {#if selectedAwaiting.questions !== undefined && selectedAwaiting.questions !== null}
+            <div class="approval-questions">
+              <div class="approval-questions-title">需要回答</div>
+              <pre class="approval-questions-json">{JSON.stringify(selectedAwaiting.questions, null, 2)}</pre>
+              <div class="approval-answers-label">answers（JSON）</div>
+              <textarea class="approval-answers" rows="5" bind:value={approvalAnswersJson} placeholder={"{}"}></textarea>
+            </div>
           {/if}
 
           {#if selectedAwaiting.op_args !== undefined && selectedAwaiting.op_args !== null}
@@ -4622,28 +4928,6 @@
     border: 1px solid var(--border);
   }
 
-  .awaiting-banner {
-    margin-top: 10px;
-    padding: 10px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(249, 115, 22, 0.25);
-    background: rgba(255, 247, 237, 0.92);
-  }
-
-  .awaiting-banner-top {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .awaiting-banner-prompt {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #9a3412;
-    word-break: break-word;
-  }
-
   .chat-feed {
     margin-top: 12px;
     max-height: clamp(320px, 60vh, 720px);
@@ -4736,6 +5020,55 @@
     white-space: pre-wrap;
   }
 
+  .approval-card-footer {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-align: left;
+  }
+
+  .approval-card-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .approval-questions-title {
+    font-size: 12px;
+    color: #9a3412;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+
+  .approval-questions-json {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(249, 115, 22, 0.25);
+    background: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+    max-height: 240px;
+  }
+
+  .approval-answers-label {
+    display: block;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #9a3412;
+    font-weight: 800;
+  }
+
+  .approval-answers {
+    width: 100%;
+    margin-top: 6px;
+    font-size: 12px;
+  }
+
   .tool-card summary {
     cursor: pointer;
     display: flex;
@@ -4752,6 +5085,13 @@
   .tool-card-body {
     margin-top: 8px;
     text-align: left;
+  }
+
+  .tool-card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
   }
 
   .tool-card-label {
@@ -4771,6 +5111,48 @@
     word-break: break-word;
     overflow: auto;
     max-height: 240px;
+  }
+
+  .awaiting-card {
+    width: 100%;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(249, 115, 22, 0.25);
+    background: rgba(255, 247, 237, 0.92);
+    padding: 10px 12px;
+  }
+
+  .pinned-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 10px 0 12px;
+  }
+
+  .awaiting-card-prompt {
+    font-size: 12px;
+    color: #9a3412;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .awaiting-card-footer {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+  }
+
+  .awaiting-card-input {
+    width: 100%;
+    font-size: 12px;
+  }
+
+  .awaiting-card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .chat-inputbar {

@@ -7,7 +7,7 @@ mod spool;
 mod tool_mode_cache;
 
 use futures_util::{SinkExt, StreamExt};
-use relay_protocol::WsEnvelope;
+use relay_protocol::{PermissionApproveData, PermissionDecision, WsEnvelope};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 
@@ -547,12 +547,45 @@ async fn connect_and_run(
                             let _ = rm.resize_run(run_id, cols, rows).await;
                         } else if env.r#type == "run.permission.approve" || env.r#type == "run.permission.deny" {
                             let Some(run_id) = env.run_id.as_deref() else { continue; };
-                            let actor = env.data.get("actor").and_then(|v| v.as_str()).unwrap_or("web");
-                            let request_id = env.data.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
+                            let parsed = serde_json::from_value::<PermissionApproveData>(env.data.clone()).ok();
+                            let actor = parsed
+                                .as_ref()
+                                .and_then(|p| p.actor.as_deref())
+                                .or_else(|| env.data.get("actor").and_then(|v| v.as_str()))
+                                .unwrap_or("web");
+                            let request_id = parsed
+                                .as_ref()
+                                .map(|p| p.request_id.as_str())
+                                .or_else(|| env.data.get("request_id").and_then(|v| v.as_str()))
+                                .unwrap_or("");
                             if request_id.is_empty() {
                                 continue;
                             }
-                            let approved = env.r#type == "run.permission.approve";
+
+                            let decision = parsed.as_ref().and_then(|p| p.decision);
+                            let allow_tools = parsed
+                                .as_ref()
+                                .and_then(|p| p.allow_tools.clone())
+                                .or_else(|| {
+                                    env.data
+                                        .get("allow_tools")
+                                        .and_then(|v| v.as_array())
+                                        .map(|arr| {
+                                            arr.iter()
+                                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                                .collect::<Vec<_>>()
+                                        })
+                                })
+                                .unwrap_or_default();
+                            let approved = match decision {
+                                Some(PermissionDecision::Approve | PermissionDecision::ApproveForSession) => true,
+                                Some(PermissionDecision::Deny | PermissionDecision::Abort) => false,
+                                None => env.r#type == "run.permission.approve",
+                            };
+
+                            if matches!(decision, Some(PermissionDecision::ApproveForSession)) && !allow_tools.is_empty() {
+                                let _ = rm.add_session_allow_tools(run_id, &allow_tools).await;
+                            }
                             let key = format!("{run_id}:{request_id}");
                             let tx = {
                                 let mut map = pending_tool_permissions.lock().await;
@@ -561,8 +594,15 @@ async fn connect_and_run(
                             if let Some(tx) = tx {
                                 let _ = tx.send(approved);
                             } else {
-                                let decision = if approved { "approve" } else { "deny" };
-                                let _ = rm.decide_permission(run_id, actor, request_id, decision).await;
+                                let decision_str = match decision {
+                                    Some(PermissionDecision::Approve | PermissionDecision::ApproveForSession) => "approve",
+                                    Some(PermissionDecision::Deny) => "deny",
+                                    Some(PermissionDecision::Abort) => "deny",
+                                    None => {
+                                        if approved { "approve" } else { "deny" }
+                                    }
+                                };
+                                let _ = rm.decide_permission(run_id, actor, request_id, decision_str).await;
                             }
                         } else if env.r#type == "run.stop" {
                             let Some(run_id) = env.run_id.as_deref() else { continue; };
@@ -695,20 +735,13 @@ async fn connect_and_run(
                                 .await;
 
                             if rpc_requires_permission(rpc_type_for_exec.as_str()) {
-                                let (tx, rx) = oneshot::channel::<bool>();
-                                let key = format!("{run_id}:{request_id}");
-                                {
-                                    let mut map = pending_tool_permissions.lock().await;
-                                    map.insert(key.clone(), tx);
-                                }
-
                                 let (op_tool, op_args, op_args_summary) = match rpc_type_for_exec.as_str() {
                                     "rpc.fs.write" => {
                                         let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("");
                                         let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
                                         let bytes = content.as_bytes().len() as i64;
                                         let summary = truncate_chars(&format!("path={path} bytes={bytes}"), 80);
-                                        (rpc_type_for_exec.as_str(), args_for_event, summary)
+                                        (rpc_type_for_exec.as_str(), args_for_event.clone(), summary)
                                     }
                                     "rpc.bash" => {
                                         let cmd = data.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
@@ -718,31 +751,45 @@ async fn connect_and_run(
                                     }
                                     _ => {
                                         let summary = truncate_chars(&serde_json::to_string(&args_for_event).unwrap_or_default(), 80);
-                                        (rpc_type_for_exec.as_str(), args_for_event, summary)
+                                        (rpc_type_for_exec.as_str(), args_for_event.clone(), summary)
                                     }
                                 };
 
-                                let prompt = if op_args_summary.trim().is_empty() {
-                                    format!("需要审批：{op_tool}")
+                                let auto_approved = rm.is_tool_allowlisted(run_id, op_tool).await;
+                                let permission_rx = if auto_approved {
+                                    None
                                 } else {
-                                    format!("需要审批：{op_tool} {op_args_summary}")
+                                    let (tx, rx) = oneshot::channel::<bool>();
+                                    let key = format!("{run_id}:{request_id}");
+                                    {
+                                        let mut map = pending_tool_permissions.lock().await;
+                                        map.insert(key.clone(), tx);
+                                    }
+
+                                    let prompt = if op_args_summary.trim().is_empty() {
+                                        format!("需要审批：{op_tool}")
+                                    } else {
+                                        format!("需要审批：{op_tool} {op_args_summary}")
+                                    };
+                                    let _ = rm
+                                        .emit_run_event(
+                                            run_id,
+                                            "run.permission_requested",
+                                            json!({
+                                                "request_id": request_id,
+                                                "reason": "permission",
+                                                "prompt": prompt,
+                                                "op_tool": op_tool,
+                                                "op_args": op_args,
+                                                "op_args_summary": op_args_summary,
+                                                "approve_text": "",
+                                                "deny_text": ""
+                                            }),
+                                        )
+                                        .await;
+
+                                    Some(rx)
                                 };
-                                let _ = rm
-                                    .emit_run_event(
-                                        run_id,
-                                        "run.permission_requested",
-                                        json!({
-                                            "request_id": request_id,
-                                            "reason": "permission",
-                                            "prompt": prompt,
-                                            "op_tool": op_tool,
-                                            "op_args": op_args,
-                                            "op_args_summary": op_args_summary,
-                                            "approve_text": "",
-                                            "deny_text": ""
-                                        }),
-                                    )
-                                    .await;
 
                                 let rm_task = rm.clone();
                                 let out_tx_task = out_tx.clone();
@@ -755,7 +802,10 @@ async fn connect_and_run(
                                 let cwd_task = cwd.clone();
 
                                 task_set.spawn(async move {
-                                    let approved = rx.await.unwrap_or(false);
+                                    let approved = match permission_rx {
+                                        Some(rx) => rx.await.unwrap_or(false),
+                                        None => true,
+                                    };
 
                                     let (ok, payload) = if !approved {
                                         (false, json!({ "error": "denied" }))
