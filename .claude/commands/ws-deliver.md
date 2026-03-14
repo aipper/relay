@@ -15,10 +15,12 @@
 
 建议流程（按顺序）：
 1) 先运行 `/ws-preflight`。
+2) 如果存在 `.gitmodules` 但缺少 `submodule.<name>.branch`，先运行 `/ws-submodule-setup` 并提交 `.gitmodules`（否则 `aiws validate .` 会失败，且 submodule 工作流会产生人为差异）。
 2) 发现 submodules：
    - `git submodule status --recursive`
 3) 逐个提交 submodules（按上一步顺序）：
    - `git -C "<sub_path>" status --porcelain`
+   - 若当前为 detached HEAD：不要直接切 `change/<change-id>` / `main` / `master`；先按 `.gitmodules` 的目标分支挂到 `aiws/pin/<target-branch>`
    - `git -C "<sub_path>" add -p`
    - `git -C "<sub_path>" diff --staged --stat`
    - 生成并让用户确认该 submodule 的 commit message（每个 repo 单独确认）
@@ -31,14 +33,19 @@
    - `git commit -m "<message>"`
 5) （推荐）门禁 + 证据：
    - `aiws validate . --stamp`（未安装全局 aiws 时可用 `npx @aipper/aiws validate . --stamp`）
+5.1) （强烈建议）生成持久证据并回填 `Evidence_Path`：
+   - `aiws change evidence <change-id>`（未安装全局 aiws 时可用 `npx @aipper/aiws change evidence <change-id>`）
+5.2) （可选）生成状态快照（建议）：
+   - `aiws change state <change-id> --write`
 6) 安全合并回目标分支：
-   - 优先运行 `/ws-finish`（底层调用 `aiws change finish`，默认 `--ff-only`）
+   - 优先运行 `/ws-finish`（底层调用 `aiws change finish`，默认 `--ff-only`；push 成功后会清理对应 change worktree）
 
 输出要求：
-- `Submodules:` 每个 submodule 的 commit 摘要（repo/path → sha → message）
-- `Superproject:` commit 摘要
-- `Merge:` `/ws-finish` 输出（into/from）
-- `Evidence:` `.agentdocs/tmp/aiws-validate/*.json`（若使用 --stamp）
+- `子模块（Submodules）:` 每个 submodule 的 commit 摘要（repo/path → sha → message）
+- `主仓库（Superproject）:` commit 摘要
+- `合并信息（Merge）:` `/ws-finish` 输出（into/from）
+- `工作区清理（Worktree cleanup）:` 若存在独立 change worktree，输出清理结果（removed/skipped + reason）
+- `证据（Evidence）:` `.agentdocs/tmp/aiws-validate/*.json`（若使用 --stamp）
 <!-- AIWS_MANAGED_END:claude:ws-deliver -->
 
 可在下方追加本项目对 Claude Code 的额外说明（托管块外内容会被保留）。

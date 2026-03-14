@@ -17,7 +17,7 @@
    - 风险与回滚（3–8 条）
    - 最小验证命令（可复现）
 3) 将分析落盘到：`.agentdocs/tmp/analyze/claude-analysis.md`（目录不存在则创建）。
-4) 回复中必须包含：`Evidence:` 证据文件路径。
+4) 回复中必须包含：`证据（Evidence）:` 证据文件路径。
 
 安全：
 - 不打印 secrets（尤其 `secrets/test-accounts.json`）。

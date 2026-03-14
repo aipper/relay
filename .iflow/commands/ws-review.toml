@@ -1,14 +1,14 @@
 # Command: ws:review
-# Description: AI Workspace 交叉审计交付（Claude + Codex + Gemini），证据落盘到 .agentdocs/tmp/review/
+# Description: AI Workspace 交叉审计交付（Claude + Codex + Gemini），证据优先落盘到 changes/<change-id>/review/
 # Category: workspace
 # Version: 1
 
-description = "AI Workspace 交叉审计交付（Claude + Codex + Gemini），证据落盘到 .agentdocs/tmp/review/"
+description = "AI Workspace 交叉审计交付（Claude + Codex + Gemini），证据优先落盘到 changes/<change-id>/review/"
 
 prompt = """
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
 
-目标：在实现/提交前，对当前工作区改动进行交叉审计，并把审计结论落盘到 `.agentdocs/tmp/review/`，便于回放与追责。
+目标：在实现/提交前，对当前工作区改动进行交叉审计，并把审计结论优先落盘到 `changes/<change-id>/review/`（若无法确定 `change-id` 再回退 `.agentdocs/tmp/review/`），便于回放与追责。
 
 强制步骤：
 1) 读取真值文件：`AI_PROJECT.md`、`REQUIREMENTS.md`、`AI_WORKSPACE.md`。
@@ -22,7 +22,8 @@ prompt = """
    - Risks：3–8 条
    - Next：最小修复清单 + 最小验证命令
 5) 证据落盘（必须）：
-   - 在 `.agentdocs/tmp/review/` 写入一份 `review.<timestamp>.md`
+   - 默认：在 `changes/<change-id>/review/` 写入一份 `iflow-review.<timestamp>.md`
+   - 回退：在 `.agentdocs/tmp/review/` 写入同名文件（仅在无法确定 `change-id` 时使用）
 6) 如果目标是提交前门禁：
    - 建议运行：`aiws validate .`（或 `npx @aipper/aiws validate .`）
 

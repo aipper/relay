@@ -1,0 +1,24 @@
+---
+description: 模板来源：查看 change templates 来源
+---
+<!-- AIWS_MANAGED_BEGIN:opencode:aiws-change-templates-which -->
+# aiws change templates which
+
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：
+- 查看 change 模板来源
+
+执行（在仓库根目录）：
+```bash
+if [[ -x "./node_modules/.bin/aiws" ]]; then
+  ./node_modules/.bin/aiws change templates which
+elif command -v aiws >/dev/null 2>&1; then
+  aiws change templates which
+else
+  npx @aipper/aiws change templates which
+fi
+```
+<!-- AIWS_MANAGED_END:opencode:aiws-change-templates-which -->
+
+可在下方追加本项目对 OpenCode 的额外说明（托管块外内容会被保留）。

@@ -23,6 +23,9 @@ description: 预检（提交前快速检查与建议）
    - `Found:` <实际读取到的文件列表>
    - `Missing:` <缺失文件列表>
    - `Key rules:` 3–8 条 bullet（范围/禁止项/必须产物/必须验证命令）
+5) 若存在 `.gitmodules`：
+   - 输出 submodule 列表：`git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$'`
+   - 检查每个 submodule 是否配置 `submodule.<name>.branch`（缺失则提示先运行 `$ws-submodule-setup`；否则 `aiws validate .` 会失败）
 
 安全：
 - 不打印 secrets；遇到疑似敏感值只提示“存在风险”但不要复述原文。

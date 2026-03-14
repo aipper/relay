@@ -4,6 +4,14 @@
 >
 > Created: 2026-02-08
 
+## Bindings
+
+- Change_ID: hapi-actionable-cards
+- Req_ID: WEB-062
+- Contract_Row(s): Req_ID=WEB-062, Req_ID=WEB-063, Req_ID=WEB-064, Req_ID=SRV-020, Req_ID=HST-020
+- Plan_File: plan/hapi-actionable-cards.md
+- Evidence_Path(s): .agentdocs/tmp/hapi-actionable-cards/verify.md, .agentdocs/tmp/hapi-actionable-cards-ui/verify.md
+
 ## 目标与非目标
 
 **目标：**

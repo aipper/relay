@@ -8,8 +8,10 @@
 建议流程：
 1) 先运行 `/ws-preflight`（读真值文件并输出约束摘要）。
 2) 建立变更归因（推荐）：
-   - 切分支：`git switch -c change/<change-id>`
-   - 初始化变更工件：创建 `changes/<change-id>/proposal.md` 与 `changes/<change-id>/tasks.md`（参考 `changes/README.md`）
+   - 推荐一键：`aiws change start <change-id> --hooks`
+   - superproject + submodule（推荐）：`aiws change start <change-id> --hooks --worktree --submodules`
+   - 若后续需要在 detached submodule 内提交：先挂到 `aiws/pin/<target-branch>`；不要直接切 `change/<change-id>` / `main` / `master`
+   - 或手工：`git switch -c change/<change-id>`，并创建 `changes/<change-id>/proposal.md` 与 `changes/<change-id>/tasks.md`（参考 `changes/README.md`）
 3) 如涉及需求调整：先 `/ws-req-review` → 用户确认后再 `/ws-req-change`（避免需求漂移）。
 4) 实施最小改动：任何改动都要能归因到 `REQUIREMENTS.md`（验收）或 `issues/problem-issues.csv`（问题）。
 5) 运行 `AI_WORKSPACE.md` 里声明的验证命令；未运行不声称已运行。
@@ -17,9 +19,9 @@
 7) 交付收尾（推荐，减少手动 merge 出错）：运行 `/ws-finish`（底层调用 `aiws change finish`，默认 fast-forward 安全合并回目标分支）。
 
 输出要求：
-- `Changed:` 文件清单
-- `Verify:` 实际运行的命令 + 期望结果
-- `Evidence:` 证据路径（例如 `.agentdocs/tmp/...` 或 `changes/<change-id>/...`）
+- `变更文件（Changed）:` 文件清单
+- `验证（Verify）:` 实际运行的命令 + 期望结果
+- `证据（Evidence）:` 证据路径（例如 `changes/<change-id>/review/...`、`changes/<change-id>/...` 或 `.agentdocs/tmp/...`）
 <!-- AIWS_MANAGED_END:opencode:ws-dev -->
 
 可在下方追加本项目对 OpenCode 的额外说明（托管块外内容会被保留）。

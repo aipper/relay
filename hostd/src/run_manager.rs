@@ -51,6 +51,7 @@ struct Run {
     opencode_session_id: StdMutex<Option<String>>,
     opencode_active_pid: StdMutex<Option<i32>>,
     opencode_call_lock: Mutex<()>,
+    tmux_session: Option<String>,
 }
 
 #[derive(Clone)]
@@ -754,6 +755,40 @@ impl RunManager {
             command.env("COLORTERM", "truecolor");
         }
 
+        // Always prefer tmux for PTY runs when available.
+        // This allows inspecting/attaching to the same session locally (SSH) while relay remains primary.
+        let tmux_session = if crate::runners::find_in_path("tmux") {
+            fn sanitize_tmux_name(s: &str) -> String {
+                let mut out = String::with_capacity(s.len());
+                for c in s.chars() {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                        out.push(c);
+                    } else {
+                        out.push('_');
+                    }
+                }
+                if out.is_empty() { "relay".to_string() } else { out }
+            }
+
+            let session = sanitize_tmux_name(&format!("relay-{run_id}"));
+            let argv = command.get_argv().clone();
+
+            let mut wrapped: Vec<std::ffi::OsString> = Vec::with_capacity(argv.len() + 10);
+            wrapped.push(std::ffi::OsString::from("tmux"));
+            wrapped.push(std::ffi::OsString::from("new-session"));
+            wrapped.push(std::ffi::OsString::from("-A"));
+            wrapped.push(std::ffi::OsString::from("-s"));
+            wrapped.push(std::ffi::OsString::from(session.clone()));
+            wrapped.push(std::ffi::OsString::from("-c"));
+            wrapped.push(std::ffi::OsString::from(cwd.clone()));
+            wrapped.push(std::ffi::OsString::from("--"));
+            wrapped.extend(argv);
+            *command.get_argv_mut() = wrapped;
+            Some(session)
+        } else {
+            None
+        };
+
         let mut child = slave.spawn_command(command).context("spawn_command")?;
         let pid = child.process_id().context("process_id")? as i32;
 
@@ -781,6 +816,7 @@ impl RunManager {
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
             opencode_call_lock: Mutex::new(()),
+            tmux_session: tmux_session.clone(),
         });
 
         {
@@ -788,14 +824,16 @@ impl RunManager {
             runs.insert(run_id.clone(), run.clone());
         }
 
-        let mut started = WsEnvelope::new(
-            "run.started",
-            json!({
-                "tool": tool,
-                "cwd": run.cwd,
-                "command": cmd,
-            }),
-        );
+        let mut started_data = json!({
+            "tool": tool,
+            "cwd": run.cwd,
+            "command": cmd,
+        });
+        if let (Some(session), Some(obj)) = (tmux_session.as_deref(), started_data.as_object_mut()) {
+            obj.insert("runner_mode".to_string(), JsonValue::String("tmux".to_string()));
+            obj.insert("tmux_session".to_string(), JsonValue::String(session.to_string()));
+        }
+        let mut started = WsEnvelope::new("run.started", started_data);
         started.host_id = Some(self.host_id.clone());
         started.run_id = Some(run_id.clone());
         started.seq = Some(run.next_seq());
@@ -1063,6 +1101,7 @@ impl RunManager {
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
             opencode_call_lock: Mutex::new(()),
+            tmux_session: None,
         });
 
         {
@@ -1222,6 +1261,7 @@ impl RunManager {
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
             opencode_call_lock: Mutex::new(()),
+            tmux_session: None,
         });
 
         {
@@ -1979,6 +2019,23 @@ impl RunManager {
             runs.get(run_id).cloned()
         }
         .context("unknown run_id")?;
+
+        // For tmux-backed PTY runs, stop the tmux session rather than the client process.
+        // - int: best-effort Ctrl-C to the pane
+        // - term/kill: kill the session
+        if let Some(session) = run.tmux_session.as_deref() {
+            #[cfg(unix)]
+            {
+                let mut c = Command::new("tmux");
+                if signal == "int" {
+                    c.args(["send-keys", "-t", session, "C-c"]);
+                } else {
+                    c.args(["kill-session", "-t", session]);
+                }
+                let _ = c.status();
+            }
+            return Ok(());
+        }
 
         if run.opencode_structured {
             #[cfg(unix)]

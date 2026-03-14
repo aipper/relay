@@ -9,6 +9,7 @@ prompt = """
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
 
 目标：在不要求切换 `change/<change-id>` 的前提下，在当前分支完成一次安全提交：先审计与门禁，再检查 staging，最后 `git commit`；若仓库含 submodule，必须先处理 submodule 再提交 superproject 的 gitlink。
+补充：若你经常遇到 submodule detached，建议日常拉取优先使用 `ws:pull`（尽量把 submodule “挂回分支”且不改变 gitlink commit）。
 
 安全约束（强制）：
 - 不自动 `git add -A`；只在用户明确指示时才做 staging
@@ -19,7 +20,7 @@ prompt = """
 强制步骤：
 1) 读取真值文件：`AI_PROJECT.md`、`REQUIREMENTS.md`、`AI_WORKSPACE.md`（缺失则先运行 `/aiws-init` 或 `aiws init .`）。
 2) 若 iFlow 拦截写入：先执行 `/ws-contract-check`，再继续。
-3) 先运行 `/ws-review`（落盘审计证据到 `.agentdocs/tmp/review/`）。
+3) 先运行 `/ws-review`（优先落盘审计证据到 `changes/<change-id>/review/`）。
 4) 运行门禁并写 stamp：`aiws validate . --stamp`（未安装全局 aiws 时可用 `npx @aipper/aiws validate . --stamp`）。
 5) 输出提交上下文（必须输出给用户确认）：
    - `git branch --show-current`
@@ -29,7 +30,8 @@ prompt = """
    - 对每个 `<sub_path>` 输出：
      - `git -C "<sub_path>" rev-parse --abbrev-ref HEAD`
      - `git -C "<sub_path>" status --porcelain`
-   - 判定规则：任一 submodule `git status --porcelain` 非空 → **停止提交 superproject**，先在该 submodule 完成 commit（必要时切回可提交分支），再回到 superproject 更新并提交 gitlink。
+   - 判定规则：任一 submodule `git status --porcelain` 非空 → **停止提交 superproject**，先在该 submodule 完成 commit，再回到 superproject 更新并提交 gitlink。
+   - 若该 submodule 当前为 detached HEAD：先按 `.gitmodules` 的目标分支挂到 `aiws/pin/<target-branch>`；不要直接切 `change/<change-id>` / `main` / `master`。
 7) 检查 staging（必须输出给用户确认）：
    - `git status --porcelain`
    - `git diff --staged --submodule=short`
@@ -38,6 +40,6 @@ prompt = """
 10) 执行提交（不带 `--no-verify`）：`git commit -m "<message>"`。
 
 输出必须包含：
-- Evidence：`.agentdocs/tmp/review/*` + `.agentdocs/tmp/aiws-validate/*`
-- Context：当前分支 + 是否检测到 submodule + 若阻断则给出阻断原因
+- 证据（Evidence）：`changes/<change-id>/review/*`（无 change-id 时回退 `.agentdocs/tmp/review/*`） + `.agentdocs/tmp/aiws-validate/*`
+- 上下文（Context）：当前分支 + 是否检测到 submodule + 若阻断则给出阻断原因
 """

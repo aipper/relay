@@ -17,11 +17,11 @@
       "sha256": "660a0f9729a823a1df2462d441d23b3b8cf166d4b6b2a0b5b6c919b71392916f"
     }
   },
-  "synced_at": "2026-02-08T10:58:53Z",
+  "synced_at": "2026-03-14T05:24:19Z",
   "synced_truth_files": {
     "AI_PROJECT.md": {
-      "mtime": 1770537577,
-      "sha256": "f23241aa0c6f220c4f8270fb3a648b21eac372fbc34e266c0522066828b417bb"
+      "mtime": 1773465171,
+      "sha256": "4714c3edb74e3e396499f328958642f207b1208c57b64f59c1b55af3da95fff2"
     },
     "AI_WORKSPACE.md": {
       "mtime": 1770537577,
@@ -44,6 +44,18 @@
       "baseline_from": "last sync",
       "baseline_at": "2026-02-08T10:16:12Z",
       "changed": []
+    },
+    {
+      "synced_at": "2026-03-14T05:24:19Z",
+      "baseline_from": "last sync",
+      "baseline_at": "2026-02-08T10:58:53Z",
+      "changed": [
+        {
+          "file": "AI_PROJECT.md",
+          "from": "f23241aa0c6f220c4f8270fb3a648b21eac372fbc34e266c0522066828b417bb",
+          "to": "4714c3edb74e3e396499f328958642f207b1208c57b64f59c1b55af3da95fff2"
+        }
+      ]
     }
   ]
 }

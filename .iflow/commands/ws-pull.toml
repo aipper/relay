@@ -1,0 +1,47 @@
+# Command: ws:pull
+# Description: 拉取并对齐 submodules（fast-forward；尽量避免 detached）
+# Category: workspace
+# Version: 1
+
+description = "拉取并对齐 submodules（fast-forward；尽量避免 detached）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：安全拉取 superproject，并对齐 submodules，尽量把 submodule 从 detached HEAD “挂回”分支（仅当该分支包含 gitlink commit），减少人为操作差异。
+
+安全约束（强制）：
+- 不执行破坏性命令；不自动提交/不自动 push
+- 若工作区不干净：停止并要求用户先 commit 或 stash
+- `git pull` 默认只允许 fast-forward（避免隐式 merge/rebase）
+
+步骤（建议）：
+1) 输出上下文并检查工作区干净：
+   - `git rev-parse --show-toplevel`
+   - `git branch --show-current`
+   - `git status --porcelain`
+   - 若 `git status --porcelain` 非空：停止。
+
+2) 拉取 superproject（fast-forward only）：
+   - `git pull --ff-only`
+   - 若失败：停止并说明需要用户明确选择 `git pull --rebase` 或手动处理。
+
+3) 更新 submodules 到 superproject 记录的 gitlink commit：
+   - 若存在 `.gitmodules`：
+     - `git submodule sync --recursive`
+     - `git submodule update --init --recursive`
+
+4) （可选但推荐）把 submodule 从 detached HEAD 尽量“挂回分支”（不改动 gitlink commit）：
+   - 为避免 origin 多分支时“猜错分支”，只在 `.gitmodules` 明确配置了 `submodule.<name>.branch` 时才执行；否则保持 detached 并提示先对齐配置
+   - 目标分支：`.gitmodules` 的 `submodule.<name>.branch`（若为 `.` 则用 superproject 当前分支）
+   - 对每个 submodule：
+     - `sub_sha="$(git rev-parse "HEAD:<sub_path>")"`
+     - `git -C "<sub_path>" fetch origin --prune`
+     - 若 `sub_sha` 属于 `origin/<target_branch>`：创建/更新 pin 分支 `aiws/pin/<target_branch>` 指向 `$sub_sha`（不改动现有分支）
+     - 否则保持 detached 并提示原因
+
+可选（方案 2，一次性设置 submodule 跟踪分支，会改 `.gitmodules`，需提交）：
+- `git submodule set-branch --branch main <sub_path>`
+- `git add .gitmodules && git commit -m "chore(submodule): set tracking branch"`
+推荐：优先使用 `ws:submodule-setup` 交互式对齐所有 submodules 的 branch，并提交 `.gitmodules`。
+"""

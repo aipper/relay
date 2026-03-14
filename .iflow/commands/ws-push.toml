@@ -1,0 +1,40 @@
+# Command: ws:push
+# Description: 推送（submodule 感知：先 submodules 后 superproject；fast-forward；不 force）
+# Category: workspace
+# Version: 1
+
+description = "推送（submodule 感知：先 submodules 后 superproject；fast-forward；不 force）"
+
+prompt = """
+用中文输出（命令/路径/代码标识符保持原样不翻译）。
+
+目标：安全 push 当前仓库；若仓库包含 submodules，则先 push submodules，再 push superproject（默认 fast-forward；不 force）。
+
+约束：
+- 不自动提交、不自动 `git add -A`
+- 不使用 `--force` / `--force-with-lease`
+- 若工作区不干净：停止并要求先 commit 或 stash
+
+步骤（建议）：
+1) 输出上下文并检查工作区干净：
+   - `git branch --show-current`
+   - `git status --porcelain`
+   - `git status -sb`
+   - 非空则停止。
+
+2) 判断是否存在 submodules：若存在 `.gitmodules`，输出 submodule 列表：
+   - `git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$'`
+
+3) 若没有 submodules：正常 push（仍需用户确认远端/分支）：
+   - `git remote -v`
+   - `git push`
+
+4) 若有 submodules：先检查 `.gitmodules` 的 `submodule.<name>.branch` 是否齐全（缺失则停止并提示 `ws:submodule-setup`）。
+
+5) 逐个 push submodules（fast-forward only），再 push superproject：
+   - `git -C "<sub_path>" fetch origin --prune`
+   - 若 `origin/<target_branch>` 不是 `HEAD` 的祖先：停止并提示先在 submodule 做 rebase/merge
+   - `git -C "<sub_path>" push origin "HEAD:refs/heads/<target_branch>"`
+   - 最后 `git push`
+"""
+

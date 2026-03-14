@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "change_id": "hapi-actionable-cards",
+  "events": [
+    {
+      "type": "truth_sync",
+      "timestamp": "2026-03-14T05:24:19Z",
+      "payload": {
+        "synced_at": "2026-03-14T05:24:19Z",
+        "baseline_from": "last sync",
+        "baseline_at": "2026-02-08T10:58:53Z",
+        "changed_files": [
+          "AI_PROJECT.md"
+        ]
+      }
+    }
+  ],
+  "updated_at": "2026-03-14T05:24:19Z"
+}

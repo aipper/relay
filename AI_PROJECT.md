@@ -38,6 +38,8 @@
 推荐（防规则/范围漂移）：
 - 创建工件：补齐 `changes/<change-id>/proposal.md`、`tasks.md`（可选 `design.md`）
 - 声明 active change（团队共享）：切到分支 `change/<change-id>`（也支持 `changes/`、`ws/`、`ws-change/`）
+- 若仓库存在 `.gitmodules`：优先使用 `aiws change start <change-id> --worktree`（或至少 `--no-switch`）；不要在当前 superproject worktree 里直接手工切分支。
+- 若 submodule 因 gitlink checkout 处于 detached HEAD：只允许挂到 `aiws/pin/<target-branch>`；不要直接切 `change/<change-id>` / `main` / `master` 等业务分支来“解 detached”。
 - 严格校验：`aiws validate .`（包含：漂移检测 + `ws_change_check` + `requirements_contract`）
 - 启用 hooks（本地生效）：`git config core.hooksPath .githooks`（提交/推送时自动跑 `aiws validate .`）
 - CI 建议追加：`aiws validate .`

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${WS_CHANGE_HOOK_BYPASS:-0}" == "1" ]]; then
+  exit 0
+fi
+
+root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n "${root:-}" ]] || exit 0
+
+version_file="$root/web/src/ui-version.json"
+python_bin="$(command -v python3 || command -v python || true)"
+
+if [[ -z "${python_bin:-}" ]]; then
+  echo "error: python runtime is required to bump web uiVersion" >&2
+  exit 1
+fi
+
+next_ui_version="$($python_bin - "$version_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = {}
+if path.exists():
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+
+raw = data.get("uiVersion", 0)
+try:
+    current = int(raw)
+except Exception:
+    current = 0
+
+next_value = current + 1
+path.write_text(json.dumps({"uiVersion": next_value}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print(next_value)
+PY
+)"
+
+git add -- "$version_file"
+echo "info: bumped web uiVersion -> ${next_ui_version}" >&2

@@ -5,7 +5,7 @@ description: 评审（提交前审计与证据落盘）
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
 
-目标：在提交/交付前审计当前改动，对照真值文件检查是否越界，并把审计证据落盘到 `.agentdocs/tmp/review/`。
+目标：在提交/交付前审计当前改动，对照真值文件检查是否越界，并把审计证据优先落盘到 `changes/<change-id>/review/`（若无法确定 `change-id` 再回退 `.agentdocs/tmp/review/`）。
 
 步骤（建议）：
 1) 先做 preflight：定位项目根目录，读取 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`，输出约束摘要。
@@ -13,11 +13,13 @@ description: 评审（提交前审计与证据落盘）
    - 是否存在越界目录改动/危险操作
    - 是否有可复现验证命令与证据
    - 是否维护了 `changes/<change-id>/` 或相关 `issues/*.csv`
-3) 将审计落盘到：`.agentdocs/tmp/review/codex-review.md`（目录不存在则创建）。
+3) 将审计落盘到（目录不存在则创建）：
+   - 默认：`changes/<change-id>/review/codex-review.md`
+   - 回退：`.agentdocs/tmp/review/codex-review.md`（仅在无法确定 `change-id` 时使用）
 4) 回复中输出：
-   - `Evidence:` 证据文件路径
-   - `Top risks:` 3–8 条（高→低）
-   - `Next:` 最小修复清单 + 最小验证命令
+   - `证据（Evidence）:` 证据文件路径
+   - `主要风险（Top risks）:` 3–8 条（高→低）
+   - `下一步（Next）:` 最小修复清单 + 最小验证命令
 
 安全：
 - 不打印 secrets。
