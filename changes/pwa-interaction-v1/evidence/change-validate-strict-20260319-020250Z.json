@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "changeId": "pwa-interaction-v1",
+  "strict": true,
+  "allowTruthDrift": false,
+  "exitCode": 0,
+  "errors": [],
+  "warnings": [],
+  "groups": {
+    "truth_drift": {
+      "errors": [],
+      "warnings": []
+    },
+    "missing_files": {
+      "errors": [],
+      "warnings": []
+    },
+    "placeholders": {
+      "errors": [],
+      "warnings": []
+    },
+    "bindings": {
+      "errors": [],
+      "warnings": []
+    },
+    "plan_quality": {
+      "errors": [],
+      "warnings": []
+    },
+    "other": {
+      "errors": [],
+      "warnings": []
+    }
+  },
+  "raw": ""
+}

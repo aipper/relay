@@ -12,7 +12,7 @@
 - Additional_Req_IDs: WEB-071, WEB-072, HST-021
 - Contract_Row: Req_ID=WEB-070
 - Plan_File: plan/2026-03-14_19-37-46-pwa-interaction-v1.md
-- Evidence_Path(s): changes/pwa-interaction-v1/evidence/verification-20260318.md
+- Evidence_Path(s): changes/pwa-interaction-v1/evidence/verification-20260318.md, changes/pwa-interaction-v1/evidence/change-status-20260319-020250Z.json, changes/pwa-interaction-v1/evidence/change-validate-strict-20260319-020250Z.json, changes/pwa-interaction-v1/evidence/aiws-validate-stamp-20260319-020250Z.json, changes/pwa-interaction-v1/evidence/change-sync-stamp-20260319-020250Z.json, changes/pwa-interaction-v1/evidence/delivery-summary-20260319-020250Z.md
 
 ## 目标与非目标
 

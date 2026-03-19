@@ -121,7 +121,38 @@
           "REQUIREMENTS.md"
         ]
       }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-19T02:02:02Z",
+      "payload": {
+        "ok": true,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 0,
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "evidence",
+      "timestamp": "2026-03-19T02:02:50Z",
+      "payload": {
+        "generated_at": "2026-03-19T02:02:50Z",
+        "created": 5,
+        "strict_validate": "ok",
+        "allow_fail": false
+      }
+    },
+    {
+      "type": "state_written",
+      "timestamp": "2026-03-19T02:02:51Z",
+      "payload": {
+        "path": "changes/pwa-interaction-v1/STATE.md"
+      }
     }
   ],
-  "updated_at": "2026-03-18T15:19:30Z"
+  "updated_at": "2026-03-19T02:02:51Z"
 }

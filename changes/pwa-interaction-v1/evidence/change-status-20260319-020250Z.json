@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-03-19T02:02:50Z",
+  "ws_root": "/home/ab/code/relay",
+  "change_id": "pwa-interaction-v1",
+  "branch": "change/pwa-interaction-v1",
+  "phase": "dev",
+  "tasks": {
+    "total": 25,
+    "done": 23,
+    "unchecked": 2,
+    "hasCheckboxes": true
+  },
+  "bindings": {
+    "contractRow": "Req_ID=WEB-070",
+    "planFile": "plan/2026-03-14_19-37-46-pwa-interaction-v1.md",
+    "evidencePaths": [
+      "changes/pwa-interaction-v1/evidence/verification-20260318.md"
+    ]
+  },
+  "truth": {
+    "baseline": {
+      "label": "sync",
+      "at": "2026-03-18T15:19:30Z"
+    },
+    "drift_files": []
+  },
+  "evidence": {
+    "total": 1,
+    "exists": 1,
+    "missing": 0,
+    "tmp": 0,
+    "persistent": 1,
+    "other": 0,
+    "absolute": 0
+  },
+  "note": "aiws change evidence status snapshot; does not contain secrets."
+}
