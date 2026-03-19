@@ -26,6 +26,73 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def list_submodules_from_gitmodules(root: Path) -> List[Tuple[str, str]]:
+    """Return [(name, sub_path), ...] from .gitmodules, or [] if none."""
+    gm = root / ".gitmodules"
+    if not gm.exists():
+        return []
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(root), "config", "--file", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception:
+        return []
+    if res.returncode != 0:
+        return []
+    subs: List[Tuple[str, str]] = []
+    for raw in (res.stdout or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        idx = line.find(" ")
+        if idx <= 0:
+            continue
+        key = line[:idx].strip()
+        sub_path = line[idx + 1 :].strip()
+        m = re.match(r"^submodule\.([^.]+)\.path$", key)
+        if not m:
+            continue
+        name = (m.group(1) or "").strip()
+        if name and sub_path:
+            subs.append((name, sub_path))
+    return subs
+
+
+def parse_submodule_targets(path: Path) -> Tuple[Dict[str, Tuple[str, str]], List[str]]:
+    """Parse a submodules.targets file. Returns (parsed_dict, error_messages)."""
+    parsed: Dict[str, Tuple[str, str]] = {}
+    perr: List[str] = []
+    if not path.exists():
+        return parsed, perr
+    text = read_text(path)
+    for i, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 2:
+            perr.append(f"{path.name}:{i} invalid line (expected: <path> <target_branch> [remote])")
+            continue
+        sub_path = parts[0].strip()
+        target_branch = parts[1].strip()
+        remote = (parts[2].strip() if len(parts) >= 3 else "origin") or "origin"
+        if not sub_path:
+            perr.append(f"{path.name}:{i} missing submodule path")
+            continue
+        if sub_path in parsed:
+            perr.append(f"{path.name}:{i} duplicate submodule path: {sub_path}")
+            continue
+        if not target_branch or target_branch in ("<fill-me>", "<fill_me>", "tbd", "TBD"):
+            perr.append(f"{path.name}:{i} missing/placeholder target_branch for {sub_path}")
+            continue
+        parsed[sub_path] = (target_branch, remote)
+    return parsed, perr
+
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -333,6 +400,38 @@ def validate_change(
 
     errors: List[str] = []
     warnings: List[str] = []
+
+    # Submodule targets constraint: when `.gitmodules` declares submodules, require a per-change target mapping.
+    # In strict mode this is an error (blocks delivery); in non-strict mode it's a warning (informational).
+    subs = list_submodules_from_gitmodules(root)
+    if subs:
+        targets_path = change_dir / "submodules.targets"
+        if not targets_path.exists() or targets_path.stat().st_size == 0:
+            msg = "missing/empty: changes/<change-id>/submodules.targets (required when .gitmodules declares submodules)"
+            hint = f"hint: create it under {change_dir} (format: <sub_path> <target_branch> [remote])"
+            if strict:
+                errors.append(msg)
+                errors.append(hint)
+            else:
+                warnings.append(msg)
+                warnings.append(hint)
+        else:
+            targets, perr = parse_submodule_targets(targets_path)
+            for pe in perr:
+                errors.append(pe)
+            declared_paths = {p for _, p in subs}
+            missing_paths = sorted([p for p in declared_paths if p not in targets])
+            if missing_paths:
+                msg = f"{targets_path.name} missing entries for submodules: {', '.join(missing_paths)}"
+                if strict:
+                    errors.append(msg)
+                else:
+                    warnings.append(msg)
+            extra_paths = sorted([p for p in targets.keys() if p not in declared_paths])
+            if extra_paths:
+                warnings.append(
+                    f"{targets_path.name} includes unknown submodule paths (ignored): {', '.join(extra_paths)}"
+                )
 
     def file_state(rel: str) -> Optional[Path]:
         p = change_dir / rel

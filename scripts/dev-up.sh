@@ -12,13 +12,17 @@ Starts relay-server and relay-hostd for local dev/demo.
 Default credentials: admin / 123456
 
 Usage:
-  scripts/dev-up.sh [--port 8787] [--keep-tmp] [--rust-log info] [--no-build]
+  scripts/dev-up.sh [--port 8787] [--bind-host 127.0.0.1] [--public-host 127.0.0.1] [--keep-tmp] [--rust-log info] [--no-build] [--env-file path]
 
 Options:
-  --port <port>      Bind server to 127.0.0.1:<port> (default: 8787)
+  --port <port>            Bind server to <bind-host>:<port> (default: 8787)
+  --bind-host <host>       Server BIND_ADDR host (default: 0.0.0.0)
+  --hostd-server-host <h>  Hostd connects to ws://<h>:<port> (default: 127.0.0.1)
+  --public-host <host>     Printed URL host for browsers/phones (default: 127.0.0.1)
   --keep-tmp         Keep temp dir (logs + db files) after exit
   --rust-log <level> RUST_LOG for server/hostd (default: warn)
   --no-build         Skip upfront cargo build (not recommended on first run)
+  --env-file <path>  Source env vars from file (e.g. OPENAI_API_KEY)
 EOF
 }
 
@@ -34,18 +38,31 @@ run() {
   "$@"
 }
 
+curl_local() {
+  curl --silent --show-error --fail-with-body --noproxy "*" "$@"
+}
+
 PORT="8787"
 KEEP_TMP="0"
 RUST_LOG_LEVEL="warn"
 DO_BUILD="1"
+BIND_HOST="0.0.0.0"
+HOSTD_SERVER_HOST="127.0.0.1"
+PUBLIC_HOST="127.0.0.1"
+HEALTH_HOST="127.0.0.1"
+ENV_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --port) PORT="${2:-}"; shift 2 ;;
+    --bind-host) BIND_HOST="${2:-}"; shift 2 ;;
+    --hostd-server-host) HOSTD_SERVER_HOST="${2:-}"; shift 2 ;;
+    --public-host) PUBLIC_HOST="${2:-}"; shift 2 ;;
     --keep-tmp) KEEP_TMP="1"; shift ;;
     --rust-log) RUST_LOG_LEVEL="${2:-}"; shift 2 ;;
     --no-build) DO_BUILD="0"; shift ;;
+    --env-file) ENV_FILE="${2:-}"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; usage; exit 2 ;;
   esac
 done
@@ -57,6 +74,26 @@ fi
 
 need cargo
 need curl
+
+if [[ -n "$ENV_FILE" ]]; then
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "--env-file not found: $ENV_FILE" >&2
+    exit 2
+  fi
+  set -a
+  source "$ENV_FILE"
+  set +a
+else
+  if [[ -f "$ROOT/conf/env" ]]; then
+    set -a
+    source "$ROOT/conf/env"
+    set +a
+  elif [[ -f "$ROOT/.env" ]]; then
+    set -a
+    source "$ROOT/.env"
+    set +a
+  fi
+fi
 
 TMP_BASE="$ROOT/.relay-tmp"
 mkdir -p "$TMP_BASE"
@@ -90,7 +127,30 @@ echo "[dev] logs: $SERVER_LOG $HOSTD_LOG"
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="123456"
 JWT_SECRET="dev"
-BIND_ADDR="127.0.0.1:$PORT"
+BIND_ADDR="$BIND_HOST:$PORT"
+
+if [[ "$BIND_HOST" == "0.0.0.0" || "$BIND_HOST" == "::" || "$BIND_HOST" == "[::]" ]]; then
+  HEALTH_HOST="127.0.0.1"
+else
+  HEALTH_HOST="$BIND_HOST"
+fi
+
+if [[ "$BIND_HOST" == "0.0.0.0" && "$PUBLIC_HOST" == "127.0.0.1" ]]; then
+  # Try ip route (works on all Linux), then hostname -I as fallback
+  lan_ip=""
+  if command -v ip >/dev/null 2>&1; then
+    lan_ip="$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1 || true)"
+  fi
+  if [[ -z "$lan_ip" ]] && command -v hostname >/dev/null 2>&1; then
+    lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  if [[ -n "$lan_ip" ]]; then
+    PUBLIC_HOST="$lan_ip"
+    echo "[dev] auto: public-host=$PUBLIC_HOST (override with --public-host)" >&2
+  else
+    echo "[dev] note: server binds to 0.0.0.0; for phone/LAN access set --public-host <LAN_IP>" >&2
+  fi
+fi
 
 if [[ "$DO_BUILD" == "1" ]]; then
   echo "[dev] building (first run may take a while)..."
@@ -127,19 +187,19 @@ for _ in $(seq 1 200); do
     tail -n 200 "$SERVER_LOG" >&2 || true
     exit 1
   fi
-  if curl --silent "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+  if curl_local "http://$HEALTH_HOST:$PORT/health" >/dev/null 2>&1; then
     break
   fi
   sleep 0.1
 done
-curl --silent "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 || {
+curl_local "http://$HEALTH_HOST:$PORT/health" >/dev/null 2>&1 || {
   echo "[dev] server health not ready; logs:" >&2
   tail -n 200 "$SERVER_LOG" >&2 || true
   exit 1
 }
 
 (
-  export SERVER_BASE_URL="ws://127.0.0.1:$PORT"
+  export SERVER_BASE_URL="ws://$HOSTD_SERVER_HOST:$PORT"
   export HOST_ID="host-dev"
   export HOST_TOKEN="devtoken"
   export LOCAL_UNIX_SOCKET="$SOCK_PATH"
@@ -175,8 +235,8 @@ cat <<EOF
 [dev] up
 
 Server:
-  http://127.0.0.1:$PORT
-  health: curl -s http://127.0.0.1:$PORT/health
+  http://$PUBLIC_HOST:$PORT
+  health: curl -s http://$PUBLIC_HOST:$PORT/health
 
 Credentials (dev):
   username: $ADMIN_USERNAME
@@ -187,7 +247,7 @@ Hostd local API:
 
 CLI quick check (run manually):
   cd cli
-  bun run dev login --server http://127.0.0.1:$PORT --username $ADMIN_USERNAME --password '$ADMIN_PASSWORD'
+  bun run dev login --server http://$PUBLIC_HOST:$PORT --username $ADMIN_USERNAME --password '$ADMIN_PASSWORD'
 
 Logs:
   server: $SERVER_LOG

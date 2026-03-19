@@ -83,6 +83,27 @@
 <!-- AI_PROJECT_RULES_BEGIN -->
 - 使用 `/ws-rule` 维护本段内容；请勿手工修改 BEGIN/END 标记。
 - 建议写成“可执行/可检查”的条款（能落到目录/文件/命令/产物），避免只写口号。
+
+### 服务重启与会话清理（项目特有，强制）
+
+1) **涉及 `server/` 或 `hostd/` 的改动，必须重新编译并重启**
+   - 最小要求：`cargo build -p relay-server -p relay-hostd`
+   - 本地 dev/demo 推荐统一用：`scripts/dev-up.sh ...`（会生成/复用 `.relay-tmp/` 的 db/log/socket）。
+
+2) **重启前必须停止所有正在跑的 runs（优先正规 stop，不要只杀 tmux）**
+   - 优先入口（二选一）：
+     - CLI：`relay runs stop <run_id> --signal int|term|kill`（或 `relay ws-stop ...`）
+     - hostd local API（unix socket）：`POST /runs/<run_id>/stop`
+
+3) **重启前/后必须清理残留的 run tmux sessions（只清 run，会话名匹配 `relay-run-*`）**
+   - 依据：`hostd/src/run_manager.rs` 的 stop 行为会对 tmux session 执行 `tmux kill-session -t <session>`。
+   - 要求：重启前确保 `tmux ls` 中不存在 `^relay-run-` 的 sessions；必要时逐个 `tmux kill-session -t <session>`。
+
+4) **重启后必须做健康检查（可检查条款）**
+   - `curl --noproxy "*" http://127.0.0.1:<port>/health` 必须返回 OK。
+   - hostd unix socket（例如 `.relay-tmp/relay-hostd-dev-8787.sock`）必须处于 LISTEN。
+
+5) **若改动影响 web 展示/事件解析，至少执行一次** `cd web && bun run build`
 <!-- AI_PROJECT_RULES_END -->
 
 你可以在本段下方追加项目自定义说明；`aiws update` 不会改动托管块以外内容。

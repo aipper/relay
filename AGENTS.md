@@ -12,21 +12,24 @@
 - 启用本机门禁（推荐）：`aiws hooks install .`（或手工：`git config core.hooksPath .githooks`；`git commit`/`git push` 会自动跑 `aiws validate .`）
 - 提交前校验（强制门禁）：`aiws validate .`（包含：漂移检测 + `ws_change_check` + `requirements_contract`）
 - Codex（推荐）：本仓库内置 repo skills：`.agents/skills/`（可显式 `$ws-dev`，也可隐式套用工作流）
+- Codex skills 命名约定：`ws-*` 为常用链路入口；`p-*` 为私有原子入口（一般不需要直接调用）。
 - Codex skills（常用，一句话说明）：
   - `$ws-preflight`：预检（读取真值文件并输出约束摘要）
   - `$ws-submodule-setup`：子模块分支对齐（写入 `.gitmodules` 的 `submodule.<name>.branch`）
   - `$ws-plan`：规划（生成可落盘 `plan/` 工件；供 `$ws-dev` 执行）
   - `$ws-plan-verify`：计划质检（执行前检查计划是否过长/跑偏）
+  - `$p-tasks-plan`：原子：tasks 同步（从 `changes/<id>/tasks.md` 生成 `update_plan` payload）
   - `$ws-dev`：开发（按需求实现并验证；适用于任何需要修改代码/配置的任务）
   - `$ws-bugfix`：缺陷修复（禅道 MCP 拉单 + 图片证据落盘 + `issues/fix_bus_issues.csv` 汇总）
   - `$ws-pull`：拉取并对齐 submodules（尽量避免 detached；减少人为差异）
   - `$ws-push`：推送（submodule 感知：先 submodules 后 superproject；fast-forward 安全）
   - `$ws-review`：评审（提交前审计；证据优先落盘到 `changes/<change-id>/review/`）
   - `$ws-commit`：提交（先审计/门禁再 commit；submodule 感知）
-  - `$aiws-init`：初始化工作区（生成真值文件与门禁）
-  - `$aiws-validate`：校验工作区（漂移检测 + 门禁）
-  - `$aiws-hooks-install`：启用 git hooks 门禁（`core.hooksPath=.githooks`）
-  - `$aiws-change-new`：创建 `changes/<change-id>` 工件
+  - `$ws-handoff`：交接（归档后生成/查看 `changes/archive/.../handoff.md`，便于跨会话接力）
+  - `$p-aiws-init`：初始化工作区（生成真值文件与门禁）
+  - `$p-aiws-validate`：校验工作区（漂移检测 + 门禁）
+  - `$p-aiws-hooks-install`：启用 git hooks 门禁（`core.hooksPath=.githooks`）
+  - `$p-aiws-change-new`：创建 `changes/<change-id>` 工件
 - Codex CLI（推荐，可选）：安装全局 skills：`npx @aipper/aiws codex install-skills`（写入 `~/.codex/skills/` 或 `$CODEX_HOME/skills`）
 - Codex CLI（遗留，可选）：安装全局 prompts：`npx @aipper/aiws codex install-prompts`（写入 `~/.codex/prompts/` 或 `$CODEX_HOME/prompts`；prompts 已 deprecated）
 - 不要把敏感信息写入 git：`secrets/test-accounts.json`、`.env*`、token、内网地址等

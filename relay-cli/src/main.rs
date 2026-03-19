@@ -10,7 +10,7 @@ use std::io::IsTerminal;
 use std::pin::Pin;
 use std::process::Command;
 use std::task::{Context as TaskContext, Poll};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 fn usage() -> ! {
@@ -647,9 +647,73 @@ fn truncate_utf8_bytes(s: &str, max_bytes: usize) -> (String, bool) {
     (String::from_utf8_lossy(&b[..end]).to_string(), truncated)
 }
 
+/// Read one MCP message from stdin.
+/// Supports two framing modes:
+///   1. Content-Length header framing (spec-compliant): `Content-Length: N\r\n\r\n{json}`
+///   2. Bare newline-delimited JSON (legacy fallback): `{json}\n`
+/// Returns Ok(None) on EOF.
+async fn read_mcp_message(
+    reader: &mut tokio::io::BufReader<tokio::io::Stdin>,
+) -> anyhow::Result<Option<String>> {
+    use tokio::io::AsyncBufReadExt;
+    let mut header_line = String::new();
+    loop {
+        header_line.clear();
+        let n = reader.read_line(&mut header_line).await?;
+        if n == 0 {
+            return Ok(None); // EOF
+        }
+        let trimmed = header_line.trim();
+        if trimmed.is_empty() {
+            continue; // skip blank lines between messages
+        }
+        // Check if this looks like a Content-Length header
+        if let Some(rest) = trimmed
+            .strip_prefix("Content-Length:")
+            .or_else(|| trimmed.strip_prefix("content-length:"))
+        {
+            let len: usize = rest
+                .trim()
+                .parse()
+                .map_err(|_| anyhow::anyhow!("bad Content-Length"))?;
+            // Consume remaining headers until blank line (\r\n or \n)
+            loop {
+                let mut hdr = String::new();
+                let hn = reader.read_line(&mut hdr).await?;
+                if hn == 0 {
+                    return Ok(None);
+                }
+                if hdr.trim().is_empty() {
+                    break;
+                }
+            }
+            // Read exactly `len` bytes of body
+            let mut buf = vec![0u8; len];
+            tokio::io::AsyncReadExt::read_exact(reader, &mut buf).await?;
+            return Ok(Some(String::from_utf8_lossy(&buf).to_string()));
+        }
+        // Bare JSON line (legacy fallback)
+        return Ok(Some(header_line.clone()));
+    }
+}
+
+/// Write one MCP message to stdout using Content-Length framing.
+async fn write_mcp_message(
+    stdout: &mut tokio::io::Stdout,
+    value: &serde_json::Value,
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let body = value.to_string();
+    let header = format!("Content-Length: {}\r\n\r\n", body.len());
+    stdout.write_all(header.as_bytes()).await?;
+    stdout.write_all(body.as_bytes()).await?;
+    stdout.flush().await?;
+    Ok(())
+}
+
 async fn run_mcp(root: std::path::PathBuf) -> anyhow::Result<()> {
     let stdin = tokio::io::stdin();
-    let mut lines = tokio::io::BufReader::new(stdin).lines();
+    let mut reader = tokio::io::BufReader::new(stdin);
     let mut stdout = tokio::io::stdout();
 
     let mode = match (
@@ -672,17 +736,24 @@ async fn run_mcp(root: std::path::PathBuf) -> anyhow::Result<()> {
         _ => McpMode::Local { root },
     };
 
-    while let Some(line) = lines.next_line().await? {
-        if line.trim().is_empty() {
+    loop {
+        let body = match read_mcp_message(&mut reader).await {
+            Ok(Some(b)) => b,
+            Ok(None) => break, // EOF
+            Err(_) => {
+                let msg = jsonrpc_err(None, -32700, "parse error");
+                write_mcp_message(&mut stdout, &msg).await?;
+                continue;
+            }
+        };
+        if body.trim().is_empty() {
             continue;
         }
-        let req: JsonRpcReq = match serde_json::from_str(&line) {
+        let req: JsonRpcReq = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(_) => {
                 let msg = jsonrpc_err(None, -32700, "parse error");
-                stdout.write_all(msg.to_string().as_bytes()).await?;
-                stdout.write_all(b"\n").await?;
-                stdout.flush().await?;
+                write_mcp_message(&mut stdout, &msg).await?;
                 continue;
             }
         };
@@ -691,6 +762,13 @@ async fn run_mcp(root: std::path::PathBuf) -> anyhow::Result<()> {
             continue;
         };
         let id = req.id.clone();
+
+        // Notifications (no id) don't expect a response — just acknowledge silently.
+        let is_notification = id.is_none() || matches!(&id, Some(serde_json::Value::Null));
+        if is_notification {
+            // notifications/initialized, notifications/cancelled, etc.
+            continue;
+        }
 
         let resp = match method.as_str() {
             "initialize" => {
@@ -1253,9 +1331,7 @@ async fn run_mcp(root: std::path::PathBuf) -> anyhow::Result<()> {
             _ => jsonrpc_err(id, -32601, "method not found"),
         };
 
-        stdout.write_all(resp.to_string().as_bytes()).await?;
-        stdout.write_all(b"\n").await?;
-        stdout.flush().await?;
+        write_mcp_message(&mut stdout, &resp).await?;
     }
 
     Ok(())

@@ -21,6 +21,10 @@ need sqlite3
 need bun
 need node
 
+curl_local() {
+  curl --silent --show-error --fail-with-body --noproxy "*" "$@"
+}
+
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -99,12 +103,12 @@ for _ in $(seq 1 1200); do
     tail -n 200 "$SERVER_LOG" >&2 || true
     exit 1
   fi
-  if curl --silent "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+  if curl_local "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     break
   fi
   sleep 0.1
 done
-curl --silent "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 || {
+curl_local "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 || {
   echo "[e2e] server health not ready; logs:" >&2
   tail -n 200 "$SERVER_LOG" >&2 || true
   echo "[e2e] hint: first run may still be compiling; re-run or inspect server.log with KEEP_TMP=1" >&2
@@ -152,12 +156,25 @@ done
 }
 
 LOGIN_JSON="$(
-  curl --silent --show-error \
+  curl_local \
     "http://127.0.0.1:$PORT/auth/login" \
     -H 'content-type: application/json' \
     --data-binary "{\"username\":\"$ADMIN_USERNAME\",\"password\":\"$ADMIN_PASSWORD\"}"
 )"
-TOKEN="$(node -e 'const fs=require("fs");const s=fs.readFileSync(0,"utf8");console.log(JSON.parse(s).access_token);' <<<"$LOGIN_JSON")"
+if [[ -z "$LOGIN_JSON" ]]; then
+  echo "[e2e] login returned empty body" >&2
+  echo "[e2e] server logs:" >&2
+  tail -n 200 "$SERVER_LOG" >&2 || true
+  exit 1
+fi
+if ! TOKEN="$(node -e 'const fs=require("fs");const s=fs.readFileSync(0,"utf8");console.log(JSON.parse(s).access_token);' <<<"$LOGIN_JSON")"; then
+  echo "[e2e] failed to parse login response (expected JSON with access_token)" >&2
+  echo "[e2e] login response:" >&2
+  printf '%s\n' "$LOGIN_JSON" >&2
+  echo "[e2e] server logs:" >&2
+  tail -n 200 "$SERVER_LOG" >&2 || true
+  exit 1
+fi
 
 HOST_INFO_OUT="$(
   bun run cli/src/index.ts ws-rpc-host-info \
@@ -231,7 +248,7 @@ if (typeof m?.data?.result?.text !== "string") process.exit(6);
 echo "[e2e] ok: ws-rpc host logs tail"
 
 SESSIONS_JSON="$(
-  curl --silent --show-error \
+  curl_local \
     "http://127.0.0.1:$PORT/sessions" \
     -H "Authorization: Bearer $TOKEN"
 )"
@@ -244,7 +261,7 @@ if (!Array.isArray(rows)) process.exit(2);
 echo "[e2e] ok: sessions api"
 
 RECENT_JSON="$(
-  curl --silent --show-error \
+  curl_local \
     "http://127.0.0.1:$PORT/sessions/recent?limit=5" \
     -H "Authorization: Bearer $TOKEN"
 )"
@@ -269,7 +286,7 @@ RUN_ID="$(node -e 'const fs=require("fs");const s=fs.readFileSync(0,"utf8");cons
 echo "[e2e] run_id=$RUN_ID"
 
 SESSION_JSON="$(
-  curl --silent --show-error \
+  curl_local \
     "http://127.0.0.1:$PORT/sessions/$RUN_ID" \
     -H "Authorization: Bearer $TOKEN"
 )"
@@ -285,7 +302,7 @@ echo "[e2e] ok: session get api"
 
 # Trigger at least one tool call via hostd local unix API, then assert it is persisted and
 # visible via messages rendering (system role).
-curl --silent --show-error \
+curl_local \
   --unix-socket "$SOCK_PATH" \
   "http://localhost/runs/$RUN_ID/fs/search?q=mock-codex" \
   >/dev/null
@@ -410,12 +427,13 @@ if [[ "$COUNT" != "1" ]]; then
 fi
 
 EXTRA_INPUT_ID="$(node -e 'const { randomUUID } = require("crypto"); console.log(randomUUID());')"
+HELLO_TEXT=$'hello\n'
 bun run cli/src/index.ts ws-send-input \
   --server "http://127.0.0.1:$PORT" \
   --token "$TOKEN" \
   --run "$RUN_ID" \
   --input-id "$EXTRA_INPUT_ID" \
-  --text $'hello\n' >/dev/null
+  --text "$HELLO_TEXT" >/dev/null
 
 for _ in $(seq 1 100); do
   EXTRA_COUNT="$(sqlite3 "$DB_PATH" "select count(*) from events where run_id='$RUN_ID' and type='run.input' and input_id='$EXTRA_INPUT_ID';")"
@@ -430,6 +448,13 @@ if [[ "$EXTRA_COUNT" != "1" ]]; then
   exit 1
 fi
 
+for _ in $(seq 1 60); do
+  OUT_COUNT="$(sqlite3 "$DB_PATH" "select count(*) from events where run_id='$RUN_ID' and type='run.output' and instr(data_json,'echo: hello') > 0;")"
+  if [[ "$OUT_COUNT" -ge "1" ]]; then
+    break
+  fi
+  sleep 0.05
+done
 OUT_COUNT="$(sqlite3 "$DB_PATH" "select count(*) from events where run_id='$RUN_ID' and type='run.output' and instr(data_json,'echo: hello') > 0;")"
 if [[ "$OUT_COUNT" -lt "1" ]]; then
   echo "[e2e] expected run.output to include mock echo for hello" >&2
@@ -438,7 +463,7 @@ fi
 echo "[e2e] ok: ws-send-input"
 
 MESSAGES_JSON="$(
-  curl --silent --show-error \
+  curl_local \
     "http://127.0.0.1:$PORT/sessions/$RUN_ID/messages?limit=200" \
     -H "Authorization: Bearer $TOKEN"
 )"
@@ -526,7 +551,7 @@ done
 }
 
 RUN2_JSON="$(
-  curl --silent --show-error \
+  curl_local \
     --unix-socket "$SHIM_SOCK" \
     -X POST \
     "http://localhost/runs" \
@@ -537,7 +562,7 @@ RUN2_ID="$(node -e 'const fs=require("fs");const s=fs.readFileSync(0,"utf8");con
 [[ -n "$RUN2_ID" ]] || { echo "[e2e] missing run_id from shim hostd" >&2; exit 1; }
 
 SHIM_INPUT_ID="$(node -e 'const { randomUUID } = require("crypto"); console.log(randomUUID());')"
-curl --silent --show-error \
+curl_local \
   "http://127.0.0.1:$PORT/runs/$RUN2_ID/input" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
