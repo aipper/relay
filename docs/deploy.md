@@ -3,7 +3,7 @@
 This system has two roles:
 
 - **VPS**: runs `relay-server` (HTTP API + WebSocket + serves the PWA).
-- **Client machine(s)**: run `relay-hostd` (runs Codex/Claude/iFlow locally and connects outbound to the VPS).
+- **Client machine(s)**: run `relay-hostd` (runs OpenCode locally and connects outbound to the VPS).
 
 ## VPS (Docker)
 
@@ -88,7 +88,7 @@ Start hostd (foreground):
 Start a run (example):
 
 ```sh
-./bin/relay codex --cwd /path/to/project
+./bin/relay opencode --cwd /path/to/project
 ```
 
 ### Option B: run hostd as a user service (Linux systemd)
@@ -163,5 +163,5 @@ loginctl enable-linger "$USER"
 Start a run (hostd auto-starts if needed):
 
 ```sh
-relay codex --cwd /path/to/project
+relay opencode --cwd /path/to/project
 ```

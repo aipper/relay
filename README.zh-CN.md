@@ -1,6 +1,6 @@
 # relay（Rust + PWA）
 
-在“运行真实 CLI 的客户端机器”上运行 Codex / Claude / iFlow 等工具，并通过 VPS 上的中心服务 + PWA 在手机/浏览器里远程查看输出、发送输入、查看工具审计。
+在“运行真实 CLI 的客户端机器”上运行 OpenCode，并通过 VPS 上的中心服务 + PWA 在手机/浏览器里远程查看输出、发送输入、查看工具审计。
 
 相关文档：
 - 部署（VPS + 客户端）：`docs/deploy.zh-CN.md`
@@ -75,7 +75,7 @@ PWA 登录说明：
 
 ## 客户端（hostd + relay CLI，不依赖 bun）
 
-`hostd` 必须跑在“真正运行 Codex/Claude/iFlow 的那台机器”上（需要访问本机项目目录与本机安装的 CLI 二进制）。
+`hostd` 必须跑在“真正运行 OpenCode 的那台机器”上（需要访问本机项目目录与本机安装的 CLI 二进制）。
 
 ### 推荐：配置文件（~/.config/abrelay）
 
@@ -117,7 +117,7 @@ bash scripts/package-client.sh
 启动一次会话（示例）：
 
 ```sh
-./bin/relay codex --cwd /path/to/project
+./bin/relay opencode --cwd /path/to/project
 ```
 
 ### 方式 B：Linux 常驻（systemd user）
@@ -139,9 +139,9 @@ systemctl --user status relay-hostd
 
 该脚本会校验 `/health`，并默认安装为 user service；也可用 `--mode system` 安装为系统级服务。
 
-## 可选：安装 codex/claude/iflow shims（在任意项目目录直接敲命令）
+## 可选：安装 opencode shim（在任意项目目录直接敲命令）
 
-如果你希望在任意项目目录里直接运行 `codex`/`claude`/`iflow` 时自动被 relay 接管：
+如果你希望在任意项目目录里直接运行 `opencode` 时自动被 relay 接管：
 
 ```sh
 bash scripts/install-shims.sh --auto-path

@@ -1,5 +1,7 @@
 # Codex CLI + relay MCP bridge (MVP)
 
+> Status: historical / future-looking notes only. The current relay build is intentionally narrowed to `opencode` as the only supported run tool.
+
 This repo can run Codex CLI under `hostd` and expose filesystem/git/shell tools to Codex via MCP, with approvals handled in the relay PWA.
 
 ## How it works

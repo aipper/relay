@@ -28,12 +28,19 @@
 - **web**：Svelte PWA（runs 列表、实时日志、approve/deny/input）。
 - **spool**：hostd 本地 SQLite 事件队列/重放机制，用于离线与断线重连。
 - **hapi 对齐**：本项目的目标能力集合，参考 `https://github.com/tiann/hapi` 的功能与使用体验，并以本文件为唯一落地需求清单（避免每次回看 GitHub）。
-- **run.tool**：会话的后端工具/模型标识（如 `codex | claude | iflow | ...`），来自 `run.started.data.tool`，并体现在 sessions 列表的 `tool` 字段。
+- **run.tool**：会话的后端工具/模型标识（当前为 `opencode`），来自 `run.started.data.tool`，并体现在 sessions 列表的 `tool` 字段。
 - **op_tool**：待审批的“操作工具名”（如 `rpc.fs.read` / `rpc.fs.write` / `bash`），用于审批相关 UI 展示与风险提示。
+
+## 当前运行时范围（优先于历史规划文字）
+
+- 当前 build 只支持 `opencode` 作为可启动的 run tool。
+- `codex` 属于后续计划，不属于当前验收范围，也不应在当前 UI / CLI / host capability 中作为已支持工具暴露。
+- `claude`、`iflow`（以及其他非 `opencode` tool）已不属于当前产品范围。
+- 本文件后续若仍出现旧的多后端规划文字，应视为历史背景，不覆盖本节对当前运行时范围的约束。
 
 ## 目标（Goals）
 
-- 在宿主机上运行 AI coding CLIs（如 Codex / Claude / iFlow 等），并通过移动端友好的 PWA 远程监控与控制。
+- 在宿主机上运行 OpenCode，并通过移动端友好的 PWA 远程监控与控制。
 - 以多组件方式交付：Rust workspace（server/hostd）+ Bun CLI（cli）+ Svelte PWA（web）。
 - 基于事件模型通过 WebSocket 串联：PWA ↔ server ↔ hostd，并支持远程输入（remote input）。
 - hostd 支持离线/断线重连后的事件重放（spool replay）。
@@ -52,7 +59,7 @@
 
 - **单用户 self-host（local-first）**：默认假设为个人使用；无需 Happy 那种多用户/云端复杂度。
 - **远程可控**：从手机/浏览器远程监控与控制本机/多台机器上的会话。
-- **多后端**：至少支持 `codex`、`claude`、`gemini`、`iflow` 四类后端（可扩展）。
+- **当前收敛范围**：当前阶段只支持 `opencode`；其他后端后续按需恢复。
 - **最小可信配置**：
   - 鉴权 token 可通过环境变量或本地配置文件设置；环境变量优先。
   - hostd ↔ server 使用 TOFU（Trust On First Use）：首次连接将 `host_id` 绑定到 `sha256(host_token)`；后续必须匹配。

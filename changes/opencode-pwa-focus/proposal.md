@@ -1,6 +1,6 @@
 # Change Proposal: opencode-pwa-focus
 
-> Title: 项目方向调整为 OpenCode-first PWA
+> Title: OpenCode-first 运行时收敛与 PWA 对齐
 >
 > Created: 2026-03-19T03:02:10Z
 
@@ -16,14 +16,14 @@
 ## 目标与非目标
 
 **目标：**
-- 评审“项目转向 OpenCode-first”是否可行，并把后续执行顺序落成可复现计划。
-- 明确 PWA 在只考虑 `opencode` 时需要补齐的关键能力：切模型、切 session、新开 session、查看对话、列出 todo/计划、任务完成后自动更新计划状态。
-- 明确当前仓库哪些能力已经具备，哪些能力仍缺失。
+- 将当前产品范围收敛为 `opencode` 优先，并移除 `claude` / `iflow` 的对外支持面。
+- 强化 `opencode` structured 模式的可观测性：对无输出挂起给出显式诊断，并阻止已知不兼容模型进入启动路径。
+- 让 PWA / hostd / CLI / 文档 / REQUIREMENTS 对“当前仅支持 opencode”的口径保持一致。
 
 **非目标：**
-- 本次不直接实现 OpenCode-first 功能。
-- 本次不处理 `codex` / `claude` / `iflow` 的同等级产品化路径。
+- 本次不恢复 `codex` 的运行时支持；`codex` 仅保留为后续计划或历史文档语境。
 - 本次不替换为 OpenCode 官方 web UI。
+- 本次不扩展新的非 `opencode` runner。
 
 ## 变更归因（强制二选一）
 
@@ -33,13 +33,13 @@
 ## 现状与问题
 
 - 当前仓库已经具备 `hostd` structured OpenCode 运行、model discovery、PWA 启动页模型选择、generic sessions/messages API。
-- 但当前产品语义仍以 relay generic `run/session` 为主，并未把 OpenCode 原生 `sessionID`、todo API、session lifecycle 提升为一等模型。
-- PWA todo 仅为 `web/src/App.svelte` 的 `localStorage` 雏形，没有 server-backed 持久化，也没有基于结构化状态的自动完成。
+- 但此前运行时与文档仍同时暴露 `codex` / `claude` / `iflow` 等入口，导致用户可选到当前并不准备继续支持的路径。
+- 此外，structured OpenCode 在部分模型/提供方组合上会出现“无 JSON / 无 stderr”的静默挂起，需要明确的 watchdog 诊断与模型护栏。
 
 ## 方案概述（What changes）
 
-- 先做需求与协议真值更新，把 OpenCode-first 作为正式方向写进真值文件与合同。
-- 然后按 `hostd -> server -> web -> cli` 分层提升 OpenCode session/todo/model 为一等能力。
+- 在 `hostd` 启动路径上把当前 build 硬性收敛为仅支持 `opencode`。
+- 在 `web` / `CLI` / `docs` / `REQUIREMENTS` 中同步删除或下线非 `opencode` 的当前支持声明。
 - 保留 relay 当前远程控制架构，不做替换式重构。
 
 ## 影响范围（Scope）
@@ -52,6 +52,7 @@
   - `server/src/*`
   - `web/src/*`
   - `cli/src/index.ts`
+  - `relay-cli/src/main.rs`
 - 可能影响的外部接口/使用方：
   - `/sessions` / `/sessions/:id` / `/sessions/:id/messages`
   - host info / start-run payload / PWA session list / todo panel
@@ -59,11 +60,11 @@
 ## 风险与回滚
 
 - 风险：
-  - 若未先更新 requirement rows，就直接进入实现，会导致方向漂移和 gate 阻断。
-  - 若过早删除 generic run/session 路径，可能影响现有非 OpenCode runner。
+- 若工件仍停留在“只做 planning”，而代码已演进为实际实现，交付时会出现工件与代码漂移。
+- 若未同步更新 UI / host capability / CLI 帮助文本，用户仍可能走到已下线 runner 路径。
 - 回滚方案（必须可执行）：
   - 保留现有 generic session/messages/todo fallback，新增能力一律 additive。
-  - 若方向调整未被采纳，回退本次 planning artifacts 即可，不影响运行时代码。
+  - 若需要恢复多后端支持，可基于 git 历史恢复 `claude` / `iflow` runner 与相关文档，不影响 `opencode` 主路径。
 
 ## 验证计划（必须可复现）
 
@@ -75,9 +76,9 @@
 
 ## 真值文件/合同更新清单
 
-- `REQUIREMENTS.md`：需要（新增 OpenCode-first session/todo/model/lifecycle 条款）
-- `requirements/CHANGELOG.md`：需要
-- `requirements/requirements-issues.csv`：需要
+- `REQUIREMENTS.md`：已更新（新增当前运行时仅支持 `opencode` 的约束）
+- `requirements/CHANGELOG.md`：本次未更新
+- `requirements/requirements-issues.csv`：本次未更新
 - `issues/problem-issues.csv`：不需要
 - 证据落盘（`.agentdocs/tmp/...`）：`.agentdocs/tmp/opencode-pwa-focus-feasibility-20260319.md`
 

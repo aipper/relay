@@ -276,10 +276,6 @@ async fn connect_and_run(
 
                             let tool_status = |tool: &str| -> serde_json::Value {
                                 let (env_var, default_bin) = match tool {
-                                    "codex" => ("RELAY_CODEX_BIN", "codex"),
-                                    "claude" => ("RELAY_CLAUDE_BIN", "claude"),
-                                    "iflow" => ("RELAY_IFLOW_BIN", "iflow"),
-                                    "gemini" => ("RELAY_GEMINI_BIN", "gemini"),
                                     "opencode" => ("RELAY_OPENCODE_BIN", "opencode"),
                                     _ => ("", tool),
                                 };
@@ -292,9 +288,11 @@ async fn connect_and_run(
                                     .err()
                                     .map(|e| e.to_string());
                                 if tool == "opencode" {
-                                    let (models, default_model, models_error) = match crate::run_manager::opencode_model_choices() {
-                                        Ok((models, default_model)) => (models, default_model, None::<String>),
-                                        Err(e) => (Vec::new(), None, Some(e.to_string())),
+                                    let (models, default_model, models_error, models_note) = match crate::run_manager::opencode_structured_model_choices() {
+                                        Ok((models, default_model, models_note)) => {
+                                            (models, default_model, None::<String>, models_note)
+                                        }
+                                        Err(e) => (Vec::new(), None, Some(e.to_string()), None::<String>),
                                     };
                                     json!({
                                         "tool": tool,
@@ -304,13 +302,14 @@ async fn connect_and_run(
                                         "models": models,
                                         "default_model": default_model,
                                         "models_error": models_error,
+                                        "models_note": models_note,
                                     })
                                 } else {
                                     json!({ "tool": tool, "bin": resolved, "ok": err.is_none(), "error": err })
                                 }
                             };
 
-                            let tools = ["codex", "claude", "iflow", "gemini", "opencode"]
+                            let tools = ["opencode"]
                                 .into_iter()
                                 .map(tool_status)
                                 .collect::<Vec<_>>();
@@ -381,14 +380,11 @@ async fn connect_and_run(
                                 continue;
                             }
 
-                            let tools = ["codex", "claude", "iflow", "gemini"]
+                            let tools = ["opencode"]
                                 .into_iter()
                                 .map(|tool| {
                                     let (env_var, default_bin) = match tool {
-                                        "codex" => ("RELAY_CODEX_BIN", "codex"),
-                                        "claude" => ("RELAY_CLAUDE_BIN", "claude"),
-                                        "iflow" => ("RELAY_IFLOW_BIN", "iflow"),
-                                        "gemini" => ("RELAY_GEMINI_BIN", "gemini"),
+                                        "opencode" => ("RELAY_OPENCODE_BIN", "opencode"),
                                         _ => ("", tool),
                                     };
                                     let resolved = crate::runners::resolve_tool_bin(tool, env_var, default_bin);
@@ -629,7 +625,7 @@ async fn connect_and_run(
                             if request_id.is_empty() {
                                 continue;
                             }
-                            let tool = env.data.get("tool").and_then(|v| v.as_str()).unwrap_or("codex").to_string();
+                            let tool = env.data.get("tool").and_then(|v| v.as_str()).unwrap_or("opencode").to_string();
                             let cmd = env
                                 .data
                                 .get("cmd")

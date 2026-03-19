@@ -135,8 +135,6 @@ pub fn validate_bin_exists(bin: &str, hint: &str) -> anyhow::Result<()> {
 pub fn for_tool(tool: &str) -> Box<dyn Runner> {
     match tool {
         "codex" => Box::new(crate::runners::codex::CodexRunner {}),
-        "claude" => Box::new(crate::runners::claude::ClaudeRunner {}),
-        "iflow" => Box::new(crate::runners::iflow::IflowRunner {}),
         "opencode" => Box::new(crate::runners::opencode::OpencodeRunner {}),
         _ => Box::new(crate::runners::shell::ShellRunner {}),
     }
@@ -222,7 +220,7 @@ pub fn base_prompt_regex(tool: &str) -> Arc<Regex> {
         |(permission\b.*\?)
         |(approve\b.*\?)
     ";
-    let pat = if tool == "codex" || tool == "claude" {
+    let pat = if tool == "codex" {
         format!("{base}{codex_extra}")
     } else {
         base.to_string()
@@ -230,9 +228,7 @@ pub fn base_prompt_regex(tool: &str) -> Arc<Regex> {
     Arc::new(Regex::new(&pat).expect("valid prompt regex"))
 }
 
-pub mod claude;
 pub mod codex;
-pub mod iflow;
 pub mod opencode;
 pub mod shell;
 
@@ -241,8 +237,8 @@ mod tests {
     use super::base_prompt_regex;
 
     #[test]
-    fn claude_prompt_regex_matches_common_permission_prompts() {
-        let re = base_prompt_regex("claude");
+    fn codex_prompt_regex_matches_common_permission_prompts() {
+        let re = base_prompt_regex("codex");
         assert!(re.is_match("Proceed? [y/N]"));
         assert!(re.is_match("Continue? (y/n)"));
         assert!(re.is_match("Allow this? (y/n)"));

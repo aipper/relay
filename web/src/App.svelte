@@ -79,6 +79,7 @@
     models?: string[] | null;
     default_model?: string | null;
     models_error?: string | null;
+    models_note?: string | null;
   };
 
   type WsEnvelope = {
@@ -324,15 +325,12 @@
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
   const START_TOOL_OPTIONS = [
-    { value: "codex", label: "codex" },
-    { value: "claude", label: "claude" },
-    { value: "iflow", label: "iflow" },
     { value: "opencode", label: "opencode" },
   ] as const;
   type StartToolOption = (typeof START_TOOL_OPTIONS)[number];
 
   let startHostId = "host-dev";
-  let startTool: StartToolOption["value"] = "codex";
+  let startTool: StartToolOption["value"] = "opencode";
   // Leave empty to run the tool's default entrypoint.
   let startCmd = "";
   let startCwd = "";
@@ -346,6 +344,7 @@
   let currentStartOpencodeModels: string[] = [];
   let currentStartOpencodeDefaultModel = "";
   let currentStartOpencodeModelsError = "";
+  let currentStartOpencodeModelsNote = "";
   let lastStartToolsForceRefreshKey = "";
   let lastSuggestedStartCwd = "";
   let recentSessions: RunRow[] = [];
@@ -487,6 +486,7 @@
             : null,
           default_model: typeof item!.default_model === "string" ? item!.default_model : null,
           models_error: typeof item!.models_error === "string" ? item!.models_error : null,
+          models_note: typeof item!.models_note === "string" ? item!.models_note : null,
         }))
         .filter((item) => Boolean(item.tool));
   }
@@ -954,7 +954,7 @@
 
           const tool = dataString(msg, "tool") ?? "unknown";
           const runnerMode = dataString(msg, "runner_mode") ?? dataString(msg, "mode") ?? "";
-          const isLikelyTuiTool = tool === "codex" || tool === "claude" || tool === "iflow" || tool === "gemini";
+          const isLikelyTuiTool = tool === "codex" || tool === "gemini";
           const mode: "log" | "tui" = runnerMode === "structured" ? "log" : isLikelyTuiTool ? "tui" : "log";
           if (nextOutputModeByRun[msg.run_id] !== mode) {
             if (!outputModeChanged) {
@@ -1176,7 +1176,7 @@
   }
 
   function isLikelyTuiToolName(tool: string): boolean {
-    return tool === "codex" || tool === "claude" || tool === "iflow" || tool === "gemini";
+    return tool === "codex" || tool === "gemini";
   }
 
   function runToolFor(runId: string): string {
@@ -3187,6 +3187,7 @@
   $: currentStartOpencodeModels = currentOpencodeToolStatus()?.models?.slice() ?? [];
   $: currentStartOpencodeDefaultModel = currentOpencodeToolStatus()?.default_model?.trim() ?? "";
   $: currentStartOpencodeModelsError = currentOpencodeToolStatus()?.models_error?.trim() ?? "";
+  $: currentStartOpencodeModelsNote = currentOpencodeToolStatus()?.models_note?.trim() ?? "";
   $: if (startHostId && currentStartToolStatuses) {
     syncStartOpencodeModelForHost();
   }
@@ -4305,7 +4306,7 @@
       {:else if currentStartToolStatuses && currentStartToolOptions.length > 0}
         当前主机可用工具：{currentStartToolOptions.map((option) => option.label).join(" / ")}
       {:else if currentStartToolStatuses && currentStartToolOptions.length === 0}
-        当前主机未检测到可用的受支持工具（codex / claude / iflow / opencode）。
+        当前主机未检测到可用的受支持工具（opencode）。
       {:else}
         将根据所选 host 动态检测可用工具。
       {/if}
@@ -4332,6 +4333,9 @@
           将以本次启动覆盖 opencode 模型。{#if currentStartOpencodeDefaultModel}当前默认：<code>{currentStartOpencodeDefaultModel}</code>。{/if}
         {:else}
           未从该主机读取到显式模型列表，将沿用 opencode 主机默认模型。
+        {/if}
+        {#if !currentStartHostToolsLoading && currentStartOpencodeModelsNote}
+          <br />{currentStartOpencodeModelsNote}
         {/if}
       </div>
     {/if}

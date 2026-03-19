@@ -18,20 +18,16 @@ fn usage() -> ! {
         r#"relay (packaged-friendly)
 
 Usage:
-  relay codex  [--sock /path/to/relay-hostd.sock] [--cmd "codex ..."] [--cwd /path/to/project] [--attach|--no-attach]
-  relay claude [--sock /path/to/relay-hostd.sock] [--cmd "claude ..."] [--cwd /path/to/project] [--attach|--no-attach]
-  relay iflow  [--sock /path/to/relay-hostd.sock] [--cmd "iflow ..."] [--cwd /path/to/project] [--attach|--no-attach]
-  relay gemini [--sock /path/to/relay-hostd.sock] [--cmd "gemini ..."] [--cwd /path/to/project] [--attach|--no-attach]
   relay opencode [--sock /path/to/relay-hostd.sock] [--cmd "opencode ..."] [--cwd /path/to/project] [--attach|--no-attach]
 
   relay mcp [--root /path/to/project]
 
 Notes:
-  - If --cmd is omitted, it defaults to the subcommand name (e.g. `codex`).
+  - If --cmd is omitted, it defaults to the subcommand name (e.g. `opencode`).
   - If --cwd is omitted, it defaults to the current working directory.
   - If --sock is omitted, it tries RELAY_HOSTD_SOCK, ~/.relay/hostd.json (local_unix_socket), ~/.relay/relay-hostd.sock, then ~/.relay/daemon.state.json.
   - In a terminal (TTY), `relay <tool>` attaches by default (proxies stdin/stdout). Use `--no-attach` to only print the run id.
-  - `--cmd` supports simple argv forms (e.g. `codex --help`). For shell pipelines/quotes, prefer using hostd directly.
+  - `--cmd` supports simple argv forms (e.g. `opencode --help`). For shell pipelines/quotes, prefer using hostd directly.
 "#
     );
     std::process::exit(2);
@@ -542,7 +538,6 @@ fn normalize_mcp_tool_name(raw_name: &str) -> &str {
     // Some clients namespace MCP tool names as `<server>.<tool>`.
     let dot = raw.rsplit('.').next().unwrap_or(raw);
 
-    // Claude Code commonly exposes MCP tools to the model as `mcp__<server>__<tool>`.
     // We accept that form too in case the client forwards it unchanged.
     dot.rsplit("__").next().unwrap_or(dot)
 }
@@ -1352,7 +1347,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let tool = match cmd {
-        "codex" | "claude" | "iflow" | "gemini" | "opencode" => cmd,
+        "opencode" => cmd,
         _ => usage(),
     };
 

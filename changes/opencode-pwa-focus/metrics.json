@@ -127,7 +127,19 @@
       "payload": {
         "path": "changes/opencode-pwa-focus/STATE.md"
       }
+    },
+    {
+      "type": "truth_sync",
+      "timestamp": "2026-03-19T10:37:43Z",
+      "payload": {
+        "synced_at": "2026-03-19T10:37:43Z",
+        "baseline_from": "last sync",
+        "baseline_at": "2026-03-19T03:12:48Z",
+        "changed_files": [
+          "REQUIREMENTS.md"
+        ]
+      }
     }
   ],
-  "updated_at": "2026-03-19T07:18:20Z"
+  "updated_at": "2026-03-19T10:37:43Z"
 }

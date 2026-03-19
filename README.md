@@ -1,6 +1,6 @@
 # relay (Rust + Bun + PWA)
 
-Run AI coding CLIs (Codex / Claude / iFlow, etc.) on host machines, and monitor/control them remotely from a mobile-friendly PWA.
+Run OpenCode on host machines, and monitor/control it remotely from a mobile-friendly PWA.
 
 Docs:
 - Deploy (VPS + clients): `docs/deploy.md`
@@ -82,31 +82,25 @@ bun run dev ws-send-input --server http://127.0.0.1:8787 --token <jwt> --run <ru
 
 ### Remote start (WebSocket RPC)
 
-You can start a run on a specific host via WS-RPC. If `--cmd` is omitted, it defaults to the selected tool name (e.g. `codex`).
+You can start a run on a specific host via WS-RPC. If `--cmd` is omitted, it defaults to the selected tool name (e.g. `opencode`).
 
-### Codex / Claude / iFlow (real)
+### OpenCode (current runtime)
 
-If `codex` / `claude` / `iflow` is installed on the host machine, you can start it as a run by using:
+If `opencode` is installed on the host machine, you can start it as a run by using:
 
 ```sh
 cd cli
-bun run dev codex --sock ./.relay-tmp/relay-hostd-dev-8787.sock
+bun run dev opencode --sock ./.relay-tmp/relay-hostd-dev-8787.sock
 ```
 
-To override the binary path on the host, set `RELAY_CODEX_BIN=/path/to/codex` in the hostd environment (Codex only).
+To override the binary path on the host, set `RELAY_OPENCODE_BIN=/path/to/opencode` in the hostd environment.
 
-Similarly:
-- `RELAY_CLAUDE_BIN=/path/to/claude`
-- `RELAY_IFLOW_BIN=/path/to/iflow`
+The current runtime surface is intentionally narrowed to `opencode` only. `codex` may be reintroduced later, but is not enabled in the current build.
 
-MCP bridge injection (per-run, no persistent config changes):
-- Codex: enabled by default (opt out: `RELAY_CODEX_DISABLE_RELAY_MCP=1`)
-- Claude: enabled when supported by your Claude CLI (opt out: `RELAY_CLAUDE_DISABLE_RELAY_MCP=1`)
-
-### Run `codex` / `claude` / `iflow` directly in any project (no Bun)
+### Run `opencode` directly in any project (no Bun)
 
 If you use the packaged binaries (or have `relay` in PATH) and a background `relay-hostd` running,
-you can install command shims so that running `codex` in a project directory starts a relay run
+you can install command shims so that running `opencode` in a project directory starts a relay run
 with `cwd = $PWD`:
 
 ```sh
@@ -168,10 +162,10 @@ The packaged directory includes a Rust CLI binary (`bin/relay`) so you can run:
 
 ```sh
 ./dist/<package>/up.sh --port 8787
-./dist/<package>/bin/relay codex --cwd /path/to/project
+./dist/<package>/bin/relay opencode --cwd /path/to/project
 ```
 
-For "run `codex` in any project dir" style usage, the packaged directory includes `install-shims.sh`:
+For "run `opencode` in any project dir" style usage, the packaged directory includes `install-shims.sh`:
 
 ```sh
 ./dist/<package>/install-shims.sh --auto-path
@@ -179,7 +173,7 @@ For "run `codex` in any project dir" style usage, the packaged directory include
 
 ## Deploy relay-server on a VPS (Docker)
 
-This deploys the central `relay-server` and serves the PWA (static assets) from the same container. `relay-hostd` should run on each client machine that needs to run Codex/Claude/iFlow.
+This deploys the central `relay-server` and serves the PWA (static assets) from the same container. `relay-hostd` should run on each client machine that needs to run OpenCode.
 
 See `docs/deploy.md` for a full VPS + client guide.
 
@@ -225,7 +219,7 @@ Builds a self-contained client bundle under `./dist/` with:
 - `bin/relay-hostd` (daemon)
 - `bin/relay` (CLI)
 - `hostd-up.sh` (connects to a remote server)
-- `install-shims.sh` (optional codex/claude/iflow shims)
+- `install-shims.sh` (optional opencode shim)
 
 ```sh
 bash scripts/package-client.sh

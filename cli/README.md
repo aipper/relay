@@ -58,7 +58,7 @@ relay daemon start
 ```
 
 说明：
-- `relay codex/claude/iflow/gemini`、`relay runs/fs/git/local ...` 会在本地 unix socket 不存在时 **自动拉起** `relay-hostd`（等价于 `relay daemon start`）
+- `relay opencode`、`relay runs/fs/git/local ...` 会在本地 unix socket 不存在时 **自动拉起** `relay-hostd`（等价于 `relay daemon start`）
 - 如需非交互安装/确认，可用 `--yes/-y` 或设置 `RELAY_YES=1`
 
 更多命令：

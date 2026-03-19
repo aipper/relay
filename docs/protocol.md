@@ -58,7 +58,7 @@ Notes:
 
 `data`:
 
-- `tool`: `codex | claude | iflow | ...`
+- `tool`: `opencode`
 - `cwd`: working directory path
 - `command`: full command line (string)
 - Optional:
@@ -296,7 +296,7 @@ Start a new run on a specific host. This RPC does **not** require `run_id` in th
 
 - `request_id`: UUID
 - `host_id`: target host machine id
-- `tool`: `codex | claude | iflow | gemini | ...`
+- `tool`: `opencode`
 - `cmd`: command to run (string, executed via `bash -lc`)
 - `cwd`: optional working directory on the host (string or null)
 - `model`: optional per-run model override (currently used by `opencode` structured runs)

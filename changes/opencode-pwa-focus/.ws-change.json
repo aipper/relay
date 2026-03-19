@@ -17,7 +17,7 @@
       "sha256": "46fc2ab348e80086a5c8b822d6c33a39d81716fc4556dcc962879397abd23853"
     }
   },
-  "synced_at": "2026-03-19T03:12:48Z",
+  "synced_at": "2026-03-19T10:37:43Z",
   "synced_truth_files": {
     "AI_PROJECT.md": {
       "mtime": 1773885848,
@@ -28,8 +28,8 @@
       "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
     },
     "REQUIREMENTS.md": {
-      "mtime": 1773889778,
-      "sha256": "46fc2ab348e80086a5c8b822d6c33a39d81716fc4556dcc962879397abd23853"
+      "mtime": 1773915219,
+      "sha256": "fad124ca76f25aae0f1268333f5df6ae799c9f6cf0363e2fd3d713d7a6a46b9a"
     }
   },
   "sync_events": [
@@ -38,6 +38,18 @@
       "baseline_from": "creation",
       "baseline_at": "2026-03-19T03:12:48Z",
       "changed": []
+    },
+    {
+      "synced_at": "2026-03-19T10:37:43Z",
+      "baseline_from": "last sync",
+      "baseline_at": "2026-03-19T03:12:48Z",
+      "changed": [
+        {
+          "file": "REQUIREMENTS.md",
+          "from": "46fc2ab348e80086a5c8b822d6c33a39d81716fc4556dcc962879397abd23853",
+          "to": "fad124ca76f25aae0f1268333f5df6ae799c9f6cf0363e2fd3d713d7a6a46b9a"
+        }
+      ]
     }
   ],
   "base_branch": "main",

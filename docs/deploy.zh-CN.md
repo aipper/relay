@@ -3,7 +3,7 @@
 本系统包含两个角色：
 
 - **VPS**：运行 `relay-server`（HTTP API + WebSocket + 提供 PWA 静态资源）
-- **客户端机器**：运行 `relay-hostd`（在本机启动 Codex/Claude/iFlow，并以出站 WebSocket 连接到 VPS）
+- **客户端机器**：运行 `relay-hostd`（在本机启动 OpenCode，并以出站 WebSocket 连接到 VPS）
 
 ## VPS（Docker，包含 PWA）
 
@@ -88,7 +88,7 @@ bash scripts/package-client.sh
 启动一次会话（示例）：
 
 ```sh
-./bin/relay codex --cwd /path/to/project
+./bin/relay opencode --cwd /path/to/project
 ```
 
 ### 方式 B：Linux 常驻（systemd user）
@@ -158,5 +158,5 @@ loginctl enable-linger "$USER"
 启动会话（如本地 unix socket 不存在会自动拉起 hostd）：
 
 ```sh
-relay codex --cwd /path/to/project
+relay opencode --cwd /path/to/project
 ```

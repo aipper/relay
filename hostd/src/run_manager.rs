@@ -5,9 +5,9 @@ use regex::Regex;
 use relay_protocol::{WsEnvelope, redaction::Redactor};
 use serde_json::Value as JsonValue;
 use serde_json::json;
+use std::fs;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::fs;
 use std::{
     collections::HashMap,
     collections::HashSet,
@@ -15,7 +15,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         Arc, Mutex as StdMutex,
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicBool, AtomicI64, Ordering},
     },
     time::Duration,
 };
@@ -114,6 +114,67 @@ pub fn opencode_model_choices() -> anyhow::Result<(Vec<String>, Option<String>)>
     Ok((models, default_model))
 }
 
+fn opencode_structured_model_supported(model: &str) -> bool {
+    let normalized = model.trim();
+    !normalized.starts_with("cch-claude/")
+}
+
+pub fn opencode_structured_model_choices()
+-> anyhow::Result<(Vec<String>, Option<String>, Option<String>)> {
+    let (models, default_model) = opencode_model_choices()?;
+    let filtered = models
+        .iter()
+        .filter(|model| opencode_structured_model_supported(model))
+        .cloned()
+        .collect::<Vec<_>>();
+    let removed = models.len().saturating_sub(filtered.len());
+    let note = if removed > 0 {
+        Some(
+            "structured 模式下已隐藏已知不兼容模型（当前为 cch-claude/*）；这些模型在本机验证中会卡住且不产出 JSON 事件"
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    let filtered_default = default_model.filter(|model| opencode_structured_model_supported(model));
+    Ok((filtered, filtered_default, note))
+}
+
+fn validate_opencode_structured_model(model: Option<&str>) -> anyhow::Result<()> {
+    let model = model.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(model) = model {
+        if !opencode_structured_model_supported(model) {
+            anyhow::bail!(
+                "opencode structured mode does not support model `{}` on this host; choose a non-cch-claude model",
+                model
+            );
+        }
+        return Ok(());
+    }
+
+    let (models, default_model) = opencode_model_choices()?;
+    if let Some(default_model) = default_model {
+        if !opencode_structured_model_supported(&default_model) {
+            let supported = models
+                .into_iter()
+                .filter(|candidate| opencode_structured_model_supported(candidate))
+                .collect::<Vec<_>>();
+            let extra = if supported.is_empty() {
+                "no structured-compatible models were discovered in host config".to_string()
+            } else {
+                format!("choose one of: {}", supported.join(", "))
+            };
+            anyhow::bail!(
+                "opencode structured host default model `{}` is not supported on this host; {}",
+                default_model,
+                extra
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn opencode_structured_config_value(model_override: Option<&str>) -> anyhow::Result<JsonValue> {
     let mut value =
         parse_opencode_global_config()?.unwrap_or_else(|| json!({ "share": "disabled" }));
@@ -136,6 +197,40 @@ fn opencode_structured_config_value(model_override: Option<&str>) -> anyhow::Res
 
 struct TempOpencodeConfigHome {
     path: std::path::PathBuf,
+}
+
+fn resolve_opencode_structured_bin(bin: &str) -> String {
+    let candidate = if bin.contains('/') {
+        Some(std::path::PathBuf::from(bin))
+    } else {
+        crate::runners::find_path_in_path(bin)
+    };
+    let Some(candidate) = candidate else {
+        return bin.to_string();
+    };
+
+    let Ok(meta) = fs::symlink_metadata(&candidate) else {
+        return bin.to_string();
+    };
+    if !meta.file_type().is_symlink() {
+        return bin.to_string();
+    }
+
+    let resolved = candidate.canonicalize().unwrap_or(candidate.clone());
+    let Ok(body) = fs::read_to_string(&resolved) else {
+        return bin.to_string();
+    };
+    if !body.contains("const cached = path.join(scriptDir, \".opencode\")") {
+        return bin.to_string();
+    }
+
+    let direct = resolved
+        .parent()
+        .map(|dir| dir.join(".opencode"))
+        .filter(|path| path.is_file());
+    direct
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| bin.to_string())
 }
 
 impl TempOpencodeConfigHome {
@@ -199,6 +294,7 @@ struct Run {
     opencode_structured: bool,
     opencode_session_id: StdMutex<Option<String>>,
     opencode_active_pid: StdMutex<Option<i32>>,
+    opencode_stop_requested: Mutex<bool>,
     opencode_call_lock: Mutex<()>,
     opencode_model: Option<String>,
     tmux_session: Option<String>,
@@ -250,12 +346,44 @@ fn emit_run_metadata(
 }
 
 #[cfg(unix)]
-fn signal_opencode_process_group(pid: i32, signal: nix::sys::signal::Signal) {
+fn signal_opencode_process_group(pid: i32, signal: nix::sys::signal::Signal) -> anyhow::Result<()> {
     use nix::sys::signal::kill;
     use nix::unistd::Pid;
 
-    let _ = kill(Pid::from_raw(-pid), signal);
-    let _ = kill(Pid::from_raw(pid), signal);
+    let group_result = kill(Pid::from_raw(-pid), signal);
+    let pid_result = kill(Pid::from_raw(pid), signal);
+    if group_result.is_ok() || pid_result.is_ok() {
+        return Ok(());
+    }
+    if let Err(err) = group_result {
+        anyhow::bail!("signal opencode process group failed: {err}");
+    }
+    if let Err(err) = pid_result {
+        anyhow::bail!("signal opencode pid failed: {err}");
+    }
+    Ok(())
+}
+
+async fn finalize_structured_run_exit(
+    runs: Arc<RwLock<HashMap<String, Arc<Run>>>>,
+    events: broadcast::Sender<WsEnvelope>,
+    host_id: String,
+    run: Arc<Run>,
+    exit_code: i64,
+) {
+    let removed = {
+        let mut runs = runs.write().await;
+        runs.remove(&run.run_id).is_some()
+    };
+    if !removed {
+        return;
+    }
+
+    let mut env = WsEnvelope::new("run.exited", json!({ "exit_code": exit_code }));
+    env.host_id = Some(host_id);
+    env.run_id = Some(run.run_id.clone());
+    env.seq = Some(run.next_seq());
+    let _ = events.send(env);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +472,14 @@ fn pty_output_max_bytes() -> usize {
         .and_then(|v| v.trim().parse::<usize>().ok())
         .unwrap_or(16 * 1024);
     v.clamp(1024, 1024 * 1024)
+}
+
+fn opencode_silent_timeout() -> Duration {
+    let ms = std::env::var("RELAY_OPENCODE_SILENT_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(15_000);
+    Duration::from_millis(ms.clamp(1_000, 120_000))
 }
 
 async fn codex_rpc_request(
@@ -533,6 +669,7 @@ async fn codex_mcp_submit_prompt(
 
 async fn opencode_submit_prompt(
     run: Arc<Run>,
+    runs: Arc<RwLock<HashMap<String, Arc<Run>>>>,
     redactor: Arc<Redactor>,
     events: broadcast::Sender<WsEnvelope>,
     host_id: String,
@@ -558,7 +695,11 @@ async fn opencode_submit_prompt(
         walk(redactor, v)
     }
 
-    let bin = crate::runners::resolve_tool_bin("opencode", "RELAY_OPENCODE_BIN", "opencode");
+    let bin = resolve_opencode_structured_bin(&crate::runners::resolve_tool_bin(
+        "opencode",
+        "RELAY_OPENCODE_BIN",
+        "opencode",
+    ));
     crate::runners::validate_bin_exists(
         &bin,
         "opencode (set RELAY_OPENCODE_BIN=/path/to/opencode or install shims to record real path)",
@@ -596,6 +737,67 @@ async fn opencode_submit_prompt(
         *p = Some(pid);
     }
 
+    let saw_activity = Arc::new(AtomicBool::new(false));
+    {
+        let events = events.clone();
+        let host_id = host_id.clone();
+        let run_for_watchdog = run.clone();
+        let saw_activity = saw_activity.clone();
+        let silent_timeout = opencode_silent_timeout();
+        std::thread::spawn(move || {
+            std::thread::sleep(silent_timeout);
+            if saw_activity.load(Ordering::Relaxed) {
+                return;
+            }
+            let still_same_pid = run_for_watchdog
+                .opencode_active_pid
+                .lock()
+                .ok()
+                .and_then(|active| *active)
+                == Some(pid);
+            if !still_same_pid {
+                return;
+            }
+
+            let model = run_for_watchdog
+                .opencode_model
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
+            let mut env = WsEnvelope::new(
+                "run.output",
+                json!({
+                    "stream": "stderr",
+                    "text": format!(
+                        "opencode structured prompt produced no output within {} ms (model: {}). terminating hung prompt; this usually means the selected model/provider is not responding in structured mode\n",
+                        silent_timeout.as_millis(),
+                        model,
+                    )
+                }),
+            );
+            env.host_id = Some(host_id.clone());
+            env.run_id = Some(run_for_watchdog.run_id.clone());
+            env.seq = Some(run_for_watchdog.next_seq());
+            let _ = events.send(env);
+
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::Signal;
+
+                let _ = signal_opencode_process_group(pid, Signal::SIGTERM);
+                std::thread::sleep(Duration::from_secs(2));
+                let still_same_pid = run_for_watchdog
+                    .opencode_active_pid
+                    .lock()
+                    .ok()
+                    .and_then(|active| *active)
+                    == Some(pid);
+                if still_same_pid {
+                    let _ = signal_opencode_process_group(pid, Signal::SIGKILL);
+                }
+            }
+        });
+    }
+
     let stdout = child.stdout.take().context("take opencode stdout")?;
     let stderr = child.stderr.take().context("take opencode stderr")?;
 
@@ -604,6 +806,7 @@ async fn opencode_submit_prompt(
         let events = events.clone();
         let host_id = host_id.clone();
         let run_for_thread = run.clone();
+        let saw_activity = saw_activity.clone();
         std::thread::spawn(move || {
             let mut r = BufReader::new(stderr);
             let mut line = String::new();
@@ -612,6 +815,7 @@ async fn opencode_submit_prompt(
                 match r.read_line(&mut line) {
                     Ok(0) => break,
                     Ok(_) => {
+                        saw_activity.store(true, Ordering::Relaxed);
                         let mut env = WsEnvelope::new(
                             "run.output",
                             json!({ "stream": "stderr", "text": line }),
@@ -639,7 +843,19 @@ async fn opencode_submit_prompt(
                 if raw.is_empty() {
                     continue;
                 }
+                saw_activity.store(true, Ordering::Relaxed);
                 let Ok(v) = serde_json::from_str::<JsonValue>(raw) else {
+                    let mut env = WsEnvelope::new(
+                        "run.output",
+                        json!({
+                            "stream": "stderr",
+                            "text": format!("opencode non-json stdout: {raw}\n"),
+                        }),
+                    );
+                    env.host_id = Some(host_id.clone());
+                    env.run_id = Some(run.run_id.clone());
+                    env.seq = Some(run.next_seq());
+                    let _ = events.send(env);
                     continue;
                 };
 
@@ -768,15 +984,55 @@ async fn opencode_submit_prompt(
     if let Ok(mut p) = run.opencode_active_pid.lock() {
         *p = None;
     }
+    let saw_activity = saw_activity.load(Ordering::Relaxed);
+    if !saw_activity {
+        let model = run
+            .opencode_model
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        let mut env = WsEnvelope::new(
+            "run.output",
+            json!({
+                "stream": "stderr",
+                "text": format!(
+                    "opencode exited without structured output (status: {status}, model: {}). this usually means the selected model/provider did not produce JSON events in structured mode\n",
+                    model,
+                )
+            }),
+        );
+        env.host_id = Some(host_id.clone());
+        env.run_id = Some(run.run_id.clone());
+        env.seq = Some(run.next_seq());
+        let _ = events.send(env);
+    }
     if !status.success() {
         let mut env = WsEnvelope::new(
             "run.output",
             json!({ "stream": "stderr", "text": format!("opencode exited: {status}") }),
         );
-        env.host_id = Some(host_id);
+        env.host_id = Some(host_id.clone());
         env.run_id = Some(run.run_id.clone());
         env.seq = Some(run.next_seq());
         let _ = events.send(env);
+    }
+
+    let should_finalize = {
+        let mut stopping = run.opencode_stop_requested.lock().await;
+        if *stopping {
+            *stopping = false;
+            true
+        } else {
+            false
+        }
+    };
+    drop(_guard);
+    if should_finalize {
+        let exit_code =
+            status
+                .code()
+                .map(i64::from)
+                .unwrap_or(if status.success() { 0 } else { -1 });
+        finalize_structured_run_exit(runs, events, host_id, run, exit_code).await;
     }
 
     Ok(())
@@ -886,6 +1142,12 @@ impl RunManager {
         };
 
         validate_run_cwd(&resolved_cwd)?;
+
+        anyhow::ensure!(
+            tool == "opencode",
+            "unsupported tool `{}`; current relay build only enables opencode",
+            tool
+        );
 
         if tool == "codex" {
             match codex_mode_setting() {
@@ -1042,6 +1304,7 @@ impl RunManager {
             opencode_structured: false,
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
+            opencode_stop_requested: Mutex::new(false),
             opencode_call_lock: Mutex::new(()),
             opencode_model: None,
             tmux_session: tmux_session.clone(),
@@ -1337,6 +1600,7 @@ impl RunManager {
         cwd: String,
         model: Option<String>,
     ) -> anyhow::Result<String> {
+        validate_opencode_structured_model(model.as_deref())?;
         let bin = crate::runners::resolve_tool_bin("opencode", "RELAY_OPENCODE_BIN", "opencode");
         crate::runners::validate_bin_exists(
             &bin,
@@ -1363,6 +1627,7 @@ impl RunManager {
             opencode_structured: true,
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
+            opencode_stop_requested: Mutex::new(false),
             opencode_call_lock: Mutex::new(()),
             opencode_model: model
                 .clone()
@@ -1572,6 +1837,7 @@ impl RunManager {
             opencode_structured: false,
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
+            opencode_stop_requested: Mutex::new(false),
             opencode_call_lock: Mutex::new(()),
             opencode_model: None,
             tmux_session: None,
@@ -2144,6 +2410,9 @@ impl RunManager {
                 });
             }
         } else if is_opencode_structured {
+            if *run.opencode_stop_requested.lock().await {
+                anyhow::bail!("opencode run is stopping");
+            }
             let prompt = text.trim_end_matches(&['\r', '\n'][..]).to_string();
             if !prompt.trim().is_empty() {
                 #[cfg(unix)]
@@ -2163,17 +2432,19 @@ impl RunManager {
                         env.run_id = Some(run.run_id.clone());
                         env.seq = Some(run.next_seq());
                         let _ = self.events.send(env);
-                        signal_opencode_process_group(active_pid, Signal::SIGINT);
+                        let _ = signal_opencode_process_group(active_pid, Signal::SIGINT);
                     }
                 }
 
                 let run2 = run.clone();
+                let runs = self.runs.clone();
                 let redactor = self.redactor.clone();
                 let events = self.events.clone();
                 let host_id = self.host_id.clone();
                 tokio::spawn(async move {
                     if let Err(e) = opencode_submit_prompt(
                         run2.clone(),
+                        runs,
                         redactor.clone(),
                         events.clone(),
                         host_id.clone(),
@@ -2310,15 +2581,20 @@ impl RunManager {
                     });
                 }
             } else if is_opencode_structured {
+                if *run.opencode_stop_requested.lock().await {
+                    anyhow::bail!("opencode run is stopping");
+                }
                 let prompt = text.trim_end_matches(&['\r', '\n'][..]).to_string();
                 if !prompt.trim().is_empty() {
                     let run2 = run.clone();
+                    let runs = self.runs.clone();
                     let redactor = self.redactor.clone();
                     let events = self.events.clone();
                     let host_id = self.host_id.clone();
                     tokio::spawn(async move {
                         if let Err(e) = opencode_submit_prompt(
                             run2.clone(),
+                            runs,
                             redactor.clone(),
                             events.clone(),
                             host_id.clone(),
@@ -2473,7 +2749,38 @@ impl RunManager {
 
                 let pid = run.opencode_active_pid.lock().ok().and_then(|pid| *pid);
                 if let Some(pid) = pid {
-                    signal_opencode_process_group(pid, sig);
+                    if signal != "int" {
+                        let mut stopping = run.opencode_stop_requested.lock().await;
+                        *stopping = true;
+                    }
+
+                    signal_opencode_process_group(pid, sig)?;
+
+                    if signal == "term" {
+                        let run = run.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+
+                            let should_force_kill = {
+                                let stopping = run.opencode_stop_requested.lock().await;
+                                if !*stopping {
+                                    false
+                                } else {
+                                    run.opencode_active_pid.lock().ok().and_then(|pid| *pid)
+                                        == Some(pid)
+                                }
+                            };
+                            if should_force_kill {
+                                #[cfg(unix)]
+                                {
+                                    use nix::sys::signal::Signal;
+
+                                    let _ = signal_opencode_process_group(pid, Signal::SIGKILL);
+                                }
+                            }
+                        });
+                    }
+                    return Ok(());
                 }
             }
 
@@ -2482,20 +2789,18 @@ impl RunManager {
                 return Ok(());
             }
 
-            // Mark the run exited and forget local state.
             {
-                let mut runs = self.runs.write().await;
-                runs.remove(run_id);
+                let mut stopping = run.opencode_stop_requested.lock().await;
+                *stopping = false;
             }
-            if let Ok(mut pid) = run.opencode_active_pid.lock() {
-                *pid = None;
-            }
-
-            let mut env = WsEnvelope::new("run.exited", json!({ "exit_code": 0 }));
-            env.host_id = Some(self.host_id.clone());
-            env.run_id = Some(run.run_id.clone());
-            env.seq = Some(run.next_seq());
-            let _ = self.events.send(env);
+            finalize_structured_run_exit(
+                self.runs.clone(),
+                self.events.clone(),
+                self.host_id.clone(),
+                run,
+                0,
+            )
+            .await;
             return Ok(());
         }
 
@@ -2620,7 +2925,10 @@ pub struct RunSummary {
 
 #[cfg(test)]
 mod tests {
-    use super::{opencode_model_choices, opencode_structured_config_value, validate_run_cwd};
+    use super::{
+        opencode_model_choices, opencode_structured_config_value,
+        opencode_structured_model_choices, validate_opencode_structured_model, validate_run_cwd,
+    };
     use serde_json::json;
     use std::fs;
 
@@ -2759,5 +3067,48 @@ mod tests {
         );
 
         fs::remove_dir_all(&temp).ok();
+    }
+
+    #[test]
+    fn opencode_structured_model_choices_filters_known_incompatible_models() {
+        let temp = std::env::temp_dir().join(format!(
+            "relay-opencode-structured-models-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let config_dir = temp.join("opencode");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config_path = config_dir.join("opencode.json");
+        fs::write(
+            &config_path,
+            serde_json::to_string(&json!({
+                "model": "cch-claude/claude-opus-4-6",
+                "provider": {
+                    "cch-oai": { "models": { "gpt-5.4": {}, "glm-5": {} } },
+                    "cch-claude": { "models": { "claude-opus-4-6": {}, "claude-sonnet-4-6": {} } }
+                }
+            }))
+            .expect("encode config"),
+        )
+        .expect("write config");
+
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.to_str().expect("utf8 temp"));
+        let (models, default_model, note) =
+            opencode_structured_model_choices().expect("structured model choices");
+        assert_eq!(
+            models,
+            vec!["cch-oai/glm-5".to_string(), "cch-oai/gpt-5.4".to_string()]
+        );
+        assert_eq!(default_model, None);
+        assert!(note.as_deref().unwrap_or_default().contains("cch-claude"));
+
+        fs::remove_dir_all(&temp).ok();
+    }
+
+    #[test]
+    fn validate_opencode_structured_model_rejects_known_incompatible_model() {
+        let err = validate_opencode_structured_model(Some("cch-claude/claude-opus-4-6"))
+            .expect_err("cch-claude model should be rejected");
+        assert!(err.to_string().contains("does not support model`") == false);
+        assert!(err.to_string().contains("does not support model"));
     }
 }

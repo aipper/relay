@@ -15,10 +15,7 @@ Usage:
   relay hostd install [--version 0.1.0] [--base-url <url>] [--dir ~/.relay/bin] [--yes] [--force] [--dry-run]
   relay hostd uninstall [--dir ~/.relay/bin] [--yes]
 
-  relay codex  [--sock /tmp/relay-hostd.sock] [--cmd "codex ..."] [--cwd .]    (default: codex)
-  relay claude [--sock /tmp/relay-hostd.sock] [--cmd "claude ..."] [--cwd .]   (default: claude)
-  relay iflow  [--sock /tmp/relay-hostd.sock] [--cmd "iflow ..."] [--cwd .]    (default: iflow)
-  relay gemini [--sock /tmp/relay-hostd.sock] [--cmd "gemini ..."] [--cwd .]   (default: gemini)
+  relay opencode [--sock /tmp/relay-hostd.sock] [--cmd "opencode ..."] [--cwd .] [--model provider/model] (default: opencode)
 
   relay daemon start [--server http://127.0.0.1:8787] [--host-id <id>] [--host-token <token>]
                     [--sock ~/.relay/relay-hostd.sock] [--spool ~/.relay/hostd-spool.db] [--log ~/.relay/hostd.log]
@@ -30,7 +27,7 @@ Usage:
   relay doctor
 
   relay login --server http://127.0.0.1:8787 --username admin --password '...'   (compat)
-  relay local start --sock /tmp/relay-hostd.sock --tool codex --cmd "..." [--cwd .] [--model provider/model]
+  relay local start --sock /tmp/relay-hostd.sock --tool opencode --cmd "..." [--cwd .] [--model provider/model]
   relay local input --sock /tmp/relay-hostd.sock --run <run_id> --text "y\\n" [--input-id <uuid>]
   relay fs read   --sock /tmp/relay-hostd.sock --run <run_id> --path relative/file.txt
   relay fs search --sock /tmp/relay-hostd.sock --run <run_id> --q "needle"
@@ -42,8 +39,8 @@ Usage:
   relay ws-stop --server http://127.0.0.1:8787 --token <jwt> --run <run_id> [--signal term|kill]
   relay ws-approve --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --request-id <uuid>
   relay ws-deny    --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --request-id <uuid>
-  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool codex --cmd "echo hi; cat" [--cwd .] [--model provider/model]
-  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool codex [--cmd "codex ..."] [--cwd .] [--model provider/model]
+  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool opencode --cmd "opencode ..." [--cwd .] [--model provider/model]
+  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool opencode [--cmd "opencode ..."] [--cwd .] [--model provider/model]
   relay ws-rpc-fs-read   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --path relative/file.txt
   relay ws-rpc-fs-search --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --q "needle"
   relay ws-rpc-fs-list   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> [--path .]
@@ -851,6 +848,13 @@ async function localStartRun(sock: string, tool: string, runCmd: string, cwd?: s
   return { out, runId };
 }
 
+function requireSupportedTool(tool: string | undefined): "opencode" {
+  if ((tool ?? "opencode") !== "opencode") {
+    throw new Error(`unsupported --tool ${tool}; current relay build only enables opencode`);
+  }
+  return "opencode";
+}
+
 async function localGetJson(sock: string, url: string): Promise<Record<string, JsonValue>> {
   requireBinaryInPath("curl");
   const curlArgs = ["--silent", "--show-error", "--unix-socket", sock, "-X", "GET", url];
@@ -1548,13 +1552,14 @@ async function main() {
     usage();
   }
 
-  if (cmd === "codex" || cmd === "claude" || cmd === "iflow" || cmd === "gemini") {
+  if (cmd === "opencode") {
     const sock = getArg("--sock") ?? envOrUndefined("RELAY_HOSTD_SOCK") ?? `${relayHomeDir()}/relay-hostd.sock`;
     const runCmd = cmdOrDefault(getArg("--cmd"), cmd);
     const cwd = getArg("--cwd");
+    const model = getArg("--model");
     if (!sock) usage();
     await ensureDaemonRunning(sock);
-    const { out } = await localStartRun(sock, cmd, runCmd, cwd);
+    const { out } = await localStartRun(sock, cmd, runCmd, cwd, model ?? undefined);
     console.log(out.trim());
     return;
   }
@@ -1582,11 +1587,11 @@ async function main() {
     await ensureDaemonRunning(sock);
 
     if (sub === "start") {
-      const tool = getArg("--tool");
+      const tool = requireSupportedTool(getArg("--tool"));
       const runCmd = getArg("--cmd") ?? tool;
       const cwd = getArg("--cwd");
       const model = getArg("--model");
-      if (!tool || !runCmd) usage();
+      if (!runCmd) usage();
 
       const { out } = await localStartRun(sock, tool, runCmd, cwd ?? undefined, model ?? undefined);
       console.log(out.trim());
@@ -1690,7 +1695,7 @@ async function main() {
     const server = getArg("--server") ?? (await resolveServer()).server;
     const token = getArg("--token") ?? (await resolveToken()).token;
     const hostId = getArg("--host-id");
-    const tool = getArg("--tool") ?? "codex";
+    const tool = requireSupportedTool(getArg("--tool") ?? "opencode");
     const runCmd = getArg("--cmd") ?? tool;
     const cwd = getArg("--cwd");
     const model = getArg("--model");
