@@ -78,6 +78,8 @@ fi
 ```bash
 # superproject 当前分支（finish 后通常是 base 分支）
 base_branch="$(git branch --show-current)"
+change_id="<change-id>"
+targets="changes/${change_id}/submodules.targets"
 
 # 子模块清单（没有则跳过）
 git config --file .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null || true
@@ -89,38 +91,50 @@ git config --file .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null |
 # - 不要直接切 `change/<change-id>` / `main` / `master` 等业务分支来“解 detached”
 # - 不改动 submodule 现有分支指针（例如不强行移动 main/master）
 # - 创建/更新本地 pin 分支：`aiws/pin/<target_branch>` 指向 gitlink commit，并将其 upstream 设为 `origin/<target_branch>`
-sub_sha="$(git rev-parse "HEAD:<sub_path>")"
-cfg_branch="$(git config --file .gitmodules --get "submodule.<name>.branch" 2>/dev/null || true)"
-if [[ "${cfg_branch:-}" == "." ]]; then cfg_branch="$base_branch"; fi
-if [[ -z "${cfg_branch:-}" ]]; then
-  echo "[warn] <sub_path>: missing .gitmodules submodule.<name>.branch; keep detached and skip auto-push"
-  continue
+if git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' >/dev/null 2>&1; then
+  if [[ ! -f “${targets}” ]]; then
+    echo “error: missing ${targets} (required when .gitmodules declares submodules)”
+    exit 2
+  fi
+
+  source tools/ws_resolve_sub_target.sh
+
+  while read -r key sub_path; do
+      name=”${key#submodule.}”; name=”${name%.path}”
+      [[ -z “${sub_path:-}” ]] && continue
+      echo “== submodule: ${sub_path} (${name}) ==”
+
+      sub_sha=”$(git rev-parse “HEAD:${sub_path}”)”
+
+      ws_resolve_sub_target “${sub_path}” “${name}” “${targets}” “${base_branch}” || exit 2
+      target_branch=”${_resolved_branch}”
+      remote=”${_resolved_remote}”
+      pin_branch=”aiws/pin/${target_branch}”
+
+      git -C “${sub_path}” fetch “${remote}” --prune
+      if ! git -C “${sub_path}” show-ref --verify --quiet “refs/remotes/${remote}/${target_branch}”; then
+        echo “error: ${sub_path}: missing ${remote}/${target_branch}; refusing to push superproject (would break gitlink fetchability)”
+        exit 2
+      fi
+
+      # 仅当 gitlink commit 属于 <remote>/<target_branch> 的历史时才”挂回分支”
+      if ! git -C “${sub_path}” merge-base --is-ancestor “${sub_sha}” “${remote}/${target_branch}”; then
+        echo “[warn] ${sub_path}: ${sub_sha} is not in ${remote}/${target_branch}; keep detached and stop (need manual reconcile)”
+        exit 1
+      fi
+
+      git -C “${sub_path}” checkout -B “${pin_branch}” “${sub_sha}”
+      git -C “${sub_path}” branch --set-upstream-to “${remote}/${target_branch}” “${pin_branch}” >/dev/null 2>&1 || true
+      git -C “${sub_path}” status -sb
+
+      # push：只允许 fast-forward（若远端分叉会被拒绝；此时必须人工处理）
+      git -C “${sub_path}” push “${remote}” “${sub_sha}:refs/heads/${target_branch}”
+    done < <(git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' 2>/dev/null || true)
 fi
-target_branch="$cfg_branch"
-pin_branch="aiws/pin/${target_branch}"
-
-git -C "<sub_path>" fetch origin --prune
-if ! git -C "<sub_path>" show-ref --verify --quiet "refs/remotes/origin/${target_branch}"; then
-  echo "[warn] <sub_path>: origin/${target_branch} not found; keep detached and skip auto-push"
-  continue
-fi
-
-# 仅当 gitlink commit 属于 origin/<target_branch> 的历史时才“挂回分支”
-if ! git -C "<sub_path>" merge-base --is-ancestor "${sub_sha}" "origin/${target_branch}"; then
-  echo "[warn] <sub_path>: ${sub_sha} is not in origin/${target_branch}; keep detached and stop (need manual reconcile)"
-  exit 1
-fi
-
-git -C "<sub_path>" checkout -B "${pin_branch}" "${sub_sha}"
-git -C "<sub_path>" branch --set-upstream-to "origin/${target_branch}" "${pin_branch}" >/dev/null 2>&1 || true
-git -C "<sub_path>" status -sb
-
-# push：只允许 fast-forward（若远端分叉会被拒绝；此时必须人工处理）
-git -C "<sub_path>" push origin "${sub_sha}:refs/heads/${target_branch}"
 ```
 规则：
 - 每个 submodule 必须先执行“pin 分支挂回 + fast-forward push”，再 push 主仓库。
-- 若任一 submodule 的 gitlink commit 不在 `origin/<target_branch>` 历史中：立即停止，先人工处理分叉，再继续。
+- 若任一 submodule 的 gitlink commit 不在 `<remote>/<target_branch>` 历史中：立即停止，先人工处理分叉，再继续。
 
 5) 仅当 submodules 全部成功后，再 push superproject 当前分支：
 ```bash

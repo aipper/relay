@@ -60,6 +60,12 @@ fi
 4) 逐个 push submodules（fast-forward only），再 push superproject：
 ```bash
 base_branch="$(git branch --show-current)"
+change_id="$(echo "${base_branch}" | sed -n 's|^change/||p')"
+targets="changes/${change_id}/submodules.targets"
+# Note: if not on a change/ branch, change_id is empty and targets file won't exist;
+# resolution falls back to .gitmodules submodule.<name>.branch via ws_resolve_sub_target.
+
+source tools/ws_resolve_sub_target.sh
 
 git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' 2>/dev/null \
   | while read -r key sub_path; do
@@ -72,25 +78,25 @@ git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' 2>/dev/null
       exit 2
     fi
 
-    cfg_branch="$(git config --file .gitmodules --get "submodule.${name}.branch" 2>/dev/null || true)"
-    if [[ "${cfg_branch:-}" == "." ]]; then cfg_branch="$base_branch"; fi
-    target_branch="${cfg_branch}"
+    ws_resolve_sub_target "${sub_path}" "${name}" "${targets}" "${base_branch}" || exit 2
+    target_branch="${_resolved_branch}"
+    remote="${_resolved_remote}"
 
-    git -C "${sub_path}" fetch origin --prune
-    if ! git -C "${sub_path}" show-ref --verify --quiet "refs/remotes/origin/${target_branch}"; then
-      echo "error: missing origin/${target_branch} for ${sub_path}"
+    git -C "${sub_path}" fetch "${remote}" --prune
+    if ! git -C "${sub_path}" show-ref --verify --quiet "refs/remotes/${remote}/${target_branch}"; then
+      echo "error: missing ${remote}/${target_branch} for ${sub_path}"
       exit 2
     fi
 
-    # fast-forward only: origin/<branch> 必须是 HEAD 的祖先
-    if ! git -C "${sub_path}" merge-base --is-ancestor "origin/${target_branch}" HEAD; then
-      echo "error: non-fast-forward (submodule=${sub_path}, branch=${target_branch})"
+    # fast-forward only: <remote>/<branch> 必须是 HEAD 的祖先
+    if ! git -C "${sub_path}" merge-base --is-ancestor "${remote}/${target_branch}" HEAD; then
+      echo "error: non-fast-forward (submodule=${sub_path}, remote=${remote}, branch=${target_branch})"
       echo "hint: rebase/merge in submodule, then retry"
       exit 2
     fi
 
-    # push HEAD -> origin/<branch>（不 force）
-    git -C "${sub_path}" push origin "HEAD:refs/heads/${target_branch}"
+    # push HEAD -> <remote>/<branch>（不 force）
+    git -C "${sub_path}" push "${remote}" "HEAD:refs/heads/${target_branch}"
   done
 
 # 最后 push superproject（仍需用户确认远端/分支）
@@ -102,4 +108,3 @@ git push
 - `Context:` 当前分支 + 是否有 submodules
 - `Submodules:` 每个 submodule push 的目标分支与结果（成功/阻断原因）
 - `Superproject:` push 结果
-

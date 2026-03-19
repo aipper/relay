@@ -8,7 +8,10 @@
 建议流程：
 1) 先运行 `/ws-preflight`（读真值文件并输出约束摘要）。
 2) 建立变更归因（推荐）：
-   - 推荐一键：`aiws change start <change-id> --hooks`
+   - ⚠️ 开始前先确认工作区干净：`git status --porcelain` 为空；否则切分支/创建 worktree 后，未提交改动可能“看起来丢了”（worktree 只从 `HEAD` checkout，未提交内容会留在原目录）。
+   - 推荐更安全（默认）：`aiws change start <change-id> --hooks --no-switch`（只创建分支/工件 + 启用 hooks；不切分支）
+   - 准备进入实现（且工作区干净）后再切换：`git switch change/<change-id>`
+   - 若你明确要“一键切分支”（不推荐，且 dirty 会被拦截）：`aiws change start <change-id> --hooks --switch`
    - superproject + submodule（推荐）：`aiws change start <change-id> --hooks --worktree --submodules`
    - 若后续需要在 detached submodule 内提交：先挂到 `aiws/pin/<target-branch>`；不要直接切 `change/<change-id>` / `main` / `master`
    - 或手工：`git switch -c change/<change-id>`，并创建 `changes/<change-id>/proposal.md` 与 `changes/<change-id>/tasks.md`（参考 `changes/README.md`）
