@@ -1,0 +1,45 @@
+{
+  "ws_change_version": 1,
+  "id": "opencode-pwa-focus",
+  "title": "opencode-pwa-focus",
+  "created_at": "2026-03-19T03:12:48Z",
+  "base_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1773885848,
+      "sha256": "64b6de5f7473ab4fa6fed295187eb8571fd0147c336afe8bf4dea44ae0df3b13"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1773466667,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773889778,
+      "sha256": "46fc2ab348e80086a5c8b822d6c33a39d81716fc4556dcc962879397abd23853"
+    }
+  },
+  "synced_at": "2026-03-19T03:12:48Z",
+  "synced_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1773885848,
+      "sha256": "64b6de5f7473ab4fa6fed295187eb8571fd0147c336afe8bf4dea44ae0df3b13"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1773466667,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773889778,
+      "sha256": "46fc2ab348e80086a5c8b822d6c33a39d81716fc4556dcc962879397abd23853"
+    }
+  },
+  "sync_events": [
+    {
+      "synced_at": "2026-03-19T03:12:48Z",
+      "baseline_from": "creation",
+      "baseline_at": "2026-03-19T03:12:48Z",
+      "changed": []
+    }
+  ],
+  "base_branch": "main",
+  "base_branch_set_at": "2026-03-19T03:30:51Z"
+}

@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "change_id": "opencode-pwa-focus",
+  "events": [
+    {
+      "type": "validate",
+      "timestamp": "2026-03-19T03:07:07Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 9,
+        "warnings": 1,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "truth_sync",
+      "timestamp": "2026-03-19T03:12:48Z",
+      "payload": {
+        "synced_at": "2026-03-19T03:12:48Z",
+        "baseline_from": "creation",
+        "baseline_at": "2026-03-19T03:12:48Z",
+        "changed_files": []
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-19T03:13:05Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 1,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-19T03:13:54Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 2,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-19T03:14:55Z",
+      "payload": {
+        "ok": true,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 0,
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "change_start",
+      "timestamp": "2026-03-19T03:30:51Z",
+      "payload": {
+        "mode": "no-switch",
+        "worktree": "/home/ab/code/relay",
+        "branch": "change/opencode-pwa-focus",
+        "from_branch": "main",
+        "current_branch": "main",
+        "hooks": true
+      }
+    }
+  ],
+  "updated_at": "2026-03-19T03:30:51Z"
+}

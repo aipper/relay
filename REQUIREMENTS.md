@@ -85,6 +85,7 @@
 - 目标：
   - 将 “run” 提升为 “session” 的表现层模型：每个 session 关联 `host_id + cwd + tool`，并有可持续的消息线程（messages）。
   - session 列表/最近会话（recent）可在 web 中查看（MVP：按 started_at 排序）。
+  - 当 `tool=opencode` 时，session 模型应进一步对齐 OpenCode 原生能力：保留并暴露稳定的 `opencode_session_id`，支持在 PWA 中切换已有 session、新开 session、fork session，并查看该 session 的历史消息。
 - 非目标：
   - 不实现 Happy 的跨端加密同步与离线合并策略。
 - 验收（dev）：
@@ -126,8 +127,10 @@
 
 - 目标：
   - web 端提供 per-session 的 todo 列表（已具备 localStorage 版本的基础），并允许从输出提取建议。
+  - 当 `tool=opencode` 时，todo 应优先基于 OpenCode 的结构化 session todo / task 状态展示，而不是仅依赖 `run.output` 文本提取。
+  - 当 OpenCode 任务完成后，PWA 中对应计划项应自动刷新为 completed；文本提取只允许作为结构化状态缺失时的兜底。
 - 非目标：
-  - 不做 server-side 多端同步（保持浏览器本地即可）。
+  - 非 OpenCode runner 暂不强制切到 server-backed todo；可继续使用浏览器本地版本。
 - 验收（dev）：
   - web 端 todo 刷新后仍存在；可一键把 `TODO:` 建议加入列表。
 
@@ -217,7 +220,9 @@
         - `permission_env_set`：布尔值，表示是否用户显式设置了 `OPENCODE_PERMISSION`。
         - `permission_mode`：`env | relay_auto_allow_all | inherit`。
         - `model`：当本次运行显式指定模型时，记录本 run 使用的 `provider/model`。
+        - `opencode_session_id`：当本次 structured 运行已创建或续接 OpenCode session 时，记录稳定的 OpenCode session 标识，供 server/web/cli 做 session 级操作。
       - hostd 应能从宿主机 `opencode` 配置读取可用模型清单与默认模型，并通过 host info 暴露给 web/cli；读取失败时返回错误摘要而不是伪造模型列表。
+      - hostd 应把 OpenCode session identity 持久化并向 server/web/cli 暴露，避免 hostd 进程重启后只剩 relay `run_id` 而丢失 OpenCode session 语义。
       - 结构化事件的敏感信息处理：
         - `tool.call.args` 与 `tool.result.result.raw_part/title/output` 需经过 redaction 后再进入事件流/落库（避免 secrets 泄露）。
         - `tool.result.duration_ms` 可选；未知时不应伪造为 0。
@@ -344,6 +349,7 @@
   - 事件视图默认不展示海量 `run.output`（避免淹没结构化事件）；默认仅对 `tool=opencode` 的会话保留 `run.output` 作为结构化 text 的承载。
   - 事件视图顶部提供“输出摘要（tail）”与“打开终端”入口；TUI 输出默认仅在终端视图查看。
   - “启动运行”页应根据所选 host 动态展示当前可用的受支持工具（至少 `codex` / `claude` / `iflow` / `opencode`）；若 host 提供 `opencode` 模型列表，则 UI 提供模型下拉，否则沿用 host 默认模型。
+  - 当 `tool=opencode` 时，PWA 应提供 session lifecycle 入口：新开 session、切换已有 session、fork 当前 session，并可查看历史对话。
   - “启动运行”页应记住每个 host 最近一次成功启动的 `cwd`，并在路径不存在/不是目录时给出面向用户的明确错误提示。
   -（hapi 对齐：卡片可操作性）移动端会话卡片流中，结构化卡片需要提供可操作 footer（参考 hapi 的 ToolCard/PermissionFooter/AskUserQuestionFooter 体验）：
     - `tool.call` / `tool.result`：以 ToolCard 展示 tool 名称、参数摘要、运行状态（pending/success/error）、耗时；支持“展开/折叠详情”和“复制 JSON/文本”。
@@ -503,12 +509,14 @@
 - 目标：web/PWA 提供每个 run 的 todo 列表，用于跟踪会话进度；支持手动维护，并提供基于 `run.output` 的 todo 建议提取。
 - 约束：
   - 默认仅保存在浏览器（localStorage），不写入 server DB（后续如需多端同步再扩展）。
+  - 但当 `tool=opencode` 且已存在结构化 session todo 时，PWA 应优先展示结构化 todo 列表，并以结构化 completed 状态自动更新计划项；localStorage 建议提取仅作补充。
   - 验收（dev）：
     - 启动：`scripts/dev-up.sh --port 8787` + `cd web && bun run dev -- --host 127.0.0.1 --port 5173`
     - 在 web 选择某个 `run_id`：
       - 可手动新增 todo、勾选完成、删除
       - 刷新页面后 todo 仍存在（localStorage 持久化）
       - 在 output 出现 `TODO:` 或 `- [ ] ...` 风格文本时，`Suggestions` 能出现并可一键加入
+      - 当该会话为 OpenCode structured session 时，可看到结构化 session todo；任务完成后 UI 自动刷新 completed 状态
 
 ### M5（会话/消息模型）：sessions + messages（对齐 hapi 的聊天线程）
 
