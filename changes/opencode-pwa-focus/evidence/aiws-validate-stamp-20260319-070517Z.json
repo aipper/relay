@@ -1,0 +1,13 @@
+{
+  "timestamp": 1773903871,
+  "ws_root": "/home/ab/code/relay",
+  "template_id": "workspace",
+  "aiws_version": "0.0.23",
+  "spec_version": "0.0.23",
+  "started_at": "2026-03-19T07:04:31Z",
+  "finished_at": "2026-03-19T07:04:32Z",
+  "status": "ok",
+  "exit_code": 0,
+  "error": null,
+  "note": "aiws validate stamp; does not include full stdout/stderr; do not put secrets in validation output."
+}

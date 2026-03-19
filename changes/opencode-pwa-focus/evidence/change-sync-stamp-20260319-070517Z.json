@@ -1,0 +1,41 @@
+{
+  "timestamp": 1773889968,
+  "ws_root": "/home/ab/code/relay",
+  "change_id": "opencode-pwa-focus",
+  "change_dir": "/home/ab/code/relay/changes/opencode-pwa-focus",
+  "synced_at": "2026-03-19T03:12:48Z",
+  "previous_baseline": {
+    "label": "creation",
+    "at": "2026-03-19T03:12:48Z",
+    "truth_files": {
+      "AI_PROJECT.md": {
+        "mtime": 1773885848,
+        "sha256": "64b6de5f7473ab4fa6fed295187eb8571fd0147c336afe8bf4dea44ae0df3b13"
+      },
+      "AI_WORKSPACE.md": {
+        "mtime": 1773466667,
+        "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+      },
+      "REQUIREMENTS.md": {
+        "mtime": 1773889778,
+        "sha256": "46fc2ab348e80086a5c8b822d6c33a39d81716fc4556dcc962879397abd23853"
+      }
+    }
+  },
+  "new_baseline": {
+    "AI_PROJECT.md": {
+      "mtime": 1773885848,
+      "sha256": "64b6de5f7473ab4fa6fed295187eb8571fd0147c336afe8bf4dea44ae0df3b13"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1773466667,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773889778,
+      "sha256": "46fc2ab348e80086a5c8b822d6c33a39d81716fc4556dcc962879397abd23853"
+    }
+  },
+  "changed": [],
+  "note": "aiws change sync stamp; does not contain secrets."
+}

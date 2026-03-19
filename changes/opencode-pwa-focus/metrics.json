@@ -79,7 +79,38 @@
         "current_branch": "main",
         "hooks": true
       }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-19T07:01:24Z",
+      "payload": {
+        "ok": true,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 0,
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "state_written",
+      "timestamp": "2026-03-19T07:01:24Z",
+      "payload": {
+        "path": "changes/opencode-pwa-focus/STATE.md"
+      }
+    },
+    {
+      "type": "evidence",
+      "timestamp": "2026-03-19T07:05:17Z",
+      "payload": {
+        "generated_at": "2026-03-19T07:05:17Z",
+        "created": 5,
+        "strict_validate": "ok",
+        "allow_fail": false
+      }
     }
   ],
-  "updated_at": "2026-03-19T03:30:51Z"
+  "updated_at": "2026-03-19T07:05:17Z"
 }
