@@ -27,6 +27,7 @@
     id: string;
     host_id: string;
     tool: string;
+    opencode_session_id?: string | null;
     cwd: string;
     status: string;
     started_at: string;
@@ -934,6 +935,15 @@
       if (msg.run_id) {
         const hasReqId = dataString(msg, "request_id");
         const last_active_at = msg.ts;
+        const opencodeSessionId = dataString(msg, "opencode_session_id");
+
+        if (opencodeSessionId) {
+          upsertRun(msg.run_id, (cur) => ({
+            ...cur,
+            opencode_session_id: opencodeSessionId,
+            last_active_at,
+          }));
+        }
 
         if (msg.type === "run.started") {
           if (!readyChanged) {
@@ -972,6 +982,7 @@
               id: msg.run_id,
               host_id: msg.host_id ?? "unknown",
               tool,
+              opencode_session_id: opencodeSessionId,
               cwd: dataString(msg, "cwd") ?? ".",
               status: "running",
               started_at: msg.ts,
@@ -983,6 +994,7 @@
               ...cur,
               host_id: msg.host_id ?? cur.host_id,
               tool,
+              opencode_session_id: opencodeSessionId ?? cur.opencode_session_id,
               cwd: dataString(msg, "cwd") ?? cur.cwd,
               status: "running",
               started_at: msg.ts,
@@ -2879,6 +2891,17 @@
     return (text ?? "").replace(/\r\n/g, "\r").replace(/\n/g, "\r");
   }
 
+  function normalizeRunInput(text: string, runId: string): string {
+    const raw = text ?? "";
+    const run = runs.find((item) => item.id === runId) ?? null;
+    const mode = outputModeByRun[runId] ?? "log";
+    const isOpencodeStructured = run?.tool === "opencode" && mode === "log";
+    if (isOpencodeStructured) {
+      return raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    }
+    return normalizeTerminalInput(raw);
+  }
+
   function codexStructuredEventText(raw: string): string | null {
     // Codex structured mode (mcp-server) emits notifications like:
     // {"jsonrpc":"2.0","method":"codex/event","params":{...}}
@@ -3011,7 +3034,7 @@
 
   function sendInput(text: string) {
     if (!selectedRunId) return;
-    const normalized = normalizeTerminalInput(text);
+    const normalized = normalizeRunInput(text, selectedRunId);
     sendWs({
       type: "run.send_input",
       ts: new Date().toISOString(),
@@ -3749,6 +3772,12 @@
               <span class="meta-k">run</span>
               <span class="meta-v"><code>{selectedRun.id}</code></span>
             </span>
+            {#if selectedRun.tool === "opencode" && selectedRun.opencode_session_id}
+              <span class="meta-pill">
+                <span class="meta-k">opencode</span>
+                <span class="meta-v"><code>{selectedRun.opencode_session_id}</code></span>
+              </span>
+            {/if}
             <span class="meta-pill meta-pill-cwd">
               <span class="meta-k">cwd</span>
               <span class="meta-v"><code>{selectedRun.cwd}</code></span>

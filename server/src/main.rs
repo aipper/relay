@@ -140,10 +140,7 @@ async fn http_send_input(
         return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
     }
 
-    let host_id = {
-        let map = state.run_to_host.read().await;
-        map.get(&run_id).cloned()
-    };
+    let host_id = resolve_host_id_for_run(&state, &run_id).await;
     let Some(host_id) = host_id else {
         return (StatusCode::NOT_FOUND, "unknown run_id").into_response();
     };
@@ -178,6 +175,45 @@ async fn http_send_input(
     }
 
     (StatusCode::BAD_GATEWAY, "host offline").into_response()
+}
+
+async fn resolve_host_id_for_run(state: &AppState, run_id: &str) -> Option<String> {
+    let host_id = {
+        let map = state.run_to_host.read().await;
+        map.get(run_id).cloned()
+    };
+    if host_id.is_some() {
+        return host_id;
+    }
+
+    let host_id = sqlx::query_scalar::<_, String>("SELECT host_id FROM runs WHERE id=?1")
+        .bind(run_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+    if let Some(host_id) = host_id {
+        let mut map = state.run_to_host.write().await;
+        map.insert(run_id.to_string(), host_id.clone());
+        return Some(host_id);
+    }
+
+    let fallback_host = {
+        let hosts = state.hosts_tx.read().await;
+        if hosts.len() == 1 {
+            hosts.keys().next().cloned()
+        } else {
+            None
+        }
+    };
+    if let Some(host_id) = fallback_host {
+        tracing::warn!(%run_id, %host_id, "run host mapping missing; falling back to sole connected host");
+        let mut map = state.run_to_host.write().await;
+        map.insert(run_id.to_string(), host_id.clone());
+        return Some(host_id);
+    }
+
+    None
 }
 
 async fn http_list_runs(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
@@ -763,28 +799,8 @@ async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
                             (host_id, None)
                         } else {
                             let Some(run_id) = env.run_id.clone() else { continue; };
-                            // Prefer in-memory map, but fall back to the DB (useful after server restarts,
-                            // because the in-memory map is not persisted).
-                            let mut host_id = {
-                                let map = state.run_to_host.read().await;
-                                map.get(&run_id).cloned()
-                            };
-                            if host_id.is_none() {
-                                host_id = sqlx::query_scalar::<_, String>(
-                                    "SELECT host_id FROM runs WHERE id=?1",
-                                )
-                                .bind(&run_id)
-                                .fetch_optional(&state.db)
-                                .await
-                                .ok()
-                                .flatten();
-                            }
+                            let host_id = resolve_host_id_for_run(&state, &run_id).await;
                             let Some(host_id) = host_id else { continue; };
-                            {
-                                // Cache for subsequent inputs.
-                                let mut map = state.run_to_host.write().await;
-                                map.insert(run_id.clone(), host_id.clone());
-                            }
                             (host_id, Some(run_id))
                         };
 
@@ -937,9 +953,23 @@ ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at
                         .get("tool")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
+                    let opencode_session_id = env
+                        .data
+                        .get("opencode_session_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
                     let cwd = env.data.get("cwd").and_then(|v| v.as_str()).unwrap_or(".");
-                    let _ = db::upsert_run_started(&state.db, &run_id, &host_id, tool, cwd, env.ts)
-                        .await;
+                    let _ = db::upsert_run_started(
+                        &state.db,
+                        &run_id,
+                        &host_id,
+                        tool,
+                        opencode_session_id,
+                        cwd,
+                        env.ts,
+                    )
+                    .await;
                 } else if env.r#type == "run.awaiting_input" {
                     let has_request_id = env
                         .data
@@ -1003,6 +1033,22 @@ ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at
                 } else if env.r#type == "rpc.response" && run_id != "unknown" {
                     let mut map = state.run_to_host.write().await;
                     map.insert(run_id.clone(), host_id.clone());
+                }
+
+                if let Some(opencode_session_id) = env
+                    .data
+                    .get("opencode_session_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    let _ = db::set_run_opencode_session_id(
+                        &state.db,
+                        &run_id,
+                        opencode_session_id,
+                        env.ts,
+                    )
+                    .await;
                 }
 
                 if run_id != "unknown" {

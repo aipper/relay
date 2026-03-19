@@ -7,8 +7,8 @@
 ## 0. Preflight
 
 - [x] 0.1 阅读并遵守 `AI_PROJECT.md` / `AI_WORKSPACE.md` / `REQUIREMENTS.md`
-- [ ] 0.2 运行门禁校验：`aiws validate .`（或 `npx -y @aipper/aiws validate .`）
-- [ ] 0.3 若真值文件发生变化（例如你更新了 REQUIREMENTS.md），同步基线：`aiws change sync opencode-pwa-focus`
+- [x] 0.2 运行门禁校验：`aiws validate .`（或 `npx -y @aipper/aiws validate .`）
+- [x] 0.3 若真值文件发生变化（例如你更新了 REQUIREMENTS.md），同步基线：`aiws change sync opencode-pwa-focus`
 
 ## 1. 需求/问题合同（如适用）
 
@@ -18,13 +18,13 @@
 
 ## 2. 实现
 
-- [ ] 2.1 把 OpenCode `sessionID` 提升为 relay 的一等模型并向 server/web 暴露
+- [x] 2.1 把 OpenCode `sessionID` 提升为 relay 的一等模型并向 server/web 暴露
 - [ ] 2.2 为 PWA/CLI 增加 OpenCode-first 的 session/todo/history 能力
 
 ## 3. 验证（必须可复现）
 
-- [ ] 3.1 `python3 tools/requirements_contract.py validate`
-- [ ] 3.2 `aiws validate .`
+- [x] 3.1 `python3 tools/requirements_contract.py validate`
+- [x] 3.2 `aiws validate .`
 
 ## 4. 交付与归档
 

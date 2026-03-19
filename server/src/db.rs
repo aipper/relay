@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY NOT NULL,
   host_id TEXT NOT NULL,
   tool TEXT NOT NULL,
+  opencode_session_id TEXT,
   cwd TEXT NOT NULL,
   status TEXT NOT NULL,
   started_at TEXT NOT NULL,
@@ -117,6 +118,9 @@ CREATE TABLE IF NOT EXISTS events (
         .execute(pool)
         .await;
     let _ = sqlx::query("ALTER TABLE runs ADD COLUMN last_active_at TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN opencode_session_id TEXT;")
         .execute(pool)
         .await;
     let _ = sqlx::query("ALTER TABLE runs ADD COLUMN pending_request_id TEXT;")
@@ -196,6 +200,7 @@ pub async fn upsert_run_started(
     run_id: &str,
     host_id: &str,
     tool: &str,
+    opencode_session_id: Option<&str>,
     cwd: &str,
     started_at: DateTime<Utc>,
 ) -> anyhow::Result<()> {
@@ -205,6 +210,7 @@ INSERT INTO runs (
   id,
   host_id,
   tool,
+  opencode_session_id,
   cwd,
   status,
   started_at,
@@ -217,10 +223,11 @@ INSERT INTO runs (
   ended_at,
   exit_code
 )
-VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?5, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6, ?6, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
 ON CONFLICT(id) DO UPDATE SET
   host_id=excluded.host_id,
   tool=excluded.tool,
+  opencode_session_id=COALESCE(excluded.opencode_session_id, runs.opencode_session_id),
   cwd=excluded.cwd,
   status='running',
   started_at=excluded.started_at,
@@ -237,8 +244,35 @@ ON CONFLICT(id) DO UPDATE SET
     .bind(run_id)
     .bind(host_id)
     .bind(tool)
+    .bind(opencode_session_id)
     .bind(cwd)
     .bind(started_at.to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_run_opencode_session_id(
+    pool: &Db,
+    run_id: &str,
+    opencode_session_id: &str,
+    ts: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let ts = ts.to_rfc3339();
+    sqlx::query(
+        r#"
+UPDATE runs
+SET opencode_session_id=?2,
+    last_active_at = CASE
+      WHEN last_active_at IS NULL OR last_active_at < ?3 THEN ?3
+      ELSE last_active_at
+    END
+WHERE id=?1
+"#,
+    )
+    .bind(run_id)
+    .bind(opencode_session_id)
+    .bind(ts)
     .execute(pool)
     .await?;
     Ok(())
@@ -456,6 +490,7 @@ pub struct RunRow {
     pub id: String,
     pub host_id: String,
     pub tool: String,
+    pub opencode_session_id: Option<String>,
     pub cwd: String,
     pub status: String,
     pub started_at: String,
@@ -476,6 +511,7 @@ SELECT
   id,
   host_id,
   tool,
+  opencode_session_id,
   cwd,
   status,
   started_at,
@@ -504,6 +540,7 @@ SELECT
   id,
   host_id,
   tool,
+  opencode_session_id,
   cwd,
   status,
   started_at,
@@ -534,6 +571,7 @@ SELECT
   id,
   host_id,
   tool,
+  opencode_session_id,
   cwd,
   status,
   started_at,

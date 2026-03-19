@@ -9,6 +9,7 @@ This document defines the minimal wire protocol between:
 
 - `host_id`: unique host machine identifier
 - `run_id`: unique run/session identifier (scoped globally)
+- `opencode_session_id`: optional OpenCode-native session identifier (stable across continued/forked OpenCode runs)
 - `seq`: monotonically increasing per `run_id` event sequence
 - `input_id`: client-generated UUID to make inputs idempotent
 
@@ -63,6 +64,18 @@ Notes:
 - Optional:
   - `runner_mode`: `tui | structured` (best-effort; used by some tools like Codex)
   - `mcp_args`: array of strings (when `runner_mode=structured`, the tool-specific server args)
+  - `opencode_session_id`: OpenCode-native session identifier when already known at run start; may be `null` initially and arrive later via `run.metadata`
+
+### `run.metadata`
+
+Additive metadata update for an existing run. Clients that do not care about these fields can ignore this event.
+
+`data`:
+
+- Optional:
+  - `tool`: tool identifier for the metadata source (for OpenCode structured runs this is `opencode`)
+  - `mode`: best-effort runner mode (for OpenCode structured runs this is `structured`)
+  - `opencode_session_id`: OpenCode-native session identifier discovered after `run.started`
 
 ### `run.output`
 

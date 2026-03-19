@@ -5,6 +5,8 @@ use regex::Regex;
 use relay_protocol::{WsEnvelope, redaction::Redactor};
 use serde_json::Value as JsonValue;
 use serde_json::json;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::fs;
 use std::{
     collections::HashMap,
@@ -232,6 +234,28 @@ impl Run {
     fn next_seq(&self) -> i64 {
         self.seq.fetch_add(1, Ordering::SeqCst) + 1
     }
+}
+
+fn emit_run_metadata(
+    events: &broadcast::Sender<WsEnvelope>,
+    host_id: &str,
+    run: &Run,
+    data: JsonValue,
+) {
+    let mut env = WsEnvelope::new("run.metadata", data);
+    env.host_id = Some(host_id.to_string());
+    env.run_id = Some(run.run_id.clone());
+    env.seq = Some(run.next_seq());
+    let _ = events.send(env);
+}
+
+#[cfg(unix)]
+fn signal_opencode_process_group(pid: i32, signal: nix::sys::signal::Signal) {
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+
+    let _ = kill(Pid::from_raw(-pid), signal);
+    let _ = kill(Pid::from_raw(pid), signal);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,6 +587,8 @@ async fn opencode_submit_prompt(
     child_cmd.stdin(Stdio::null());
     child_cmd.stdout(Stdio::piped());
     child_cmd.stderr(Stdio::piped());
+    #[cfg(unix)]
+    child_cmd.process_group(0);
 
     let mut child = child_cmd.spawn().context("spawn opencode run")?;
     let pid = child.id() as i32;
@@ -621,6 +647,16 @@ async fn opencode_submit_prompt(
                     if let Ok(mut cur) = run.opencode_session_id.lock() {
                         if cur.as_deref() != Some(sid) {
                             *cur = Some(sid.to_string());
+                            emit_run_metadata(
+                                &events,
+                                &host_id,
+                                &run,
+                                json!({
+                                    "tool": "opencode",
+                                    "mode": "structured",
+                                    "opencode_session_id": sid,
+                                }),
+                            );
                         }
                     }
                 }
@@ -1350,6 +1386,7 @@ impl RunManager {
                 "command": cmd,
                 "mode": "structured",
                 "model": model.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                "opencode_session_id": JsonValue::Null,
                 "permission_env_set": std::env::var_os("OPENCODE_PERMISSION").is_some(),
                 "permission_mode": if std::env::var_os("OPENCODE_PERMISSION").is_some() {
                     "env"
@@ -2109,6 +2146,27 @@ impl RunManager {
         } else if is_opencode_structured {
             let prompt = text.trim_end_matches(&['\r', '\n'][..]).to_string();
             if !prompt.trim().is_empty() {
+                #[cfg(unix)]
+                {
+                    use nix::sys::signal::Signal;
+
+                    let active_pid = run.opencode_active_pid.lock().ok().and_then(|pid| *pid);
+                    if let Some(active_pid) = active_pid {
+                        let mut env = WsEnvelope::new(
+                            "run.output",
+                            json!({
+                                "stream": "stderr",
+                                "text": "opencode previous prompt still active; interrupting it before sending the new input\n"
+                            }),
+                        );
+                        env.host_id = Some(self.host_id.clone());
+                        env.run_id = Some(run.run_id.clone());
+                        env.seq = Some(run.next_seq());
+                        let _ = self.events.send(env);
+                        signal_opencode_process_group(active_pid, Signal::SIGINT);
+                    }
+                }
+
                 let run2 = run.clone();
                 let redactor = self.redactor.clone();
                 let events = self.events.clone();
@@ -2405,8 +2463,7 @@ impl RunManager {
         if run.opencode_structured {
             #[cfg(unix)]
             {
-                use nix::sys::signal::{Signal, kill};
-                use nix::unistd::Pid;
+                use nix::sys::signal::Signal;
 
                 let sig = match signal {
                     "kill" => Signal::SIGKILL,
@@ -2416,7 +2473,7 @@ impl RunManager {
 
                 let pid = run.opencode_active_pid.lock().ok().and_then(|pid| *pid);
                 if let Some(pid) = pid {
-                    let _ = kill(Pid::from_raw(pid), sig);
+                    signal_opencode_process_group(pid, sig);
                 }
             }
 
