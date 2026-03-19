@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "change_id": "golutra-analysis",
+  "events": [
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T09:38:08Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 1,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    }
+  ],
+  "updated_at": "2026-03-14T09:38:08Z"
+}
