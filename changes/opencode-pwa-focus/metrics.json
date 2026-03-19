@@ -110,7 +110,24 @@
         "strict_validate": "ok",
         "allow_fail": false
       }
+    },
+    {
+      "type": "evidence",
+      "timestamp": "2026-03-19T07:18:20Z",
+      "payload": {
+        "generated_at": "2026-03-19T07:18:20Z",
+        "created": 5,
+        "strict_validate": "ok",
+        "allow_fail": false
+      }
+    },
+    {
+      "type": "state_written",
+      "timestamp": "2026-03-19T07:18:20Z",
+      "payload": {
+        "path": "changes/opencode-pwa-focus/STATE.md"
+      }
     }
   ],
-  "updated_at": "2026-03-19T07:05:17Z"
+  "updated_at": "2026-03-19T07:18:20Z"
 }

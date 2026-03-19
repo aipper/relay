@@ -1,0 +1,42 @@
+{
+  "generated_at": "2026-03-19T07:18:20Z",
+  "ws_root": "/home/ab/code/relay",
+  "change_id": "opencode-pwa-focus",
+  "branch": "change/opencode-pwa-focus",
+  "phase": "dev",
+  "tasks": {
+    "total": 13,
+    "done": 7,
+    "unchecked": 6,
+    "hasCheckboxes": true
+  },
+  "bindings": {
+    "contractRow": "Req_ID=WEB-073, Req_ID=WEB-074, Req_ID=WEB-075, Req_ID=HST-022",
+    "planFile": "plan/2026-03-19_11-02-10-opencode-pwa-focus.md",
+    "evidencePaths": [
+      ".agentdocs/tmp/opencode-pwa-focus-feasibility-20260319.md",
+      "changes/opencode-pwa-focus/evidence/change-status-20260319-070517Z.json",
+      "changes/opencode-pwa-focus/evidence/change-validate-strict-20260319-070517Z.json",
+      "changes/opencode-pwa-focus/evidence/aiws-validate-stamp-20260319-070517Z.json",
+      "changes/opencode-pwa-focus/evidence/change-sync-stamp-20260319-070517Z.json",
+      "changes/opencode-pwa-focus/evidence/delivery-summary-20260319-070517Z.md"
+    ]
+  },
+  "truth": {
+    "baseline": {
+      "label": "sync",
+      "at": "2026-03-19T03:12:48Z"
+    },
+    "drift_files": []
+  },
+  "evidence": {
+    "total": 6,
+    "exists": 6,
+    "missing": 0,
+    "tmp": 1,
+    "persistent": 5,
+    "other": 0,
+    "absolute": 0
+  },
+  "note": "aiws change evidence status snapshot; does not contain secrets."
+}

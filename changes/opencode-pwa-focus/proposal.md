@@ -11,7 +11,7 @@
 - Additional_Req_IDs: WEB-074, WEB-075, HST-022
 - Contract_Row: Req_ID=WEB-073, Req_ID=WEB-074, Req_ID=WEB-075, Req_ID=HST-022
 - Plan_File: plan/2026-03-19_11-02-10-opencode-pwa-focus.md
-- Evidence_Path(s): .agentdocs/tmp/opencode-pwa-focus-feasibility-20260319.md, changes/opencode-pwa-focus/evidence/change-status-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/change-validate-strict-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/aiws-validate-stamp-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/change-sync-stamp-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/delivery-summary-20260319-070517Z.md
+- Evidence_Path(s): .agentdocs/tmp/opencode-pwa-focus-feasibility-20260319.md, changes/opencode-pwa-focus/evidence/change-status-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/change-validate-strict-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/aiws-validate-stamp-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/change-sync-stamp-20260319-070517Z.json, changes/opencode-pwa-focus/evidence/delivery-summary-20260319-070517Z.md, changes/opencode-pwa-focus/evidence/change-status-20260319-071820Z.json, changes/opencode-pwa-focus/evidence/change-validate-strict-20260319-071820Z.json, changes/opencode-pwa-focus/evidence/aiws-validate-stamp-20260319-071820Z.json, changes/opencode-pwa-focus/evidence/change-sync-stamp-20260319-071820Z.json, changes/opencode-pwa-focus/evidence/delivery-summary-20260319-071820Z.md
 
 ## 目标与非目标
 

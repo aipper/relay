@@ -1,6 +1,6 @@
 # AIWS STATE: opencode-pwa-focus
 
-Generated: 2026-03-19T07:01:24Z
+Generated: 2026-03-19T07:18:20Z
 
 ## Context
 - Worktree: `/home/ab/code/relay`
@@ -16,7 +16,7 @@ Generated: 2026-03-19T07:01:24Z
 - Plan_File: `plan/2026-03-19_11-02-10-opencode-pwa-focus.md`
 
 ## Evidence
-- Declared: `1` (exists=`1`, missing=`0`, persistent=`0`, tmp=`1`)
+- Declared: `11` (exists=`11`, missing=`0`, persistent=`10`, tmp=`1`)
 
 ## Blockers (strict)
 - (none)
