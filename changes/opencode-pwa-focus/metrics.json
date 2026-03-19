@@ -139,7 +139,24 @@
           "REQUIREMENTS.md"
         ]
       }
+    },
+    {
+      "type": "evidence",
+      "timestamp": "2026-03-19T10:46:58Z",
+      "payload": {
+        "generated_at": "2026-03-19T10:46:58Z",
+        "created": 5,
+        "strict_validate": "ok",
+        "allow_fail": false
+      }
+    },
+    {
+      "type": "state_written",
+      "timestamp": "2026-03-19T10:46:59Z",
+      "payload": {
+        "path": "changes/opencode-pwa-focus/STATE.md"
+      }
     }
   ],
-  "updated_at": "2026-03-19T10:37:43Z"
+  "updated_at": "2026-03-19T10:46:59Z"
 }
