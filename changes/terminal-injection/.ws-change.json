@@ -1,0 +1,43 @@
+{
+  "ws_change_version": 1,
+  "id": "terminal-injection",
+  "title": "terminal-injection",
+  "created_at": "2026-03-14T09:53:05Z",
+  "base_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1773466667,
+      "sha256": "4714c3edb74e3e396499f328958642f207b1208c57b64f59c1b55af3da95fff2"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1773466667,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773466667,
+      "sha256": "660a0f9729a823a1df2462d441d23b3b8cf166d4b6b2a0b5b6c919b71392916f"
+    }
+  },
+  "synced_at": "2026-03-14T09:53:05Z",
+  "synced_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1773466667,
+      "sha256": "4714c3edb74e3e396499f328958642f207b1208c57b64f59c1b55af3da95fff2"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1773466667,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773466667,
+      "sha256": "660a0f9729a823a1df2462d441d23b3b8cf166d4b6b2a0b5b6c919b71392916f"
+    }
+  },
+  "sync_events": [
+    {
+      "synced_at": "2026-03-14T09:53:05Z",
+      "baseline_from": "creation",
+      "baseline_at": "2026-03-14T09:53:05Z",
+      "changed": []
+    }
+  ]
+}

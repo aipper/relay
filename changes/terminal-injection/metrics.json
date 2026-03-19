@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "change_id": "terminal-injection",
+  "events": [
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T09:50:59Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 1,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T09:51:20Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 3,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T09:52:48Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 11,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "truth_sync",
+      "timestamp": "2026-03-14T09:53:05Z",
+      "payload": {
+        "synced_at": "2026-03-14T09:53:05Z",
+        "baseline_from": "creation",
+        "baseline_at": "2026-03-14T09:53:05Z",
+        "changed_files": []
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T09:55:45Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 15,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T09:58:00Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 11,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T09:58:58Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 11,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T10:01:13Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 7,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T10:02:19Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 11,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T10:03:44Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 4,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T10:04:31Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 3,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T10:05:28Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 2,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-03-14T10:06:19Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 2,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    }
+  ],
+  "updated_at": "2026-03-14T10:06:19Z"
+}
