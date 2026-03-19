@@ -1,0 +1,56 @@
+{
+  "ws_change_version": 1,
+  "id": "pwa-interaction-v1",
+  "title": "pwa-interaction-v1",
+  "created_at": "2026-03-14T11:41:03Z",
+  "base_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1773466667,
+      "sha256": "4714c3edb74e3e396499f328958642f207b1208c57b64f59c1b55af3da95fff2"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1773466667,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773466667,
+      "sha256": "660a0f9729a823a1df2462d441d23b3b8cf166d4b6b2a0b5b6c919b71392916f"
+    }
+  },
+  "base_branch": "main",
+  "base_branch_set_at": "2026-03-14T11:54:45Z",
+  "synced_at": "2026-03-18T15:19:30Z",
+  "synced_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1773738795,
+      "sha256": "64b6de5f7473ab4fa6fed295187eb8571fd0147c336afe8bf4dea44ae0df3b13"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1773466667,
+      "sha256": "194aa99cd1d9f3779cd660e22edfeb361a4e367a9afbff174c24f3663c290f6d"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773847147,
+      "sha256": "80e1d9e9401496e428f622b35d73690a0abe0c13795d40c19b36dc868b231579"
+    }
+  },
+  "sync_events": [
+    {
+      "synced_at": "2026-03-18T15:19:30Z",
+      "baseline_from": "creation",
+      "baseline_at": "2026-03-14T11:41:03Z",
+      "changed": [
+        {
+          "file": "AI_PROJECT.md",
+          "from": "4714c3edb74e3e396499f328958642f207b1208c57b64f59c1b55af3da95fff2",
+          "to": "64b6de5f7473ab4fa6fed295187eb8571fd0147c336afe8bf4dea44ae0df3b13"
+        },
+        {
+          "file": "REQUIREMENTS.md",
+          "from": "660a0f9729a823a1df2462d441d23b3b8cf166d4b6b2a0b5b6c919b71392916f",
+          "to": "80e1d9e9401496e428f622b35d73690a0abe0c13795d40c19b36dc868b231579"
+        }
+      ]
+    }
+  ]
+}

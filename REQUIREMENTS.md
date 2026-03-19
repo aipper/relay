@@ -187,6 +187,7 @@
 - 提供会话消息 API（用于 web 的结构化消息视图）：`GET /sessions/:id/messages?limit=200`
   - 返回按时间排序的消息列表（MVP：events 表的视图）。
   - 对 `tool.call` / `tool.result` / `run.permission_requested` 等事件，响应中可选携带结构化 `data` 字段（来自 events.data_json 的解析结果）。
+  - 支持可选 `include_output=false`，用于事件/卡片视图抑制海量 `run.output` 回放，仅保留结构化事件。
 - 提供 server 日志 tail（排障）：`GET /server/logs/tail?lines=200&max_bytes=200000`（需要 JWT；默认 docker 写入 `/data/relay-server.log`，可用 `SERVER_LOG_PATH` 覆盖）。
 - 提供密码哈希生成能力（Argon2），用于创建可登录的凭据（见 README 的 `--hash-password` 用法）。
 
@@ -205,6 +206,7 @@
     - 支持通过 `RELAY_OPENCODE_MODE=structured|tui` 控制 opencode 启动方式（默认 `structured`）。
     - `structured`：
       - hostd 在收到 `run.send_input` 后调用 `opencode run --format json`（必要时带 `--session <id>` 续聊）。
+      - structured 调用必须与用户全局 `opencode` 配置隔离：使用临时 `XDG_CONFIG_HOME`，强制 `share=disabled`，移除 `plugin`，并避免继承交互式 stdin，防止只返回 share 链接或挂起。
       - 解析 opencode 的 JSONL 事件并映射为 relay 事件：
         - `text` → `run.output`（markdown 原文）
         - `tool_use` → `tool.call` + `tool.result`（args/result 存在 `data_json`，供 web 富渲染）
@@ -214,6 +216,8 @@
       - `run.started`（opencode structured）需携带权限模式元信息（用于 web 展示，不提供编辑）：
         - `permission_env_set`：布尔值，表示是否用户显式设置了 `OPENCODE_PERMISSION`。
         - `permission_mode`：`env | relay_auto_allow_all | inherit`。
+        - `model`：当本次运行显式指定模型时，记录本 run 使用的 `provider/model`。
+      - hostd 应能从宿主机 `opencode` 配置读取可用模型清单与默认模型，并通过 host info 暴露给 web/cli；读取失败时返回错误摘要而不是伪造模型列表。
       - 结构化事件的敏感信息处理：
         - `tool.call.args` 与 `tool.result.result.raw_part/title/output` 需经过 redaction 后再进入事件流/落库（避免 secrets 泄露）。
         - `tool.result.duration_ms` 可选；未知时不应伪造为 0。
@@ -230,6 +234,7 @@
 ### cli（Bun）
 
 - 作为本地命令包装层，通过 hostd 启动 runs。
+- 远程/本地启动 run 时，CLI 应支持透传可选 `model` 字段到 hostd local API / WS RPC；当前至少用于 `opencode` structured runs 的 per-run model override。
 - 提供登录能力（示例：`bun run dev login ...`）。
 - 提供通过 WebSocket 发送远程输入能力（示例：`bun run dev ws-send-input ...`）。
 - 安装体验（macOS/Linux）：
@@ -303,6 +308,7 @@
   - 会话列表不显示未读更新提示。
   - 顶部显示连接状态（圆点 + 文字）；WebSocket 断开时启用 10s 轮询刷新 runs/hosts。
   - 会话详情提供“事件 / 终端”顶部标签切换；默认进入“事件”视图；终端仅用于查看原始上下文。
+  - 事件视图与终端视图必须分离 output 订阅策略：对 TUI 工具（如 `codex/claude/iflow/gemini`），事件视图默认不请求/不订阅海量 `run.output`；仅在终端视图或明确需要 output 的模式下才回放/订阅输出。
   - 移动端（<=640）打开会话时，默认始终进入“事件（会话卡片流）”视图（对齐 hapi 的 structured-first 体验），不得自动进入“终端”视图。
   - 移动端在以下场景必须回到“事件（会话卡片流）”作为优先视图：首次进入会话、刷新后恢复会话、从列表切换到其他会话。
   - 移动端“终端”入口为次级入口，仅在用户主动点击“终端/输出”入口后进入；再次切换会话时不继承到新会话。
@@ -337,6 +343,8 @@
   - 事件流以“turn（用户输入）→ parts（工具/系统/assistant 输出）”的结构展示（对齐 opencode share 的观感）；`tool.call/tool.result` 优先展示结构化 JSON（来自 messages API 的 `data` 字段），并可展开查看详情。
   - 事件视图默认不展示海量 `run.output`（避免淹没结构化事件）；默认仅对 `tool=opencode` 的会话保留 `run.output` 作为结构化 text 的承载。
   - 事件视图顶部提供“输出摘要（tail）”与“打开终端”入口；TUI 输出默认仅在终端视图查看。
+  - “启动运行”页应根据所选 host 动态展示当前可用的受支持工具（至少 `codex` / `claude` / `iflow` / `opencode`）；若 host 提供 `opencode` 模型列表，则 UI 提供模型下拉，否则沿用 host 默认模型。
+  - “启动运行”页应记住每个 host 最近一次成功启动的 `cwd`，并在路径不存在/不是目录时给出面向用户的明确错误提示。
   -（hapi 对齐：卡片可操作性）移动端会话卡片流中，结构化卡片需要提供可操作 footer（参考 hapi 的 ToolCard/PermissionFooter/AskUserQuestionFooter 体验）：
     - `tool.call` / `tool.result`：以 ToolCard 展示 tool 名称、参数摘要、运行状态（pending/success/error）、耗时；支持“展开/折叠详情”和“复制 JSON/文本”。
     - `run.permission_requested`：以 PermissionCard 展示 `op_tool` / `op_args_summary` / 风险提示；footer 提供 approve/deny。

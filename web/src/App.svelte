@@ -1,7 +1,25 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import XtermTerminal from "./XtermTerminal.svelte";
+  import BlocksRenderer from "./lib/components/BlocksRenderer.svelte";
+  import { reduceToBlocks } from "./lib/blocks/reduce";
+  import { reconcileBlocks } from "./lib/blocks/reconcile";
+  import type { UiBlock } from "./lib/blocks/types";
   import uiVersionMeta from "./ui-version.json";
+
+  // Polyfill: crypto.randomUUID is unavailable on non-secure (http://) contexts.
+  const uuid: () => string =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? () => crypto.randomUUID()
+      : () => {
+          // RFC4122 v4 fallback using crypto.getRandomValues
+          const b = new Uint8Array(16);
+          (typeof crypto !== "undefined" ? crypto : ({} as Crypto)).getRandomValues(b);
+          b[6] = (b[6] & 0x0f) | 0x40;
+          b[8] = (b[8] & 0x3f) | 0x80;
+          const h = [...b].map((v) => v.toString(16).padStart(2, "0")).join("");
+          return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+        };
 
   type Health = { name: string; version: string };
   type LoginResponse = { access_token: string };
@@ -52,6 +70,16 @@
     online: boolean;
   };
 
+  type HostToolStatus = {
+    tool: string;
+    bin?: string | null;
+    ok: boolean;
+    error?: string | null;
+    models?: string[] | null;
+    default_model?: string | null;
+    models_error?: string | null;
+  };
+
   type WsEnvelope = {
     type: string;
     ts: string;
@@ -62,13 +90,22 @@
   };
 
   const uiVersion = Number((uiVersionMeta as { uiVersion?: number }).uiVersion ?? 0);
+  const START_CWD_STORAGE_KEY = "relay.startCwdByHost.v1";
 
   const DEFAULT_SESSION_LIMIT = 200;
   const WS_BATCH_BUDGET_MS = 10;
   const OUTPUT_TUI_RENDER_THROTTLE_MS = 200;
 
-  const browserOrigin =
-    typeof window !== "undefined" && typeof window.location?.origin === "string" ? window.location.origin : "";
+  function inferDefaultApiBaseUrl(): string {
+    if (typeof window === "undefined") return "http://127.0.0.1:8787";
+    const host = window.location?.hostname || "127.0.0.1";
+    const proto = window.location?.protocol === "https:" ? "https" : "http";
+    // If the app is hosted on the server port already, use same-origin.
+    if (window.location?.port === "8787") return window.location.origin;
+    return `${proto}://${host}:8787`;
+  }
+
+  const defaultApiBaseUrl = inferDefaultApiBaseUrl();
 
   let useCustomServer = false;
   let customBaseUrl = "";
@@ -76,14 +113,12 @@
     const savedBaseUrl = localStorage.getItem("relay.baseUrl") ?? "";
     const savedUseCustom = localStorage.getItem("relay.useCustomServer") === "1";
     customBaseUrl = savedBaseUrl;
-    // Prefer current page (same-origin) by default; only opt into a custom server explicitly.
-    useCustomServer = savedUseCustom || (!browserOrigin && Boolean(savedBaseUrl));
+    // If user configured a baseUrl, treat it as preferred.
+    useCustomServer = savedUseCustom || Boolean(savedBaseUrl);
   }
 
   $: apiBaseUrl =
-    (useCustomServer ? customBaseUrl.trim() : browserOrigin) ||
-    customBaseUrl.trim() ||
-    "http://127.0.0.1:8787";
+    (useCustomServer ? customBaseUrl.trim() : "") || customBaseUrl.trim() || defaultApiBaseUrl;
 
   let username = "admin";
   let password = "";
@@ -165,6 +200,9 @@
   let lastSeenApprovalRequest: Record<string, string> = {};
   let lastError = "";
   let outputByRun: Record<string, string> = {};
+  let runReadyByRun: Record<string, boolean> = {};
+  let wsSubscribedRunId = "";
+  let wsSubscribedIncludeOutput = true;
   let awaitingByRun: Record<
     string,
     | {
@@ -270,6 +308,8 @@
   let chatInputText = "";
   let chatInputEl: HTMLTextAreaElement | null = null;
 
+  let uiBlocks: UiBlock[] = [];
+
   type OutputMatch = {
     id: string;
     line: number;
@@ -282,12 +322,47 @@
   let toastText = "";
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const START_TOOL_OPTIONS = [
+    { value: "codex", label: "codex" },
+    { value: "claude", label: "claude" },
+    { value: "iflow", label: "iflow" },
+    { value: "opencode", label: "opencode" },
+  ] as const;
+  type StartToolOption = (typeof START_TOOL_OPTIONS)[number];
+
   let startHostId = "host-dev";
-  let startTool = "codex";
-  let startCmd = "echo Proceed?; cat";
+  let startTool: StartToolOption["value"] = "codex";
+  // Leave empty to run the tool's default entrypoint.
+  let startCmd = "";
   let startCwd = "";
   let startError = "";
+  let startCwdByHost: Record<string, string> = {};
+  let startHostToolsById: Record<string, HostToolStatus[] | undefined> = {};
+  let startHostToolsLoadingById: Record<string, boolean | undefined> = {};
+  let currentStartToolOptions: readonly StartToolOption[] = [...START_TOOL_OPTIONS];
+  let currentStartToolStatuses: HostToolStatus[] | null = null;
+  let currentStartHostToolsLoading = false;
+  let currentStartOpencodeModels: string[] = [];
+  let currentStartOpencodeDefaultModel = "";
+  let currentStartOpencodeModelsError = "";
+  let lastStartToolsForceRefreshKey = "";
+  let lastSuggestedStartCwd = "";
   let recentSessions: RunRow[] = [];
+  let startOpencodeModel = "";
+
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem(START_CWD_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === "object") {
+          startCwdByHost = parsed as Record<string, string>;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const pendingRpc = new Map<string, (msg: WsEnvelope) => void>();
 
@@ -339,8 +414,112 @@
     }
   }
 
+  function persistStartCwdByHost() {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(START_CWD_STORAGE_KEY, JSON.stringify(startCwdByHost));
+    } catch {
+      // ignore
+    }
+  }
+
+  function suggestedStartCwdForHost(hostId: string): string {
+    const saved = startCwdByHost[hostId]?.trim();
+    if (saved) return saved;
+    const recent = runs.find((run) => run.host_id === hostId && run.cwd?.trim());
+    if (recent?.cwd?.trim()) return recent.cwd.trim();
+    const recentSession = recentSessions.find((run) => run.host_id === hostId && run.cwd?.trim());
+    if (recentSession?.cwd?.trim()) return recentSession.cwd.trim();
+    return "";
+  }
+
+  function rememberStartCwd(hostId: string, cwd: string) {
+    const normalized = cwd.trim();
+    if (!hostId.trim() || !normalized) return;
+    startCwdByHost = { ...startCwdByHost, [hostId.trim()]: normalized };
+    persistStartCwdByHost();
+  }
+
+  function humanizeStartError(message: string): string {
+    const trimmed = message.trim();
+    if (trimmed.startsWith("run cwd does not exist:")) {
+      const badPath = trimmed.slice("run cwd does not exist:".length).trim();
+      const suggestion = suggestedStartCwdForHost(startHostId) || "/home/ab/test";
+      return `启动失败：主机路径不存在：${badPath}。请填写远程主机上的真实目录，例如 ${suggestion}。`;
+    }
+    if (trimmed.startsWith("run cwd is not a directory:")) {
+      const badPath = trimmed.slice("run cwd is not a directory:".length).trim();
+      return `启动失败：${badPath} 不是目录，请改成远程主机上的项目目录。`;
+    }
+    return trimmed;
+  }
+
+  function applySuggestedStartCwd(force = false) {
+    const suggested = suggestedStartCwdForHost(startHostId);
+    const current = startCwd.trim();
+    if (force || !current || current === lastSuggestedStartCwd) {
+      startCwd = suggested;
+    }
+    lastSuggestedStartCwd = suggested;
+  }
+
+  $: if (startHostId) {
+    applySuggestedStartCwd(false);
+  }
+
   function isRecord(v: unknown): v is Record<string, unknown> {
     return Boolean(v) && typeof v === "object";
+  }
+
+  function parseHostToolStatuses(value: unknown): HostToolStatus[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((item) => (isRecord(item) ? item : null))
+      .filter(Boolean)
+        .map((item) => ({
+          tool: typeof item!.tool === "string" ? item!.tool : "",
+          bin: typeof item!.bin === "string" ? item!.bin : null,
+          ok: Boolean(item!.ok),
+          error: typeof item!.error === "string" ? item!.error : null,
+          models: Array.isArray(item!.models)
+            ? item!.models.filter((v): v is string => typeof v === "string" && Boolean(v.trim()))
+            : null,
+          default_model: typeof item!.default_model === "string" ? item!.default_model : null,
+          models_error: typeof item!.models_error === "string" ? item!.models_error : null,
+        }))
+        .filter((item) => Boolean(item.tool));
+  }
+
+  function currentOpencodeToolStatus(): HostToolStatus | null {
+    const found = currentStartToolStatuses?.find((item) => item.tool === "opencode") ?? null;
+    return found;
+  }
+
+  function syncStartOpencodeModelForHost() {
+    const status = currentOpencodeToolStatus();
+    const options = status?.models?.filter((item) => item.trim()) ?? [];
+    const defaultModel = status?.default_model?.trim() ?? "";
+    if (!options.length) {
+      startOpencodeModel = defaultModel;
+      return;
+    }
+    if (startOpencodeModel && options.includes(startOpencodeModel)) return;
+    startOpencodeModel = defaultModel && options.includes(defaultModel) ? defaultModel : options[0] ?? "";
+  }
+
+  function dynamicStartToolOptionsForHost(hostId: string): StartToolOption[] {
+    const statuses = startHostToolsById[hostId];
+    if (!statuses) return [...START_TOOL_OPTIONS];
+    const allowed = new Set(statuses.filter((item) => item.ok).map((item) => item.tool));
+    return START_TOOL_OPTIONS.filter((option) => allowed.has(option.value));
+  }
+
+  function syncStartToolSelectionForHost(hostId: string) {
+    const options = dynamicStartToolOptionsForHost(hostId);
+    if (options.length === 0) return;
+    if (!options.some((option) => option.value === startTool)) {
+      startTool = options[0]!.value;
+    }
   }
 
   function basename(path: string): string {
@@ -479,11 +658,33 @@
 
   function awaitingIsPrompt(a: {
     reason?: string;
+    request_id?: string;
     op_tool?: string;
   }): boolean {
     const reason = (a.reason ?? "").trim().toLowerCase();
+    const reqId = (a.request_id ?? "").trim();
     const opTool = (a.op_tool ?? "").trim();
-    return reason === "prompt" && !opTool;
+    return reason === "prompt" && !opTool && !reqId;
+  }
+
+  function promptWantsYesNo(prompt?: string | null): boolean {
+    const p = (prompt ?? "").trim().toLowerCase();
+    if (!p) return false;
+    if (p.includes("proceed?")) return true;
+    if (p.includes("continue?")) return true;
+    if (p.includes("confirm")) return true;
+    if (p.includes("(y/n)")) return true;
+    if (p.includes("[y/n]")) return true;
+    if (p.includes("[y/n]")) return true;
+    return /\by\s*\/\s*n\b/i.test(p);
+  }
+
+  function awaitingWantsYesNo(a: { reason?: string; op_tool?: string; request_id?: string; prompt?: string }): boolean {
+    if ((a.op_tool ?? "").trim()) return false;
+    const reason = (a.reason ?? "").trim().toLowerCase();
+    if (reason !== "prompt") return false;
+    // If it's a prompt that looks like a yes/no confirmation (e.g. "Proceed?"), treat it like an approval.
+    return promptWantsYesNo((a as unknown as { prompt?: string }).prompt ?? "");
   }
 
   function awaitingIsApproval(a: {
@@ -530,7 +731,7 @@
     const started = performance.now();
 
     const shouldCaptureEvents = token && view === "settings";
-    const shouldAppendMessages = token && view === "sessions" && sessionDetailTab === "messages" && Boolean(selectedRunId);
+    const shouldAppendMessages = token && view === "sessions" && Boolean(selectedRunId);
     const selectedId = selectedRunId;
 
     let nextRuns = runs;
@@ -543,6 +744,10 @@
     let nextOutputByRun = outputByRun;
     let selectedOutput = selectedId ? outputByRun[selectedId] ?? "" : "";
     let outputChanged = false;
+    let outputByRunChanged = false;
+
+    let nextRunReadyByRun = runReadyByRun;
+    let readyChanged = false;
     const pendingOutputChunks: string[] = [];
     const pendingPausedChunks: string[] = [];
     const pendingPausedTuiChunks: string[] = [];
@@ -601,46 +806,78 @@
         }
       }
 
-      if (msg.run_id && msg.type === "run.output" && msg.run_id === selectedId) {
-        const raw = dataString(msg, "text") ?? "";
-        const seq = typeof msg.seq === "number" ? msg.seq : undefined;
-        if (raw) {
-          // Auto-detect: if we see cursor movement / clear-screen ANSI, switch to TUI snapshot mode.
-          if (selectedId && selectedMode === "log" && looksLikeTuiAnsi(raw)) {
-            if (!outputModeChanged) {
-              nextOutputModeByRun = { ...nextOutputModeByRun };
-              outputModeChanged = true;
-            }
-            nextOutputModeByRun[selectedId] = "tui";
-            selectedMode = "tui";
-            tuiState = newTerminalState();
-            tuiRunId = selectedId;
-            selectedOutput = "";
-          }
+      if (msg.run_id && msg.type === "run.ready") {
+        if (!readyChanged) {
+          nextRunReadyByRun = { ...nextRunReadyByRun };
+          readyChanged = true;
+        }
+        nextRunReadyByRun[msg.run_id] = true;
+      }
 
-          if (selectedMode === "tui") {
-            if (typeof seq === "number" && seq > 0 && seq <= xtermAppliedSeq) {
-              // already applied (e.g. after backfill)
-            } else if (xtermBackfillRunId === selectedId) {
-              xtermBackfillPending.push({ seq, text: raw });
-            } else if (!outputAutoScroll) {
-              pendingPausedTuiChunks.push(raw);
-              if (typeof seq === "number") outputPausedPendingMaxSeq = Math.max(outputPausedPendingMaxSeq, seq);
-            } else if (xtermRef && xtermRunId === selectedId) {
-              pendingTuiWriteChunks.push(raw);
-              if (typeof seq === "number") pendingTuiWriteMaxSeq = Math.max(pendingTuiWriteMaxSeq, seq);
+      if (msg.run_id && msg.type === "run.output") {
+        const runId = msg.run_id;
+        const raw0 = dataString(msg, "text") ?? "";
+        const seq = typeof msg.seq === "number" ? msg.seq : undefined;
+        const raw = codexStructuredEventText(raw0) ?? raw0;
+        if (raw) {
+          if (!readyChanged) {
+            nextRunReadyByRun = { ...nextRunReadyByRun };
+            readyChanged = true;
+          }
+          nextRunReadyByRun[runId] = true;
+          if (runId === selectedId) {
+            // Auto-detect: if we see cursor movement / clear-screen ANSI, switch to TUI snapshot mode.
+            if (selectedId && selectedMode === "log" && looksLikeTuiAnsi(raw)) {
+              if (!outputModeChanged) {
+                nextOutputModeByRun = { ...nextOutputModeByRun };
+                outputModeChanged = true;
+              }
+              nextOutputModeByRun[selectedId] = "tui";
+              selectedMode = "tui";
+              tuiState = newTerminalState();
+              tuiRunId = selectedId;
+              selectedOutput = "";
+            }
+
+            if (selectedMode === "tui") {
+              if (typeof seq === "number" && seq > 0 && seq <= xtermAppliedSeq) {
+                // already applied (e.g. after backfill)
+              } else if (xtermBackfillRunId === selectedId) {
+                xtermBackfillPending.push({ seq, text: raw });
+              } else if (!outputAutoScroll) {
+                pendingPausedTuiChunks.push(raw);
+                if (typeof seq === "number") outputPausedPendingMaxSeq = Math.max(outputPausedPendingMaxSeq, seq);
+              } else if (xtermRef && xtermRunId === selectedId) {
+                pendingTuiWriteChunks.push(raw);
+                if (typeof seq === "number") pendingTuiWriteMaxSeq = Math.max(pendingTuiWriteMaxSeq, seq);
+              } else {
+                xtermPreReady = truncateTail(`${xtermPreReady}${raw}`, 500_000);
+                if (typeof seq === "number") xtermPreReadyMaxSeq = Math.max(xtermPreReadyMaxSeq, seq);
+              }
             } else {
-              xtermPreReady = truncateTail(`${xtermPreReady}${raw}`, 500_000);
-              if (typeof seq === "number") xtermPreReadyMaxSeq = Math.max(xtermPreReadyMaxSeq, seq);
+              const text = sanitizeTerminalOutput(raw);
+              if (text) {
+                if (outputAutoScroll) {
+                  pendingOutputChunks.push(text);
+                  outputChanged = true;
+                } else {
+                  pendingPausedChunks.push(text);
+                }
+              }
             }
           } else {
-            const text = sanitizeTerminalOutput(raw);
-            if (text) {
-              if (outputAutoScroll) {
-                pendingOutputChunks.push(text);
-                outputChanged = true;
-              } else {
-                pendingPausedChunks.push(text);
+            // Keep a small tail buffer for non-selected sessions so switching between
+            // runs doesn't require a full HTTP backfill to see recent output.
+            const mode: "log" | "tui" = nextOutputModeByRun[runId] ?? "log";
+            if (mode === "log") {
+              const text = sanitizeTerminalOutput(raw);
+              if (text) {
+                if (!outputByRunChanged) {
+                  nextOutputByRun = { ...nextOutputByRun };
+                  outputByRunChanged = true;
+                }
+                const cur = nextOutputByRun[runId] ?? "";
+                nextOutputByRun[runId] = truncateTail(`${cur}${text}`, 200_000);
               }
             }
           }
@@ -699,9 +936,16 @@
         const last_active_at = msg.ts;
 
         if (msg.type === "run.started") {
+          if (!readyChanged) {
+            nextRunReadyByRun = { ...nextRunReadyByRun };
+            readyChanged = true;
+          }
+          nextRunReadyByRun[msg.run_id] = false;
+
           const tool = dataString(msg, "tool") ?? "unknown";
+          const runnerMode = dataString(msg, "runner_mode") ?? dataString(msg, "mode") ?? "";
           const isLikelyTuiTool = tool === "codex" || tool === "claude" || tool === "iflow" || tool === "gemini";
-          const mode: "log" | "tui" = isLikelyTuiTool ? "tui" : "log";
+          const mode: "log" | "tui" = runnerMode === "structured" ? "log" : isLikelyTuiTool ? "tui" : "log";
           if (nextOutputModeByRun[msg.run_id] !== mode) {
             if (!outputModeChanged) {
               nextOutputModeByRun = { ...nextOutputModeByRun };
@@ -772,6 +1016,12 @@
             pending_op_args_summary: null,
           }));
         } else if (msg.type === "run.exited") {
+          if (!readyChanged) {
+            nextRunReadyByRun = { ...nextRunReadyByRun };
+            readyChanged = true;
+          }
+          nextRunReadyByRun[msg.run_id] = false;
+
           const exit_code =
             isRecord(msg.data) && typeof msg.data["exit_code"] === "number" ? msg.data["exit_code"] : undefined;
           upsertRun(msg.run_id, (cur) => ({
@@ -790,8 +1040,16 @@
       }
 
       if (shouldAppendMessages && msg.run_id && msg.run_id === selectedId) {
-        const m = envToMessage(msg);
-        if (m) newMessages.push(m);
+        // Only append full message stream when the Messages tab is active.
+        // For Codex structured mode, also surface `codex/event` notifications even
+        // when viewing Output to avoid "I sent hello but got nothing" confusion.
+        const allow =
+          sessionDetailTab === "messages" ||
+          (msg.type === "run.output" && Boolean(codexStructuredEventText(dataString(msg, "text") ?? "")));
+        if (allow) {
+          const m = envToMessage(msg);
+          if (m) newMessages.push(m);
+        }
       }
 
       if (performance.now() - started > WS_BATCH_BUDGET_MS) break;
@@ -818,7 +1076,7 @@
         const append = pendingOutputChunks.length > 0 ? pendingOutputChunks.join("") : "";
         if (append) selectedOutput = truncateTail(applyTerminalEdits(selectedOutput, append), 200_000);
         nextOutputByRun = { ...nextOutputByRun, [selectedId]: selectedOutput };
-        outputByRun = nextOutputByRun;
+        outputByRunChanged = true;
       }
       if (pendingPausedChunks.length > 0 && selectedId) {
         const append = pendingPausedChunks.join("");
@@ -829,9 +1087,12 @@
         }
       }
     }
+
+    if (outputByRunChanged) outputByRun = nextOutputByRun;
     if (outputModeChanged) outputModeByRun = nextOutputModeByRun;
     if (awaitingChanged) awaitingByRun = nextAwaiting;
     if (runsChanged) runs = nextRuns;
+    if (readyChanged) runReadyByRun = nextRunReadyByRun;
     if (shouldCaptureEvents && newEvents.length > 0) {
       events = [...newEvents.reverse(), ...events].slice(0, 500);
     }
@@ -861,8 +1122,10 @@
 
   async function selectSession(runId: string) {
     selectedRunId = runId;
-    // Default to events view; terminal is available via the tab.
-    sessionDetailTab = "messages";
+    subscribeToRun(runId);
+    const tool = runToolFor(runId);
+    const isLikelyTuiTool = isLikelyTuiToolName(tool);
+    sessionDetailTab = isLikelyTuiTool ? "output" : "messages";
     outputAutoScroll = true;
     outputPausedPending = "";
     outputPausedPendingChars = 0;
@@ -898,6 +1161,28 @@
     if (!messagesByRun[runId]) void loadMessages(runId);
     await tick();
     chatInputEl?.focus();
+  }
+
+  function isLikelyTuiToolName(tool: string): boolean {
+    return tool === "codex" || tool === "claude" || tool === "iflow" || tool === "gemini";
+  }
+
+  function runToolFor(runId: string): string {
+    return runs.find((x) => x.id === runId)?.tool ?? "";
+  }
+
+  function currentOutputModeForRun(runId: string): "log" | "tui" {
+    const tool = runToolFor(runId);
+    return outputModeByRun[runId] ?? (isLikelyTuiToolName(tool) ? "tui" : "log");
+  }
+
+  function includeOutputInMessages(runId: string): boolean {
+    const tool = runToolFor(runId);
+    return tool === "opencode" || currentOutputModeForRun(runId) === "log";
+  }
+
+  function shouldSubscribeOutput(runId: string): boolean {
+    return sessionDetailTab === "output" || includeOutputInMessages(runId);
   }
 
   function tailLines(text: string, maxLines: number): string {
@@ -1866,19 +2151,21 @@
   function envToMessage(env: WsEnvelope): ChatMessage | null {
     if (!env.run_id) return null;
     if (env.type === "run.output") {
+      const raw0 = dataString(env, "text") ?? "";
+      const raw = codexStructuredEventText(raw0) ?? raw0;
       return {
-        key: `${env.ts}:run.output:${env.seq ?? crypto.randomUUID()}`,
+        key: `${env.ts}:run.output:${env.seq ?? uuid()}`,
         ts: env.ts,
         role: "assistant",
         kind: env.type,
         actor: dataString(env, "actor"),
-        text: sanitizeTerminalOutput(dataString(env, "text") ?? ""),
+        text: sanitizeTerminalOutput(raw),
         data: env.data,
       };
     }
     if (env.type === "run.input") {
       return {
-        key: `${env.ts}:run.input:${dataString(env, "input_id") ?? crypto.randomUUID()}`,
+        key: `${env.ts}:run.input:${dataString(env, "input_id") ?? uuid()}`,
         ts: env.ts,
         role: "user",
         kind: env.type,
@@ -1889,7 +2176,7 @@
     }
     if (env.type === "run.permission_requested") {
       return {
-        key: `${env.ts}:run.permission_requested:${dataString(env, "request_id") ?? crypto.randomUUID()}`,
+        key: `${env.ts}:run.permission_requested:${dataString(env, "request_id") ?? uuid()}`,
         ts: env.ts,
         role: "system",
         kind: env.type,
@@ -1900,7 +2187,7 @@
     }
     if (env.type === "run.started" || env.type === "run.exited") {
       return {
-        key: `${env.ts}:${env.type}:${env.seq ?? crypto.randomUUID()}`,
+        key: `${env.ts}:${env.type}:${env.seq ?? uuid()}`,
         ts: env.ts,
         role: "system",
         kind: env.type,
@@ -1910,7 +2197,7 @@
     }
     if (env.type === "tool.call") {
       return {
-        key: `${env.ts}:tool.call:${dataString(env, "request_id") ?? crypto.randomUUID()}`,
+        key: `${env.ts}:tool.call:${dataString(env, "request_id") ?? uuid()}`,
         ts: env.ts,
         role: "system",
         kind: env.type,
@@ -1926,7 +2213,7 @@
       const base = `tool.result ${dataString(env, "tool") ?? "unknown"} ok=${ok} duration_ms=${dur}`;
       const extra = ok ? jsonTrunc(dataAny(env, "result"), 2000) : String(dataAny(env, "error") ?? "");
       return {
-        key: `${env.ts}:tool.result:${dataString(env, "request_id") ?? crypto.randomUUID()}`,
+        key: `${env.ts}:tool.result:${dataString(env, "request_id") ?? uuid()}`,
         ts: env.ts,
         role: "system",
         kind: env.type,
@@ -1944,6 +2231,8 @@
     events = [];
     health = null;
     outputByRun = {};
+    runReadyByRun = {};
+    wsSubscribedRunId = "";
     awaitingByRun = {};
     hosts = [];
     messagesByRun = {};
@@ -1968,7 +2257,11 @@
     const nextWs = new WebSocket(`${toWsBase(apiBaseUrl)}/ws/app?token=${encodeURIComponent(nextToken)}`);
     ws = nextWs;
     nextWs.onopen = () => {
-      if (ws === nextWs) status = "connected";
+      if (ws === nextWs) {
+        status = "connected";
+        const runId = wsSubscribedRunId || selectedRunId;
+        if (runId) subscribeToRun(runId);
+      }
     };
     nextWs.onclose = () => {
       if (ws === nextWs) status = "disconnected";
@@ -1987,7 +2280,6 @@
         if (msg.type === "run.output") {
           const sel = selectedRunId;
           if (!sel || msg.run_id !== sel) return;
-          if (!(token && view === "sessions")) return;
         }
         if (msg.type === "tool.call" || msg.type === "tool.result") {
           const sel = selectedRunId;
@@ -2121,6 +2413,7 @@
         const online = hosts.filter((h) => h.online);
         if (online.length > 0 && !online.some((h) => h.id === startHostId)) startHostId = online[0].id;
         if (online.length > 0 && !online.some((h) => h.id === hostDiagHostId)) hostDiagHostId = online[0].id;
+        if (startHostId.trim()) void ensureStartHostTools(startHostId, true);
       }
     } catch (e) {
       // Non-fatal: keep previous hosts to avoid "everything offline" flicker.
@@ -2182,12 +2475,11 @@
     if (selectedRunId) await loadMessages(selectedRunId);
   }
 
-  async function loadMessages(runId: string) {
+  async function loadMessages(runId: string, options?: { includeOutput?: boolean }) {
     if (!token) return;
     try {
-      const tool0 = runs.find((x) => x.id === runId)?.tool ?? "";
-      const isLikelyTuiTool0 = tool0 === "codex" || tool0 === "claude" || tool0 === "iflow" || tool0 === "gemini";
-      const expectedMode0: "log" | "tui" = outputModeByRun[runId] ?? (isLikelyTuiTool0 ? "tui" : "log");
+      const expectedMode0 = currentOutputModeForRun(runId);
+      const includeOutput = options?.includeOutput ?? (runId === selectedRunId ? shouldSubscribeOutput(runId) : includeOutputInMessages(runId));
       if (runId === selectedRunId && expectedMode0 === "tui") {
         xtermBackfillRunId = runId;
         xtermBackfillReady = false;
@@ -2195,8 +2487,9 @@
         xtermBackfillMaxSeq = 0;
         xtermBackfillPending = [];
       }
+      const query = new URLSearchParams({ limit: "200", include_output: includeOutput ? "true" : "false" });
       const r = await fetchWithTimeout(
-        `${apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200`,
+        `${apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?${query.toString()}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
@@ -2217,10 +2510,15 @@
         kind: m.kind,
         actor: m.actor,
         request_id: m.request_id,
-        text: m.kind === "run.output" ? sanitizeTerminalOutput(m.text) : m.text,
+        text:
+          m.kind === "run.output"
+            ? sanitizeTerminalOutput(codexStructuredEventText(m.text) ?? m.text)
+            : m.text,
         data: m.data,
       }));
       messagesByRun = { ...messagesByRun, [runId]: mapped };
+
+      if (!includeOutput) return;
 
       // Populate output view from persisted messages (useful when opening a run after it started).
       // For TUI tools (Codex/Claude/etc), reconstruct a small screen snapshot instead of a giant log.
@@ -2235,8 +2533,8 @@
         if (rawTotal >= 1_000_000) break;
       }
       const rawParts = rawPartsRev.reverse();
-      const tool = runs.find((x) => x.id === runId)?.tool ?? "";
-      const isLikelyTuiTool = tool === "codex" || tool === "claude" || tool === "iflow" || tool === "gemini";
+      const tool = runToolFor(runId);
+      const isLikelyTuiTool = isLikelyTuiToolName(tool);
       const mode: "log" | "tui" =
         rawParts.some((s) => looksLikeTuiAnsi(s)) || (isLikelyTuiTool && rawParts.some((s) => s.includes("\x1b[")))
           ? "tui"
@@ -2306,10 +2604,29 @@
     ws.send(JSON.stringify(env));
   }
 
+  function subscribeToRun(runId: string) {
+    wsSubscribedRunId = runId;
+    wsSubscribedIncludeOutput = runId ? shouldSubscribeOutput(runId) : false;
+    if (!runId) return;
+    sendWs({
+      type: "run.subscribe",
+      ts: new Date().toISOString(),
+      run_id: runId,
+      data: { replace: true, include_output: wsSubscribedIncludeOutput },
+    });
+  }
+
+  $: if (selectedRunId && ws && ws.readyState === WebSocket.OPEN) {
+    const wantsOutput = shouldSubscribeOutput(selectedRunId);
+    if (wsSubscribedRunId !== selectedRunId || wsSubscribedIncludeOutput !== wantsOutput) {
+      subscribeToRun(selectedRunId);
+    }
+  }
+
   async function rpcCall(rpcType: string, data: Record<string, unknown>): Promise<WsEnvelope> {
     if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("ws not connected");
     if (!selectedRunId) throw new Error("missing run_id");
-    const requestId = crypto.randomUUID();
+    const requestId = uuid();
     const msg: WsEnvelope = {
       type: rpcType,
       ts: new Date().toISOString(),
@@ -2325,7 +2642,7 @@
 
   async function rpcCallNoRun(rpcType: string, data: Record<string, unknown>): Promise<WsEnvelope> {
     if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("ws not connected");
-    const requestId = crypto.randomUUID();
+    const requestId = uuid();
     const msg: WsEnvelope = {
       type: rpcType,
       ts: new Date().toISOString(),
@@ -2338,24 +2655,72 @@
     return await p;
   }
 
+  async function fetchHostInfoResult(hostId: string): Promise<Record<string, unknown>> {
+    const resp = await rpcCallNoRun("rpc.host.info", { host_id: hostId });
+    const ok = dataBool(resp, "ok");
+    if (!ok) throw new Error(dataString(resp, "error") ?? "rpc failed");
+    const result = dataAny(resp, "result");
+    if (!isRecord(result)) throw new Error("bad rpc result");
+    return result;
+  }
+
+  async function ensureStartHostTools(hostId: string, force = false) {
+    const normalized = hostId.trim();
+    if (!normalized || !token || status !== "connected") return;
+    if (!force && normalized in startHostToolsById) {
+      syncStartToolSelectionForHost(normalized);
+      return;
+    }
+    startHostToolsLoadingById = { ...startHostToolsLoadingById, [normalized]: true };
+    try {
+      const result = await fetchHostInfoResult(normalized);
+      const tools = parseHostToolStatuses(result["tools"]);
+      startHostToolsById = { ...startHostToolsById, [normalized]: tools };
+      syncStartToolSelectionForHost(normalized);
+    } catch (e) {
+      console.warn("ensureStartHostTools failed", normalized, e instanceof Error ? e.message : String(e));
+      if (!(normalized in startHostToolsById)) {
+        startHostToolsById = { ...startHostToolsById, [normalized]: [] };
+      }
+    } finally {
+      startHostToolsLoadingById = { ...startHostToolsLoadingById, [normalized]: false };
+    }
+  }
+
   async function startRun() {
     startError = "";
     try {
+      const tool = startTool.trim();
+      const availableOptions = dynamicStartToolOptionsForHost(startHostId);
+      if (!availableOptions.some((option) => option.value === tool)) {
+        throw new Error(`unsupported tool: ${tool}`);
+      }
       const data: Record<string, unknown> = {
         host_id: startHostId.trim(),
-        tool: startTool.trim(),
-        cmd: startCmd,
+        tool,
+        cmd: startCmd.trim(),
         cwd: startCwd.trim() ? startCwd.trim() : null,
       };
+      if (tool === "opencode" && startOpencodeModel.trim()) {
+        data.model = startOpencodeModel.trim();
+      }
       const resp = await rpcCallNoRun("rpc.run.start", data);
       const ok = dataBool(resp, "ok");
       if (!ok) throw new Error(dataString(resp, "error") ?? "rpc failed");
-      if (resp.run_id) {
-        await refreshRuns();
-        selectSession(resp.run_id);
+      const result = dataAny(resp, "result");
+      const runIdFromResult = isRecord(result) && typeof result.run_id === "string" ? result.run_id : "";
+      const runId = resp.run_id ?? runIdFromResult;
+      if (!runId) {
+        throw new Error("rpc.run.start succeeded but run_id missing");
       }
+      if (startCwd.trim()) rememberStartCwd(startHostId, startCwd);
+      await refreshRuns();
+      view = "sessions";
+      await selectSession(runId);
+      setToast(`已启动 ${tool}`);
     } catch (e) {
-      startError = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : String(e);
+      startError = humanizeStartError(message);
     }
   }
 
@@ -2450,6 +2815,7 @@
 
   async function fetchHostInfo() {
     hostInfo = await hostRpc("rpc.host.info", { host_id: hostDiagHostId });
+    await ensureStartHostTools(hostDiagHostId, true);
   }
 
   async function fetchHostDoctor() {
@@ -2511,6 +2877,34 @@
     // Browser inputs naturally use '\n', so normalize to '\r' to match terminal behavior.
     // Also collapse CRLF to CR to avoid sending two line breaks.
     return (text ?? "").replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+  }
+
+  function codexStructuredEventText(raw: string): string | null {
+    // Codex structured mode (mcp-server) emits notifications like:
+    // {"jsonrpc":"2.0","method":"codex/event","params":{...}}
+    if (!raw || raw[0] !== "{" || !raw.includes('"method":"codex/event"')) return null;
+    try {
+      const v: unknown = JSON.parse(raw);
+      if (!isRecord(v) || v["method"] !== "codex/event") return null;
+      const params = v["params"];
+      if (!isRecord(params)) return null;
+      const msg = params["msg"];
+      if (!isRecord(msg)) return null;
+
+      const t = typeof msg["type"] === "string" ? msg["type"] : "";
+      const message = typeof msg["message"] === "string" ? msg["message"] : "";
+      const details = typeof msg["additional_details"] === "string" ? msg["additional_details"] : "";
+
+      const pieces: string[] = [];
+      if (t) pieces.push(`[codex:${t}]`);
+      if (message) pieces.push(message);
+      if (details) pieces.push(details);
+
+      const out = pieces.join(" ").trim();
+      return out ? `${out}\n` : null;
+    } catch {
+      return null;
+    }
   }
 
   function sendStdin(text: string) {
@@ -2617,18 +3011,56 @@
 
   function sendInput(text: string) {
     if (!selectedRunId) return;
+    const normalized = normalizeTerminalInput(text);
     sendWs({
       type: "run.send_input",
       ts: new Date().toISOString(),
       run_id: selectedRunId,
-      data: { input_id: crypto.randomUUID(), actor: "web", text: normalizeTerminalInput(text) },
+      data: { input_id: uuid(), actor: "web", text: normalized },
     });
   }
-
   function sendChatInput() {
     if (!selectedRunId || status !== "connected") return;
     const raw = chatInputText;
     if (!raw.trim()) return;
+
+    const a = selectedAwaiting;
+    if (a) {
+      // If the run is awaiting permission, don't blindly send arbitrary text.
+      if (awaitingIsApproval(a) || awaitingWantsYesNo(a)) {
+        const t = raw.trim().toLowerCase();
+        const yes = t === "y" || t === "yes" || t === "approve" || t === "ok" || t === "同意" || t === "继续";
+        const no = t === "n" || t === "no" || t === "deny" || t === "拒绝";
+        if (yes) {
+          sendDecision("approve");
+          chatInputText = "";
+          void tick().then(() => chatInputEl?.focus());
+          return;
+        }
+        if (no) {
+          sendDecision("deny");
+          chatInputText = "";
+          void tick().then(() => chatInputEl?.focus());
+          return;
+        }
+
+        setToast("当前需要先确认（Proceed?），请在置顶卡片点“同意/拒绝”或输入 y/n");
+        // Surface the approval modal on desktop to reduce confusion.
+        if (!isMobile) approvalModalOpen = true;
+        return;
+      }
+
+      // If the run is awaiting a prompt, route the main input to that prompt.
+      if (awaitingIsPrompt(a)) {
+        let text = raw;
+        if (!text.includes("\n") && !text.endsWith("\r") && !text.endsWith("\n")) text += "\n";
+        sendInput(text);
+        chatInputText = "";
+        void tick().then(() => chatInputEl?.focus());
+        return;
+      }
+    }
+
     let text = raw;
     if (!text.includes("\n") && !text.endsWith("\r") && !text.endsWith("\n")) text += "\n";
     sendInput(text);
@@ -2721,10 +3153,30 @@
 
   $: selectedRun = runs.find((r) => r.id === selectedRunId) ?? null;
   $: awaitingRuns = runs.filter((r) => r.status === "awaiting_input" || r.status === "awaiting_approval");
+  $: selectedRunReady = selectedRunId ? runReadyByRun[selectedRunId] ?? true : true;
   $: selectedOutput = selectedRunId ? outputByRun[selectedRunId] ?? "" : "";
   $: selectedAwaiting = selectedRunId ? awaitingByRun[selectedRunId] ?? awaitingFromRunRow(selectedRun) : null;
   $: selectedMessages = selectedRunId ? messagesByRun[selectedRunId] ?? [] : [];
   $: hostsById = Object.fromEntries(hosts.map((h) => [h.id, h] as const)) as Record<string, HostInfo>;
+  $: currentStartToolOptions = dynamicStartToolOptionsForHost(startHostId);
+  $: currentStartToolStatuses = startHostToolsById[startHostId] ?? null;
+  $: currentStartHostToolsLoading = Boolean(startHostToolsLoadingById[startHostId]);
+  $: currentStartOpencodeModels = currentOpencodeToolStatus()?.models?.slice() ?? [];
+  $: currentStartOpencodeDefaultModel = currentOpencodeToolStatus()?.default_model?.trim() ?? "";
+  $: currentStartOpencodeModelsError = currentOpencodeToolStatus()?.models_error?.trim() ?? "";
+  $: if (startHostId && currentStartToolStatuses) {
+    syncStartOpencodeModelForHost();
+  }
+  $: if (token && status === "connected" && startHostId.trim()) {
+    void ensureStartHostTools(startHostId);
+  }
+  $: if (token && status === "connected" && view === "start" && startHostId.trim()) {
+    const refreshKey = `${view}:${startHostId}:${hostsById[startHostId]?.online ? "online" : "offline"}`;
+    if (refreshKey !== lastStartToolsForceRefreshKey) {
+      lastStartToolsForceRefreshKey = refreshKey;
+      void ensureStartHostTools(startHostId, true);
+    }
+  }
 
   // Keep card footer + modal drafts consistent for the same request.
   $: {
@@ -2834,43 +3286,11 @@
   $: outputHtml = outputSearchActive ? renderOutputHtml(outputLines, outputSearchMatches, outputSearchCursor) : "";
   $: if (sessionDetailTab === "output" && outputAutoScroll) scheduleOutputScrollToBottom();
 
-  $: displayMessages = (() => {
+  $: uiBlocks = (() => {
     const msgs = selectedMessages ?? [];
     const tool = selectedRunId ? (runs.find((r) => r.id === selectedRunId)?.tool ?? "") : "";
-    const includeOutputInEvents = tool === "opencode";
-    const out: ChatMessage[] = [];
-    for (const m of msgs) {
-      // Keep event timeline compact: show raw output only for opencode (its structured text comes
-      // through as run.output today). Other tools can be inspected via the Terminal tab.
-      if (!includeOutputInEvents && m.kind === "run.output") {
-        continue;
-      }
-      const prev = out[out.length - 1];
-      if (prev && prev.kind === "run.output" && m.kind === "run.output" && prev.role === "assistant" && m.role === "assistant") {
-        prev.text = `${prev.text ?? ""}${m.text ?? ""}`;
-        continue;
-      }
-      out.push({ ...m });
-    }
-    return out;
-  })();
-
-  type ChatTurn = { key: string; user: ChatMessage | null; parts: ChatMessage[] };
-  $: chatTurns = (() => {
-    const msgs = displayMessages ?? [];
-    const out: ChatTurn[] = [];
-    let cur: ChatTurn = { key: "init", user: null, parts: [] };
-    for (const m of msgs) {
-      if (m.kind === "run.input" && m.role === "user") {
-        if (cur.user || cur.parts.length > 0) out.push(cur);
-        cur = { key: m.key, user: m, parts: [] };
-        continue;
-      }
-      cur.parts.push(m);
-    }
-    if (cur.user || cur.parts.length > 0) out.push(cur);
-    // Stabilize keys for the "system-only" first turn.
-    return out.map((t, i) => (t.user ? t : { ...t, key: t.parts[0]?.key ?? `turn:${i}` }));
+    const pinnedRequestId = selectedAwaiting?.request_id ?? null;
+    return reduceToBlocks(msgs, { runTool: tool, pinnedRequestId, outputMode: selectedOutputMode });
   })();
 
   function todoStorageKey(runId: string) {
@@ -2887,7 +3307,7 @@
         .map((x) => (isRecord(x) ? x : null))
         .filter(Boolean)
         .map((x) => ({
-          id: typeof x!.id === "string" ? x!.id : crypto.randomUUID(),
+          id: typeof x!.id === "string" ? x!.id : uuid(),
           text: typeof x!.text === "string" ? x!.text : "",
           done: typeof x!.done === "boolean" ? x!.done : false,
           created_at: typeof x!.created_at === "string" ? x!.created_at : new Date().toISOString(),
@@ -2906,7 +3326,7 @@
     if (!selectedRunId) return;
     const t = text.trim();
     if (!t) return;
-    const next = [{ id: crypto.randomUUID(), text: t, done: false, created_at: new Date().toISOString() }, ...todos];
+    const next = [{ id: uuid(), text: t, done: false, created_at: new Date().toISOString() }, ...todos];
     todos = next;
     saveTodos(selectedRunId, next);
   }
@@ -3371,6 +3791,10 @@
           role="tab"
           on:click={async () => {
             sessionDetailTab = "output";
+            if (selectedRunId) {
+              subscribeToRun(selectedRunId);
+              void loadMessages(selectedRunId, { includeOutput: true });
+            }
             await focusOutputSearch();
           }}
         >
@@ -3381,7 +3805,10 @@
           role="tab"
           on:click={() => {
             sessionDetailTab = "messages";
-            if (selectedRunId) void loadMessages(selectedRunId);
+            if (selectedRunId) {
+              subscribeToRun(selectedRunId);
+              void loadMessages(selectedRunId, { includeOutput: includeOutputInMessages(selectedRunId) });
+            }
           }}
         >
           事件
@@ -3516,239 +3943,35 @@
           {/if}
         </div>
         <div class="chat-feed">
-          {#if displayMessages.length === 0}
+          {#if uiBlocks.length === 0}
             <div class="subtle"></div>
           {:else}
-            {#each chatTurns as turn (turn.key)}
-              {#if turn.user}
-                <div class="chat-row" data-role="user">
-                  <div class="chat-bubble" data-role="user">
-                    {@html renderMarkdownBasic(turn.user.text || "")}
-                  </div>
-                  <div class="chat-ts">{formatAbsTime(turn.user.ts)}</div>
-                </div>
-              {/if}
-
-              {#each turn.parts as m, i (m.key)}
-                {#if m.kind === "tool.call" && turn.parts[i + 1]?.kind === "tool.result" && turn.parts[i + 1]?.request_id && turn.parts[i + 1]?.request_id === m.request_id}
-                  {@const callMeta = toolMetaFromText(m.kind, m.text || "")}
-                  {@const res = turn.parts[i + 1]}
-                  {@const resMeta = toolMetaFromText(res.kind, res.text || "")}
-                  {@const callData = isRecord(m.data) ? m.data : null}
-                  {@const resData = isRecord(res.data) ? res.data : null}
-                  {@const label = callData && typeof callData["tool"] === "string" ? String(callData["tool"]) : callMeta.label}
-                  {@const okState =
-                    resData && typeof resData["ok"] === "boolean"
-                      ? Boolean(resData["ok"])
-                      : (res.text || "").includes(" ok=true")
-                        ? true
-                        : (res.text || "").includes(" ok=false")
-                          ? false
-                          : null}
-                  <div class="chat-row" data-role="system">
-                    <details open class="tool-card">
-                      <summary>
-                        <code>{label}</code>
-                        {#if m.actor}<code>actor={m.actor}</code>{/if}
-                        {#if okState === true}
-                          <span style="color:#065f46">ok</span>
-                        {:else if okState === false}
-                          <span style="color:#b91c1c">error</span>
-                        {/if}
-                      </summary>
-                      <div class="tool-card-body">
-                        <div class="tool-card-actions">
-                          <button
-                            class="secondary"
-                            type="button"
-                            on:click={() =>
-                              void copyText(
-                                callData && "args" in callData
-                                  ? JSON.stringify(callData.args, null, 2)
-                                  : (callMeta.details || ""),
-                              )}
-                          >
-                            复制 call
-                          </button>
-                          <button
-                            class="secondary"
-                            type="button"
-                            on:click={() =>
-                              void copyText(
-                                resData && okState === true && "result" in resData
-                                  ? JSON.stringify(resData.result, null, 2)
-                                  : resData && okState === false && "error" in resData
-                                    ? JSON.stringify(resData.error, null, 2)
-                                    : (resMeta.details || ""),
-                              )}
-                          >
-                            复制 result
-                          </button>
-                          {#if m.request_id}
-                            <button class="secondary" type="button" on:click={() => void copyText(m.request_id || "")}>复制 request_id</button>
-                          {/if}
-                        </div>
-                        <div class="tool-card-label">call</div>
-                        {#if callData && "args" in callData}
-                          <pre class="tool-json">{JSON.stringify(callData.args, null, 2)}</pre>
-                        {:else}
-                          {@html renderMarkdownBasic(callMeta.details || "")}
-                        {/if}
-                        <div class="tool-card-label" style="margin-top:10px">result</div>
-                        {#if resData && okState === true && "result" in resData}
-                          <pre class="tool-json">{JSON.stringify(resData.result, null, 2)}</pre>
-                        {:else if resData && okState === false && "error" in resData}
-                          <pre class="tool-json">{JSON.stringify(resData.error, null, 2)}</pre>
-                        {:else}
-                          {@html renderMarkdownBasic(resMeta.details || "")}
-                        {/if}
-                      </div>
-                    </details>
-                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
-                  </div>
-                {:else if m.kind === "tool.result" && turn.parts[i - 1]?.kind === "tool.call" && turn.parts[i - 1]?.request_id && turn.parts[i - 1]?.request_id === m.request_id}
-                  <!-- paired with previous tool.call; skip rendering -->
-                {:else if m.kind === "run.permission_requested"}
-                  {@const isCurrent = Boolean(selectedAwaiting?.request_id) && selectedAwaiting?.request_id === m.request_id}
-                  {#if isCurrent}
-                    <!-- current actionable permission is pinned above; skip duplicate -->
-                  {:else}
-                  <div class="chat-row" data-role="system">
-                    <div class="approval-card">
-                      <div class="approval-card-top">
-                        <span class="meta-pill">
-                          <span class="meta-k">tool</span>
-                          <span class="meta-v">{selectedRun.tool}</span>
-                        </span>
-                        {#if isCurrent && selectedAwaiting?.op_tool}
-                          <span class="session-op">{selectedAwaiting.op_tool}</span>
-                        {/if}
-                        {#if isCurrent && selectedAwaiting?.op_args_summary}
-                          <span class="session-op-args">{selectedAwaiting.op_args_summary}</span>
-                        {/if}
-                      </div>
-                      {#if m.text}
-                        <div class="approval-card-prompt">{m.text}</div>
-                      {/if}
-
-                      {#if isCurrent}
-                        <div class="approval-card-footer">
-                          <label class="checkbox">
-                            <input type="checkbox" bind:checked={approvalForSession} disabled={!selectedAwaiting?.op_tool || status !== "connected"} />
-                            本会话允许{#if selectedAwaiting?.op_tool}（<code>{selectedAwaiting.op_tool}</code>）{/if}
-                          </label>
-
-                          {#if selectedAwaiting?.questions !== undefined && selectedAwaiting?.questions !== null}
-                            <div class="approval-questions">
-                              <div class="approval-questions-title">需要回答</div>
-                              <pre class="approval-questions-json">{JSON.stringify(selectedAwaiting.questions, null, 2)}</pre>
-                              <div class="approval-answers-label">answers（JSON）</div>
-                              <textarea
-                                class="approval-answers"
-                                rows="5"
-                                bind:value={approvalAnswersJson}
-                                placeholder={"{}"}
-                                disabled={status !== "connected"}
-                              ></textarea>
-                            </div>
-                          {/if}
-
-                          <div class="approval-card-actions">
-                            <button
-                              class="secondary"
-                              type="button"
-                              disabled={status !== "connected"}
-                              on:click={() => sendDecision("deny")}
-                            >
-                              拒绝
-                            </button>
-                            <button type="button" disabled={status !== "connected"} on:click={() => sendDecision("approve")}>同意</button>
-                          </div>
-                        </div>
-                      {/if}
-                    </div>
-                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
-                  </div>
-                  {/if}
-                {:else if m.kind === "run.awaiting_input"}
-                  {@const isCurrent =
-                    selectedAwaiting
-                      ? awaitingIsPrompt(selectedAwaiting) && (!m.request_id || selectedAwaiting.request_id === m.request_id)
-                      : false}
-                  {#if isCurrent}
-                    <!-- current actionable prompt is pinned above; skip duplicate -->
-                  {:else}
-                  <div class="chat-row" data-role="system">
-                    <div class="awaiting-card">
-                      {#if m.text}
-                        <div class="awaiting-card-prompt">{m.text}</div>
-                      {/if}
-                      {#if isCurrent}
-                        <div class="awaiting-card-footer">
-                          <textarea
-                            class="awaiting-card-input"
-                            rows="2"
-                            bind:value={inlineAwaitingText}
-                            disabled={status !== "connected"}
-                            on:keydown={(e) => {
-                              if (e.key === "Enter" && !e.shiftKey) {
-                                e.preventDefault();
-                                const text = (inlineAwaitingText || "").trimEnd();
-                                if (!text.trim()) return;
-                                sendInput(text.endsWith("\n") ? text : `${text}\n`);
-                                inlineAwaitingText = "";
-                              }
-                            }}
-                          ></textarea>
-                          <div class="awaiting-card-actions">
-                            <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("y\n")}>y</button>
-                            <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("n\n")}>n</button>
-                            <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("continue\n")}>continue</button>
-                            <button
-                              type="button"
-                              disabled={status !== "connected" || !inlineAwaitingText.trim()}
-                              on:click={() => {
-                                const text = (inlineAwaitingText || "").trimEnd();
-                                if (!text.trim()) return;
-                                sendInput(text.endsWith("\n") ? text : `${text}\n`);
-                                inlineAwaitingText = "";
-                              }}
-                            >
-                              发送
-                            </button>
-                          </div>
-                        </div>
-                      {/if}
-                    </div>
-                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
-                  </div>
-                  {/if}
-                {:else}
-                  <div class="chat-row" data-role={m.role}>
-                    {#if m.role === "system"}
-                      <div class="chat-system">
-                        {@html renderMarkdownBasic(m.text || "")}
-                      </div>
-                    {:else}
-                      <div class="chat-bubble" data-role={m.role}>
-                        {@html renderMarkdownBasic(m.text || "")}
-                      </div>
-                    {/if}
-                    <div class="chat-ts">{formatAbsTime(m.ts)}</div>
-                  </div>
-                {/if}
-              {/each}
-            {/each}
+            <BlocksRenderer
+              blocks={uiBlocks}
+              runTool={selectedRun?.tool ?? ""}
+              {renderMarkdownBasic}
+              {formatAbsTime}
+              {copyText}
+            />
           {/if}
         </div>
         <div class="chat-inputbar">
+          {#if selectedRunId && status === "connected" && !selectedRunReady}
+            <div class="subtle" style="margin:0 0 6px">终端连接中…（建立输出通道后会开始显示回复）</div>
+          {/if}
           <textarea
             class="chat-textarea"
             bind:this={chatInputEl}
             bind:value={chatInputText}
             rows="2"
             on:keydown={handleChatInputKeydown}
-            placeholder=""
+            placeholder={
+              selectedAwaiting && (awaitingIsApproval(selectedAwaiting) || awaitingWantsYesNo(selectedAwaiting))
+                ? "待确认（Proceed?）：输入 y/n 或用上方按钮"
+                : selectedRunId && status === "connected" && !selectedRunReady
+                  ? "终端连接中…"
+                  : "输入消息（Enter 发送，Shift+Enter 换行）"
+            }
             disabled={!selectedRunId || status !== "connected"}
           ></textarea>
           <div class="chat-input-actions">
@@ -4041,17 +4264,61 @@
     </label>
     <label>
       工具
-      <input bind:value={startTool} placeholder="codex" />
+      <select bind:value={startTool} style="width:100%;padding:10px;box-sizing:border-box">
+        {#each currentStartToolOptions as option (option.value)}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
     </label>
+    <div style="font-size:12px;color:#475569;margin:-4px 0 10px 0">
+      {#if currentStartHostToolsLoading}
+        正在检测该主机已安装的工具…
+      {:else if currentStartToolStatuses && currentStartToolOptions.length > 0}
+        当前主机可用工具：{currentStartToolOptions.map((option) => option.label).join(" / ")}
+      {:else if currentStartToolStatuses && currentStartToolOptions.length === 0}
+        当前主机未检测到可用的受支持工具（codex / claude / iflow / opencode）。
+      {:else}
+        将根据所选 host 动态检测可用工具。
+      {/if}
+    </div>
+    {#if startTool === "opencode"}
+      <label>
+        模型
+        <select bind:value={startOpencodeModel} style="width:100%;padding:10px;box-sizing:border-box" disabled={currentStartHostToolsLoading || currentStartOpencodeModels.length === 0}>
+          {#if currentStartOpencodeModels.length === 0}
+            <option value="">使用 host 默认模型</option>
+          {:else}
+            {#each currentStartOpencodeModels as model (model)}
+              <option value={model}>{model}</option>
+            {/each}
+          {/if}
+        </select>
+      </label>
+      <div style="font-size:12px;color:#475569;margin:-4px 0 10px 0">
+        {#if currentStartHostToolsLoading}
+          正在读取该主机的 opencode 模型配置…
+        {:else if currentStartOpencodeModelsError}
+          当前主机的 opencode 模型配置读取失败：{currentStartOpencodeModelsError}
+        {:else if currentStartOpencodeModels.length > 0}
+          将以本次启动覆盖 opencode 模型。{#if currentStartOpencodeDefaultModel}当前默认：<code>{currentStartOpencodeDefaultModel}</code>。{/if}
+        {:else}
+          未从该主机读取到显式模型列表，将沿用 opencode 主机默认模型。
+        {/if}
+      </div>
+    {/if}
     <label>
       CWD（可选，主机路径）
-      <input bind:value={startCwd} placeholder="/path/to/project" />
+      <input bind:value={startCwd} placeholder={lastSuggestedStartCwd || "/path/to/project"} />
     </label>
+    <div style="font-size:12px;color:#475569;margin:-4px 0 10px 0">
+      会记住每台主机最近一次成功启动的目录。{#if lastSuggestedStartCwd}最近可用路径：<code>{lastSuggestedStartCwd}</code>
+      <button type="button" class="secondary" style="margin-left:8px;padding:2px 8px" on:click={() => applySuggestedStartCwd(true)}>回填</button>{:else}请填写远程主机上的真实目录，例如 <code>/home/ab/test</code>。{/if}
+    </div>
     <label>
       命令
-      <input bind:value={startCmd} placeholder="echo hi; cat" />
+      <input bind:value={startCmd} placeholder={`（留空：运行工具默认入口，例如 ${startTool}）`} />
     </label>
-    <button on:click={startRun} disabled={status !== "connected"}>启动</button>
+    <button on:click={startRun} disabled={status !== "connected" || currentStartHostToolsLoading || (currentStartToolStatuses !== null && currentStartToolOptions.length === 0)}>启动</button>
     {#if startError}
       <div style="color:#b91c1c">{startError}</div>
     {/if}
@@ -4989,27 +5256,27 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
   }
 
-  .chat-row {
+  :global(.chat-row) {
     display: flex;
     flex-direction: column;
     gap: 4px;
     margin: 10px 0;
   }
 
-  .chat-row[data-role="assistant"] {
+  :global(.chat-row[data-role="assistant"]) {
     align-items: flex-start;
   }
 
-  .chat-row[data-role="user"] {
+  :global(.chat-row[data-role="user"]) {
     align-items: flex-end;
   }
 
-  .chat-row[data-role="system"] {
+  :global(.chat-row[data-role="system"]) {
     align-items: center;
     text-align: center;
   }
 
-  .chat-bubble {
+  :global(.chat-bubble) {
     max-width: 70%;
     padding: 10px 12px;
     border-radius: var(--radius-lg);
@@ -5019,28 +5286,28 @@
     white-space: pre-wrap;
   }
 
-  .chat-bubble[data-role="assistant"] {
+  :global(.chat-bubble[data-role="assistant"]) {
     background: rgba(248, 250, 255, 0.98);
   }
 
-  .chat-bubble[data-role="user"] {
+  :global(.chat-bubble[data-role="user"]) {
     background: rgba(14, 165, 233, 0.16);
     border-color: rgba(14, 165, 233, 0.3);
   }
 
-  .chat-system {
+  :global(.chat-system) {
     max-width: 70%;
     font-size: 12px;
     color: var(--muted);
     word-break: break-word;
   }
 
-  .chat-ts {
+  :global(.chat-ts) {
     font-size: 11px;
     color: var(--muted);
   }
 
-  .tool-card {
+  :global(.tool-card) {
     width: 100%;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border);
@@ -5120,7 +5387,7 @@
     font-size: 12px;
   }
 
-  .tool-card summary {
+  :global(.tool-card summary) {
     cursor: pointer;
     display: flex;
     gap: 8px;
@@ -5129,29 +5396,29 @@
     list-style: none;
   }
 
-  .tool-card summary::-webkit-details-marker {
+  :global(.tool-card summary::-webkit-details-marker) {
     display: none;
   }
 
-  .tool-card-body {
+  :global(.tool-card-body) {
     margin-top: 8px;
     text-align: left;
   }
 
-  .tool-card-actions {
+  :global(.tool-card-actions) {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
     margin-bottom: 10px;
   }
 
-  .tool-card-label {
+  :global(.tool-card-label) {
     font-size: 12px;
     color: var(--muted);
     margin-bottom: 6px;
   }
 
-  .tool-json {
+  :global(.tool-json) {
     margin: 0;
     padding: 10px 12px;
     border-radius: var(--radius-lg);

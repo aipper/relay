@@ -29,6 +29,8 @@ impl Runner for IflowRunner {
         Ok(RunnerSpec {
             command,
             prompt_regex: base_prompt_regex("iflow"),
+            approve_text: "y\n".to_string(),
+            deny_text: "n\n".to_string(),
         })
     }
 }

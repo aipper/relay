@@ -291,7 +291,23 @@ async fn connect_and_run(
                                 let err = crate::runners::validate_bin_exists(&resolved, tool)
                                     .err()
                                     .map(|e| e.to_string());
-                                json!({ "tool": tool, "bin": resolved, "ok": err.is_none(), "error": err })
+                                if tool == "opencode" {
+                                    let (models, default_model, models_error) = match crate::run_manager::opencode_model_choices() {
+                                        Ok((models, default_model)) => (models, default_model, None::<String>),
+                                        Err(e) => (Vec::new(), None, Some(e.to_string())),
+                                    };
+                                    json!({
+                                        "tool": tool,
+                                        "bin": resolved,
+                                        "ok": err.is_none(),
+                                        "error": err,
+                                        "models": models,
+                                        "default_model": default_model,
+                                        "models_error": models_error,
+                                    })
+                                } else {
+                                    json!({ "tool": tool, "bin": resolved, "ok": err.is_none(), "error": err })
+                                }
                             };
 
                             let tools = ["codex", "claude", "iflow", "gemini", "opencode"]
@@ -623,7 +639,13 @@ async fn connect_and_run(
                                 .unwrap_or_else(|| tool.clone());
 
                             let cwd = env.data.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            let run_id = match rm.start_run(tool, cmd, cwd).await {
+                            let model = env
+                                .data
+                                .get("model")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                                .filter(|s| !s.trim().is_empty());
+                            let run_id = match rm.start_run(tool, cmd, cwd, model).await {
                                 Ok(id) => id,
                                 Err(err) => {
                                     let resp = WsEnvelope::new(

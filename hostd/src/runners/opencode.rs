@@ -1,6 +1,6 @@
 use super::{
-    Runner, RunnerSpec, base_prompt_regex, command_from_cmdline, command_from_shell, looks_like_shell,
-    resolve_tool_bin, swap_leading_token, validate_bin_exists,
+    Runner, RunnerSpec, base_prompt_regex, command_from_cmdline, command_from_shell,
+    looks_like_shell, resolve_tool_bin, swap_leading_token, validate_bin_exists,
 };
 
 pub struct OpencodeRunner;
@@ -29,7 +29,8 @@ impl Runner for OpencodeRunner {
         Ok(RunnerSpec {
             command,
             prompt_regex: base_prompt_regex("opencode"),
+            approve_text: "y\n".to_string(),
+            deny_text: "n\n".to_string(),
         })
     }
 }
-

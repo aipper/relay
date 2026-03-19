@@ -41,6 +41,8 @@ pub struct StartRunRequest {
     pub tool: String,
     pub cmd: String,
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -114,7 +116,7 @@ async fn start_run(
     };
     let run_id = state
         .rm
-        .start_run(req.tool, cmd, req.cwd)
+        .start_run(req.tool, cmd, req.cwd, req.model)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e:#}")))?;
     Ok(Json(StartRunResponse { run_id }))

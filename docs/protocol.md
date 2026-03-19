@@ -286,6 +286,7 @@ Start a new run on a specific host. This RPC does **not** require `run_id` in th
 - `tool`: `codex | claude | iflow | gemini | ...`
 - `cmd`: command to run (string, executed via `bash -lc`)
 - `cwd`: optional working directory on the host (string or null)
+- `model`: optional per-run model override (currently used by `opencode` structured runs)
 
 Response:
 
@@ -304,6 +305,7 @@ require `run_id` in the envelope.
 Response:
 
 - `rpc.response` with `data.result` containing host fields and tool/dependency statuses
+- for `opencode`, `data.result.tools[*]` may also include `models`, `default_model`, and `models_error`
 
 ### `rpc.host.capabilities` (web/cli → server → hostd)
 

@@ -104,7 +104,9 @@ impl ToolModeCache {
         let file = match std::fs::read_to_string(&path) {
             Ok(raw) => serde_json::from_str::<CacheFile>(&raw).unwrap_or_default(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => CacheFile::default(),
-            Err(e) => return Err(e).with_context(|| format!("read tool mode cache: {}", path.display())),
+            Err(e) => {
+                return Err(e).with_context(|| format!("read tool mode cache: {}", path.display()));
+            }
         };
 
         Ok(Some(Self { path, file }))

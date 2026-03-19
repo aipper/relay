@@ -30,7 +30,7 @@ Usage:
   relay doctor
 
   relay login --server http://127.0.0.1:8787 --username admin --password '...'   (compat)
-  relay local start --sock /tmp/relay-hostd.sock --tool codex --cmd "..." [--cwd .]
+  relay local start --sock /tmp/relay-hostd.sock --tool codex --cmd "..." [--cwd .] [--model provider/model]
   relay local input --sock /tmp/relay-hostd.sock --run <run_id> --text "y\\n" [--input-id <uuid>]
   relay fs read   --sock /tmp/relay-hostd.sock --run <run_id> --path relative/file.txt
   relay fs search --sock /tmp/relay-hostd.sock --run <run_id> --q "needle"
@@ -42,8 +42,8 @@ Usage:
   relay ws-stop --server http://127.0.0.1:8787 --token <jwt> --run <run_id> [--signal term|kill]
   relay ws-approve --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --request-id <uuid>
   relay ws-deny    --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --request-id <uuid>
-  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool codex --cmd "echo hi; cat" [--cwd .]
-  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool codex [--cmd "codex ..."] [--cwd .]
+  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool codex --cmd "echo hi; cat" [--cwd .] [--model provider/model]
+  relay ws-start-run --server http://127.0.0.1:8787 --token <jwt> --host-id <host_id> --tool codex [--cmd "codex ..."] [--cwd .] [--model provider/model]
   relay ws-rpc-fs-read   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --path relative/file.txt
   relay ws-rpc-fs-search --server http://127.0.0.1:8787 --token <jwt> --run <run_id> --q "needle"
   relay ws-rpc-fs-list   --server http://127.0.0.1:8787 --token <jwt> --run <run_id> [--path .]
@@ -824,9 +824,9 @@ async function postJson(url: string, body: Record<string, JsonValue>) {
   return JSON.parse(text) as Record<string, JsonValue>;
 }
 
-async function localStartRun(sock: string, tool: string, runCmd: string, cwd?: string) {
+async function localStartRun(sock: string, tool: string, runCmd: string, cwd?: string, model?: string) {
   requireBinaryInPath("curl");
-  const body = { tool, cmd: runCmd, cwd: cwd ?? null };
+  const body = { tool, cmd: runCmd, cwd: cwd ?? null, model: model ?? null };
   const curlArgs = [
     "--silent",
     "--show-error",
@@ -1585,9 +1585,10 @@ async function main() {
       const tool = getArg("--tool");
       const runCmd = getArg("--cmd") ?? tool;
       const cwd = getArg("--cwd");
+      const model = getArg("--model");
       if (!tool || !runCmd) usage();
 
-      const { out } = await localStartRun(sock, tool, runCmd, cwd ?? undefined);
+      const { out } = await localStartRun(sock, tool, runCmd, cwd ?? undefined, model ?? undefined);
       console.log(out.trim());
       return;
     }
@@ -1692,13 +1693,14 @@ async function main() {
     const tool = getArg("--tool") ?? "codex";
     const runCmd = getArg("--cmd") ?? tool;
     const cwd = getArg("--cwd");
+    const model = getArg("--model");
     if (!server || !token || !hostId || !runCmd) usage();
 
     const requestId = crypto.randomUUID();
     const env: Record<string, JsonValue> = {
       type: "rpc.run.start",
       ts: new Date().toISOString(),
-      data: { request_id: requestId, host_id: hostId, tool, cmd: runCmd, cwd: cwd ?? null },
+      data: { request_id: requestId, host_id: hostId, tool, cmd: runCmd, cwd: cwd ?? null, model: model ?? null },
     };
 
     const resp = await wsRpc(

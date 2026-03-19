@@ -10,8 +10,10 @@ Examples (requires `curl`):
 ```sh
 curl --unix-socket /tmp/relay-hostd.sock http://localhost/runs \
   -H 'content-type: application/json' \
-  -d '{"tool":"codex","cmd":"bash -lc \"echo hi; read -p \\\"Proceed? \\\" x; echo ok\"","cwd":null}'
+  -d '{"tool":"codex","cmd":"bash -lc \"echo hi; read -p \\\"Proceed? \\\" x; echo ok\"","cwd":null,"model":null}'
 ```
+
+`model` is optional and currently applies to `opencode` structured runs.
 
 List runs:
 

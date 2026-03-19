@@ -13,6 +13,8 @@ impl Runner for ShellRunner {
         Ok(RunnerSpec {
             command,
             prompt_regex: base_prompt_regex("shell"),
+            approve_text: "y\n".to_string(),
+            deny_text: "n\n".to_string(),
         })
     }
 }

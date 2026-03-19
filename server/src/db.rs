@@ -593,6 +593,7 @@ pub struct MessageEventRow {
 pub async fn list_message_events(
     pool: &Db,
     run_id: &str,
+    include_output: bool,
     before_id: Option<i64>,
     limit: i64,
 ) -> anyhow::Result<Vec<MessageEventRow>> {
@@ -602,6 +603,7 @@ pub async fn list_message_events(
 SELECT id, seq, ts, type, actor, input_id, text, text_redacted, data_json
 FROM events
 WHERE run_id=?1
+  AND (?2 OR type != 'run.output')
   AND type IN (
     'run.started',
     'run.output',
@@ -612,12 +614,13 @@ WHERE run_id=?1
     'tool.call',
     'tool.result'
   )
-  AND (?2 IS NULL OR id < ?2)
+  AND (?3 IS NULL OR id < ?3)
 ORDER BY id DESC
-LIMIT ?3
+LIMIT ?4
 "#,
     )
     .bind(run_id)
+    .bind(include_output)
     .bind(before_id)
     .bind(limit)
     .fetch_all(pool)

@@ -1,5 +1,5 @@
 use super::{
-    Runner, RunnerSpec, base_prompt_regex, command_from_cmdline, command_from_shell,
+    Runner, RunnerSpec, base_prompt_regex, command_from_cmdline, command_from_shell, find_in_path,
     looks_like_shell, resolve_tool_bin, swap_leading_token, validate_bin_exists,
 };
 
@@ -9,20 +9,28 @@ fn escape_toml_basic_string(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\"', "\\\"")
 }
 
-fn resolve_relay_mcp_command() -> String {
+fn resolve_relay_mcp_command() -> Option<String> {
     if let Ok(v) = std::env::var("RELAY_MCP_COMMAND") {
         let v = v.trim().to_string();
         if !v.is_empty() {
-            return v;
+            return Some(v);
         }
     }
 
     let exe = match std::env::current_exe() {
         Ok(p) => p,
-        Err(_) => return "relay".to_string(),
+        Err(_) => {
+            if find_in_path("relay") {
+                return Some("relay".to_string());
+            }
+            return None;
+        }
     };
     let Some(dir) = exe.parent() else {
-        return "relay".to_string();
+        if find_in_path("relay") {
+            return Some("relay".to_string());
+        }
+        return None;
     };
 
     #[cfg(windows)]
@@ -31,9 +39,12 @@ fn resolve_relay_mcp_command() -> String {
     let candidate = dir.join("relay");
 
     if candidate.is_file() {
-        return candidate.to_string_lossy().to_string();
+        return Some(candidate.to_string_lossy().to_string());
     }
-    "relay".to_string()
+    if find_in_path("relay") {
+        return Some("relay".to_string());
+    }
+    None
 }
 
 fn env_truthy(name: &str) -> bool {
@@ -47,15 +58,24 @@ fn env_truthy(name: &str) -> bool {
     }
 }
 
-fn env_falsy(name: &str) -> bool {
-    let v = match std::env::var(name) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    match v.trim().to_ascii_lowercase().as_str() {
-        "0" | "false" | "no" | "n" | "off" => true,
-        _ => false,
+fn merged_no_proxy_for_localhost() -> String {
+    let existing = std::env::var("NO_PROXY")
+        .or_else(|_| std::env::var("no_proxy"))
+        .unwrap_or_default();
+    let mut parts: Vec<String> = existing
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    for item in ["127.0.0.1", "localhost", "::1"] {
+        if !parts.iter().any(|p| p.eq_ignore_ascii_case(item)) {
+            parts.push(item.to_string());
+        }
     }
+
+    parts.join(",")
 }
 
 impl Runner for CodexRunner {
@@ -84,27 +104,44 @@ impl Runner for CodexRunner {
         }
 
         let command = if looks_like_shell(&final_cmd) {
-            command_from_shell(&final_cmd, cwd)
+            let mut command = command_from_shell(&final_cmd, cwd);
+            let no_proxy = merged_no_proxy_for_localhost();
+            command.env("NO_PROXY", &no_proxy);
+            command.env("no_proxy", &no_proxy);
+            command.env("NO_UPDATE_NOTIFIER", "1");
+            command
         } else {
             let mut command = command_from_cmdline(&final_cmd, cwd);
+
+            let no_proxy = merged_no_proxy_for_localhost();
+            command.env("NO_PROXY", &no_proxy);
+            command.env("no_proxy", &no_proxy);
+            command.env("NO_UPDATE_NOTIFIER", "1");
+
+            if !env_truthy("RELAY_CODEX_KEEP_USER_MCP") {
+                command.arg("--config");
+                command.arg("mcp_servers.metamcp.enabled=false");
+                command.arg("--config");
+                command.arg("mcp_servers.serena.enabled=false");
+            }
 
             // Happy-alignment (A): make Codex aware of `relay mcp` tools so it can use them for
             // file ops / shell execution, with approvals handled by relay PWA via hostd.
             //
-            // Default: enabled. Set `RELAY_CODEX_DISABLE_RELAY_MCP=1` to opt out.
-            if !env_falsy("RELAY_CODEX_ENABLE_RELAY_MCP")
+            if env_truthy("RELAY_CODEX_ENABLE_RELAY_MCP")
                 && !env_truthy("RELAY_CODEX_DISABLE_RELAY_MCP")
             {
-                let relay_cmd = escape_toml_basic_string(&resolve_relay_mcp_command());
-
-                command.arg("--config");
-                command.arg(format!(
-                    r#"mcp_servers.relay={{command="{relay_cmd}", args=["mcp"], startup_timeout_sec=20, tool_timeout_sec=600, enabled=true}}"#,
-                ));
-                command.arg("--config");
-                command.arg(
-                    r#"mcp_servers.relay.env={RELAY_RUN_ID="${RELAY_RUN_ID}", RELAY_HOSTD_SOCK="${RELAY_HOSTD_SOCK}", RELAY_TOOL="${RELAY_TOOL}"}"#,
-                );
+                if let Some(relay_cmd) = resolve_relay_mcp_command() {
+                    let relay_cmd = escape_toml_basic_string(&relay_cmd);
+                    command.arg("--config");
+                    command.arg(format!(
+                        r#"mcp_servers.relay={{command="{relay_cmd}", args=["mcp"], startup_timeout_sec=20, tool_timeout_sec=600, enabled=true}}"#,
+                    ));
+                    command.arg("--config");
+                    command.arg(
+                        r#"mcp_servers.relay.env={RELAY_RUN_ID="${RELAY_RUN_ID}", RELAY_HOSTD_SOCK="${RELAY_HOSTD_SOCK}", RELAY_TOOL="${RELAY_TOOL}"}"#,
+                    );
+                }
             }
 
             command
@@ -113,6 +150,8 @@ impl Runner for CodexRunner {
         Ok(RunnerSpec {
             command,
             prompt_regex: base_prompt_regex("codex"),
+            approve_text: "y\n".to_string(),
+            deny_text: "n\n".to_string(),
         })
     }
 }

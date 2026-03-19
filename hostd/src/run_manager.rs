@@ -5,14 +5,14 @@ use regex::Regex;
 use relay_protocol::{WsEnvelope, redaction::Redactor};
 use serde_json::Value as JsonValue;
 use serde_json::json;
+use std::fs;
 use std::{
     collections::HashMap,
     collections::HashSet,
     io::{BufRead, BufReader, Read, Write},
     process::{Command, Stdio},
     sync::{
-        Arc,
-        Mutex as StdMutex,
+        Arc, Mutex as StdMutex,
         atomic::{AtomicI64, Ordering},
     },
     time::Duration,
@@ -20,6 +20,153 @@ use std::{
 use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
 
 use crate::tool_mode_cache::{ToolModeCache, ToolRunMode};
+
+fn validate_run_cwd(cwd: &str) -> anyhow::Result<()> {
+    let path = std::path::Path::new(cwd);
+    if !path.exists() {
+        anyhow::bail!("run cwd does not exist: {cwd}");
+    }
+    if !path.is_dir() {
+        anyhow::bail!("run cwd is not a directory: {cwd}");
+    }
+    Ok(())
+}
+
+fn opencode_global_config_path() -> Option<std::path::PathBuf> {
+    if let Ok(v) = std::env::var("XDG_CONFIG_HOME") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return Some(
+                std::path::PathBuf::from(v)
+                    .join("opencode")
+                    .join("opencode.json"),
+            );
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    let home = home.trim();
+    if home.is_empty() {
+        return None;
+    }
+    Some(
+        std::path::PathBuf::from(home)
+            .join(".config")
+            .join("opencode")
+            .join("opencode.json"),
+    )
+}
+
+fn parse_opencode_global_config() -> anyhow::Result<Option<JsonValue>> {
+    let Some(path) = opencode_global_config_path() else {
+        return Ok(None);
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path)
+        .with_context(|| format!("read opencode config: {}", path.display()))?;
+    let value = serde_json::from_str::<JsonValue>(&raw)
+        .with_context(|| format!("parse opencode config json: {}", path.display()))?;
+    Ok(Some(value))
+}
+
+pub fn opencode_model_choices() -> anyhow::Result<(Vec<String>, Option<String>)> {
+    let Some(value) = parse_opencode_global_config()? else {
+        return Ok((Vec::new(), None));
+    };
+    let obj = value
+        .as_object()
+        .context("opencode config must be a JSON object")?;
+    let default_model = obj
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let mut models = Vec::new();
+    if let Some(providers) = obj.get("provider").and_then(|v| v.as_object()) {
+        for (provider_id, provider_value) in providers {
+            let Some(provider_obj) = provider_value.as_object() else {
+                continue;
+            };
+            let Some(model_map) = provider_obj.get("models").and_then(|v| v.as_object()) else {
+                continue;
+            };
+            for model_id in model_map.keys() {
+                let provider_id = provider_id.trim();
+                let model_id = model_id.trim();
+                if provider_id.is_empty() || model_id.is_empty() {
+                    continue;
+                }
+                models.push(format!("{provider_id}/{model_id}"));
+            }
+        }
+    }
+    models.sort();
+    models.dedup();
+    if let Some(default_model) = default_model.as_ref() {
+        if !models.iter().any(|item| item == default_model) {
+            models.insert(0, default_model.clone());
+        }
+    }
+    Ok((models, default_model))
+}
+
+fn opencode_structured_config_value(model_override: Option<&str>) -> anyhow::Result<JsonValue> {
+    let mut value =
+        parse_opencode_global_config()?.unwrap_or_else(|| json!({ "share": "disabled" }));
+    let map = value
+        .as_object_mut()
+        .context("opencode config must be a JSON object")?;
+    map.insert(
+        "share".to_string(),
+        JsonValue::String("disabled".to_string()),
+    );
+    map.remove("plugin");
+    if let Some(model_override) = model_override.map(str::trim).filter(|s| !s.is_empty()) {
+        map.insert(
+            "model".to_string(),
+            JsonValue::String(model_override.to_string()),
+        );
+    }
+    Ok(value)
+}
+
+struct TempOpencodeConfigHome {
+    path: std::path::PathBuf,
+}
+
+impl TempOpencodeConfigHome {
+    fn create(model_override: Option<&str>) -> anyhow::Result<Self> {
+        let path = std::env::temp_dir().join(format!(
+            "relay-opencode-config-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let opencode_dir = path.join("opencode");
+        fs::create_dir_all(&opencode_dir).with_context(|| {
+            format!(
+                "create temp opencode config dir: {}",
+                opencode_dir.display()
+            )
+        })?;
+        let value = opencode_structured_config_value(model_override)?;
+        let body = serde_json::to_string_pretty(&value).context("encode temp opencode config")?;
+        let config_path = opencode_dir.join("opencode.json");
+        fs::write(&config_path, body)
+            .with_context(|| format!("write temp opencode config: {}", config_path.display()))?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for TempOpencodeConfigHome {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
 
 #[derive(Clone)]
 pub struct RunManager {
@@ -51,7 +198,10 @@ struct Run {
     opencode_session_id: StdMutex<Option<String>>,
     opencode_active_pid: StdMutex<Option<i32>>,
     opencode_call_lock: Mutex<()>,
+    opencode_model: Option<String>,
     tmux_session: Option<String>,
+    default_approve_text: String,
+    default_deny_text: String,
 }
 
 #[derive(Clone)]
@@ -98,6 +248,7 @@ fn codex_mode_setting() -> CodexModeSetting {
         .trim()
         .to_ascii_lowercase();
     match v.as_str() {
+        "tui" | "pty" => CodexModeSetting::Tui,
         "auto" => CodexModeSetting::Auto,
         "structured" | "mcp" => CodexModeSetting::Structured,
         _ => CodexModeSetting::Tui,
@@ -140,7 +291,9 @@ fn opencode_permission_setting() -> OpencodePermissionSetting {
         .to_ascii_lowercase();
     match v.as_str() {
         "inherit" | "env" => OpencodePermissionSetting::Inherit,
-        "auto" | "allow" | "allow_all" | "allow-all" | "" => OpencodePermissionSetting::AutoAllowAll,
+        "auto" | "allow" | "allow_all" | "allow-all" | "" => {
+            OpencodePermissionSetting::AutoAllowAll
+        }
         _ => OpencodePermissionSetting::AutoAllowAll,
     }
 }
@@ -325,7 +478,10 @@ async fn codex_mcp_submit_prompt(
     }
 
     let result = resp.get("result").cloned().unwrap_or(JsonValue::Null);
-    let is_error = result.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let text = mcp_tool_result_text(&result);
     let thread_id = mcp_tool_result_thread_id(&result);
 
@@ -364,10 +520,14 @@ async fn opencode_submit_prompt(
         fn walk(redactor: &Redactor, v: &JsonValue) -> JsonValue {
             match v {
                 JsonValue::String(s) => JsonValue::String(redactor.redact(s).text_redacted),
-                JsonValue::Array(arr) => JsonValue::Array(arr.iter().map(|x| walk(redactor, x)).collect()),
-                JsonValue::Object(map) => {
-                    JsonValue::Object(map.iter().map(|(k, val)| (k.clone(), walk(redactor, val))).collect())
+                JsonValue::Array(arr) => {
+                    JsonValue::Array(arr.iter().map(|x| walk(redactor, x)).collect())
                 }
+                JsonValue::Object(map) => JsonValue::Object(
+                    map.iter()
+                        .map(|(k, val)| (k.clone(), walk(redactor, val)))
+                        .collect(),
+                ),
                 _ => v.clone(),
             }
         }
@@ -381,12 +541,14 @@ async fn opencode_submit_prompt(
     )?;
 
     let session_id = run.opencode_session_id.lock().ok().and_then(|v| v.clone());
+    let temp_config_home = TempOpencodeConfigHome::create(run.opencode_model.as_deref())?;
 
     let mut child_cmd = Command::new(&bin);
     child_cmd.arg("run").arg("--format").arg("json");
     if let Some(session_id) = session_id.as_deref().filter(|s| !s.trim().is_empty()) {
         child_cmd.arg("--session").arg(session_id);
     }
+    child_cmd.arg(&prompt);
 
     // Avoid interactive permission prompts in non-TTY mode.
     // Default remains auto-allow (for backward compatibility), but can be disabled.
@@ -395,9 +557,10 @@ async fn opencode_submit_prompt(
     {
         child_cmd.env("OPENCODE_PERMISSION", r#"{"*":"allow"}"#);
     }
+    child_cmd.env("XDG_CONFIG_HOME", temp_config_home.path());
 
     child_cmd.current_dir(&run.cwd);
-    child_cmd.stdin(Stdio::piped());
+    child_cmd.stdin(Stdio::null());
     child_cmd.stdout(Stdio::piped());
     child_cmd.stderr(Stdio::piped());
 
@@ -405,13 +568,6 @@ async fn opencode_submit_prompt(
     let pid = child.id() as i32;
     if let Ok(mut p) = run.opencode_active_pid.lock() {
         *p = Some(pid);
-    }
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .context("write opencode stdin")?;
-        stdin.write_all(b"\n").ok();
     }
 
     let stdout = child.stdout.take().context("take opencode stdout")?;
@@ -486,8 +642,10 @@ async fn opencode_submit_prompt(
                         }
                         out.push('\n');
 
-                        let mut env =
-                            WsEnvelope::new("run.output", json!({ "stream": "stdout", "text": out }));
+                        let mut env = WsEnvelope::new(
+                            "run.output",
+                            json!({ "stream": "stdout", "text": out }),
+                        );
                         env.host_id = Some(host_id.clone());
                         env.run_id = Some(run.run_id.clone());
                         env.seq = Some(run.next_seq());
@@ -514,8 +672,10 @@ async fn opencode_submit_prompt(
 
                         let input_redacted = redact_json_value(&redactor, &input);
                         let part_redacted = redact_json_value(&redactor, part);
-                        let title_redacted = title.as_ref().map(|v| redact_json_value(&redactor, v));
-                        let output_redacted = output.as_ref().map(|v| redact_json_value(&redactor, v));
+                        let title_redacted =
+                            title.as_ref().map(|v| redact_json_value(&redactor, v));
+                        let output_redacted =
+                            output.as_ref().map(|v| redact_json_value(&redactor, v));
 
                         let mut call = WsEnvelope::new(
                             "tool.call",
@@ -632,7 +792,11 @@ impl RunManager {
         walk(&self.redactor, v)
     }
 
-    pub async fn add_session_allow_tools(&self, run_id: &str, tools: &[String]) -> anyhow::Result<()> {
+    pub async fn add_session_allow_tools(
+        &self,
+        run_id: &str,
+        tools: &[String],
+    ) -> anyhow::Result<()> {
         fn valid_tool_name(s: &str) -> bool {
             let s = s.trim();
             if s.is_empty() || s.len() > 128 {
@@ -674,6 +838,7 @@ impl RunManager {
         tool: String,
         cmd: String,
         cwd: Option<String>,
+        model: Option<String>,
     ) -> anyhow::Result<String> {
         let run_id = format!("run-{}", uuid::Uuid::new_v4());
         let resolved_cwd = match cwd.as_deref() {
@@ -683,6 +848,8 @@ impl RunManager {
                 .and_then(|p| p.to_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| ".".into()),
         };
+
+        validate_run_cwd(&resolved_cwd)?;
 
         if tool == "codex" {
             match codex_mode_setting() {
@@ -698,9 +865,7 @@ impl RunManager {
                         .await;
                 }
                 CodexModeSetting::Auto => {
-                    return self
-                        .start_run_codex_auto(run_id, cmd, resolved_cwd)
-                        .await;
+                    return self.start_run_codex_auto(run_id, cmd, resolved_cwd).await;
                 }
             }
         }
@@ -709,7 +874,7 @@ impl RunManager {
             match opencode_mode_setting() {
                 OpencodeModeSetting::Structured => {
                     return self
-                        .start_run_opencode_structured_with_id(run_id, cmd, resolved_cwd)
+                        .start_run_opencode_structured_with_id(run_id, cmd, resolved_cwd, model)
                         .await;
                 }
                 OpencodeModeSetting::Tui => {
@@ -767,11 +932,34 @@ impl RunManager {
                         out.push('_');
                     }
                 }
-                if out.is_empty() { "relay".to_string() } else { out }
+                if out.is_empty() {
+                    "relay".to_string()
+                } else {
+                    out
+                }
             }
 
             let session = sanitize_tmux_name(&format!("relay-{run_id}"));
             let argv = command.get_argv().clone();
+            let no_proxy = {
+                let existing = std::env::var("NO_PROXY")
+                    .or_else(|_| std::env::var("no_proxy"))
+                    .unwrap_or_default();
+                let mut parts: Vec<String> = existing
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect();
+
+                for item in ["127.0.0.1", "localhost", "::1"] {
+                    if !parts.iter().any(|p| p.eq_ignore_ascii_case(item)) {
+                        parts.push(item.to_string());
+                    }
+                }
+
+                parts.join(",")
+            };
 
             let mut wrapped: Vec<std::ffi::OsString> = Vec::with_capacity(argv.len() + 10);
             wrapped.push(std::ffi::OsString::from("tmux"));
@@ -782,6 +970,9 @@ impl RunManager {
             wrapped.push(std::ffi::OsString::from("-c"));
             wrapped.push(std::ffi::OsString::from(cwd.clone()));
             wrapped.push(std::ffi::OsString::from("--"));
+            wrapped.push(std::ffi::OsString::from("env"));
+            wrapped.push(std::ffi::OsString::from(format!("NO_PROXY={no_proxy}")));
+            wrapped.push(std::ffi::OsString::from(format!("no_proxy={no_proxy}")));
             wrapped.extend(argv);
             *command.get_argv_mut() = wrapped;
             Some(session)
@@ -816,7 +1007,10 @@ impl RunManager {
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
             opencode_call_lock: Mutex::new(()),
+            opencode_model: None,
             tmux_session: tmux_session.clone(),
+            default_approve_text: spec.approve_text.clone(),
+            default_deny_text: spec.deny_text.clone(),
         });
 
         {
@@ -829,15 +1023,33 @@ impl RunManager {
             "cwd": run.cwd,
             "command": cmd,
         });
-        if let (Some(session), Some(obj)) = (tmux_session.as_deref(), started_data.as_object_mut()) {
-            obj.insert("runner_mode".to_string(), JsonValue::String("tmux".to_string()));
-            obj.insert("tmux_session".to_string(), JsonValue::String(session.to_string()));
+        if let (Some(session), Some(obj)) = (tmux_session.as_deref(), started_data.as_object_mut())
+        {
+            obj.insert(
+                "runner_mode".to_string(),
+                JsonValue::String("tmux".to_string()),
+            );
+            obj.insert(
+                "tmux_session".to_string(),
+                JsonValue::String(session.to_string()),
+            );
         }
         let mut started = WsEnvelope::new("run.started", started_data);
         started.host_id = Some(self.host_id.clone());
         started.run_id = Some(run_id.clone());
         started.seq = Some(run.next_seq());
         let _ = self.events.send(started);
+
+        let runner_mode = if tmux_session.is_some() {
+            "tmux"
+        } else {
+            "pty"
+        };
+        let mut ready = WsEnvelope::new("run.ready", json!({ "runner_mode": runner_mode }));
+        ready.host_id = Some(self.host_id.clone());
+        ready.run_id = Some(run_id.clone());
+        ready.seq = Some(run.next_seq());
+        let _ = self.events.send(ready);
 
         let events = self.events.clone();
         let host_id = self.host_id.clone();
@@ -906,6 +1118,20 @@ impl RunManager {
                                     let prompt = chunk_text.chars().take(200).collect::<String>();
                                     let request_id = uuid::Uuid::new_v4().to_string();
 
+                                    let mut approve_text =
+                                        run_for_thread.default_approve_text.clone();
+                                    let deny_text = run_for_thread.default_deny_text.clone();
+                                    if run_for_thread.tool == "codex" {
+                                        let p = prompt.to_lowercase();
+                                        let is_trust_prompt = p
+                                            .contains("do you trust the contents")
+                                            || p.contains("trust the contents")
+                                            || p.contains("press enter to continue");
+                                        if is_trust_prompt {
+                                            approve_text = "\n".to_string();
+                                        }
+                                    }
+
                                     if let Ok(mut pending) =
                                         run_for_thread.pending_permission.try_lock()
                                     {
@@ -913,8 +1139,8 @@ impl RunManager {
                                             request_id: request_id.clone(),
                                             reason: "prompt".to_string(),
                                             prompt: prompt.clone(),
-                                            approve_text: "y\n".to_string(),
-                                            deny_text: "n\n".to_string(),
+                                            approve_text: approve_text.clone(),
+                                            deny_text: deny_text.clone(),
                                             rpc_request_id: None,
                                         });
                                     }
@@ -925,8 +1151,8 @@ impl RunManager {
                                             "request_id": request_id,
                                             "reason": "prompt",
                                             "prompt": prompt,
-                                            "approve_text": "y\n",
-                                            "deny_text": "n\n"
+                                            "approve_text": approve_text,
+                                            "deny_text": deny_text
                                         }),
                                     );
                                     pr.host_id = Some(host_id.clone());
@@ -1073,6 +1299,7 @@ impl RunManager {
         run_id: String,
         cmd: String,
         cwd: String,
+        model: Option<String>,
     ) -> anyhow::Result<String> {
         let bin = crate::runners::resolve_tool_bin("opencode", "RELAY_OPENCODE_BIN", "opencode");
         crate::runners::validate_bin_exists(
@@ -1101,7 +1328,13 @@ impl RunManager {
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
             opencode_call_lock: Mutex::new(()),
+            opencode_model: model
+                .clone()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
             tmux_session: None,
+            default_approve_text: "y\n".to_string(),
+            default_deny_text: "n\n".to_string(),
         });
 
         {
@@ -1116,6 +1349,7 @@ impl RunManager {
                 "cwd": cwd,
                 "command": cmd,
                 "mode": "structured",
+                "model": model.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
                 "permission_env_set": std::env::var_os("OPENCODE_PERMISSION").is_some(),
                 "permission_mode": if std::env::var_os("OPENCODE_PERMISSION").is_some() {
                     "env"
@@ -1131,6 +1365,12 @@ impl RunManager {
         started.seq = Some(run.next_seq());
         let _ = self.events.send(started);
 
+        let mut ready = WsEnvelope::new("run.ready", json!({ "runner_mode": "structured" }));
+        ready.host_id = Some(self.host_id.clone());
+        ready.run_id = Some(run_id.clone());
+        ready.seq = Some(run.next_seq());
+        let _ = self.events.send(ready);
+
         Ok(run_id)
     }
 
@@ -1145,20 +1385,28 @@ impl RunManager {
             s.replace('\\', "\\\\").replace('\"', "\\\"")
         }
 
-        fn resolve_relay_mcp_command() -> String {
+        fn resolve_relay_mcp_command() -> Option<String> {
             if let Ok(v) = std::env::var("RELAY_MCP_COMMAND") {
                 let v = v.trim().to_string();
                 if !v.is_empty() {
-                    return v;
+                    return Some(v);
                 }
             }
 
             let exe = match std::env::current_exe() {
                 Ok(p) => p,
-                Err(_) => return "relay".to_string(),
+                Err(_) => {
+                    if crate::runners::find_in_path("relay") {
+                        return Some("relay".to_string());
+                    }
+                    return None;
+                }
             };
             let Some(dir) = exe.parent() else {
-                return "relay".to_string();
+                if crate::runners::find_in_path("relay") {
+                    return Some("relay".to_string());
+                }
+                return None;
             };
 
             #[cfg(windows)]
@@ -1167,9 +1415,12 @@ impl RunManager {
             let candidate = dir.join("relay");
 
             if candidate.is_file() {
-                return candidate.to_string_lossy().to_string();
+                return Some(candidate.to_string_lossy().to_string());
             }
-            "relay".to_string()
+            if crate::runners::find_in_path("relay") {
+                return Some("relay".to_string());
+            }
+            None
         }
 
         fn env_truthy(name: &str) -> bool {
@@ -1183,15 +1434,24 @@ impl RunManager {
             )
         }
 
-        fn env_falsy(name: &str) -> bool {
-            let v = match std::env::var(name) {
-                Ok(v) => v,
-                Err(_) => return false,
-            };
-            matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "0" | "false" | "no" | "n" | "off"
-            )
+        fn merged_no_proxy_for_localhost() -> String {
+            let existing = std::env::var("NO_PROXY")
+                .or_else(|_| std::env::var("no_proxy"))
+                .unwrap_or_default();
+            let mut parts: Vec<String> = existing
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+
+            for item in ["127.0.0.1", "localhost", "::1"] {
+                if !parts.iter().any(|p| p.eq_ignore_ascii_case(item)) {
+                    parts.push(item.to_string());
+                }
+            }
+
+            parts.join(",")
         }
 
         let bin = crate::runners::resolve_tool_bin("codex", "RELAY_CODEX_BIN", "codex");
@@ -1205,20 +1465,35 @@ impl RunManager {
             child_cmd.arg(a);
         }
 
-        if !env_falsy("RELAY_CODEX_ENABLE_RELAY_MCP") && !env_truthy("RELAY_CODEX_DISABLE_RELAY_MCP")
+        if !env_truthy("RELAY_CODEX_KEEP_USER_MCP") {
+            child_cmd.arg("--config");
+            child_cmd.arg("mcp_servers.metamcp.enabled=false");
+            child_cmd.arg("--config");
+            child_cmd.arg("mcp_servers.serena.enabled=false");
+        }
+
+        if env_truthy("RELAY_CODEX_ENABLE_RELAY_MCP")
+            && !env_truthy("RELAY_CODEX_DISABLE_RELAY_MCP")
         {
-            let relay_cmd = escape_toml_basic_string(&resolve_relay_mcp_command());
-            child_cmd.arg("--config");
-            child_cmd.arg(format!(
-                r#"mcp_servers.relay={{command="{relay_cmd}", args=["mcp"], startup_timeout_sec=20, tool_timeout_sec=600, enabled=true}}"#,
-            ));
-            child_cmd.arg("--config");
-            child_cmd.arg(
-                r#"mcp_servers.relay.env={RELAY_RUN_ID="${RELAY_RUN_ID}", RELAY_HOSTD_SOCK="${RELAY_HOSTD_SOCK}", RELAY_TOOL="${RELAY_TOOL}"}"#,
-            );
+            if let Some(relay_cmd) = resolve_relay_mcp_command() {
+                let relay_cmd = escape_toml_basic_string(&relay_cmd);
+                child_cmd.arg("--config");
+                child_cmd.arg(format!(
+                    r#"mcp_servers.relay={{command="{relay_cmd}", args=["mcp"], startup_timeout_sec=20, tool_timeout_sec=600, enabled=true}}"#,
+                ));
+                child_cmd.arg("--config");
+                child_cmd.arg(
+                    r#"mcp_servers.relay.env={RELAY_RUN_ID="${RELAY_RUN_ID}", RELAY_HOSTD_SOCK="${RELAY_HOSTD_SOCK}", RELAY_TOOL="${RELAY_TOOL}"}"#,
+                );
+            }
         }
 
         child_cmd.current_dir(&cwd);
+
+        let no_proxy = merged_no_proxy_for_localhost();
+        child_cmd.env("NO_PROXY", &no_proxy);
+        child_cmd.env("no_proxy", &no_proxy);
+
         child_cmd.env("RELAY_RUN_ID", &run_id);
         child_cmd.env("RELAY_TOOL", "codex");
         child_cmd.env("RELAY_HOSTD_SOCK", &self.local_unix_socket);
@@ -1261,7 +1536,10 @@ impl RunManager {
             opencode_session_id: StdMutex::new(None),
             opencode_active_pid: StdMutex::new(None),
             opencode_call_lock: Mutex::new(()),
+            opencode_model: None,
             tmux_session: None,
+            default_approve_text: "y\n".to_string(),
+            default_deny_text: "n\n".to_string(),
         });
 
         {
@@ -1283,6 +1561,12 @@ impl RunManager {
         started.run_id = Some(run_id.clone());
         started.seq = Some(run.next_seq());
         let _ = self.events.send(started);
+
+        let mut ready = WsEnvelope::new("run.ready", json!({ "runner_mode": "structured" }));
+        ready.host_id = Some(self.host_id.clone());
+        ready.run_id = Some(run_id.clone());
+        ready.seq = Some(run.next_seq());
+        let _ = self.events.send(ready);
 
         // Stdout JSON-RPC reader.
         {
@@ -1317,7 +1601,9 @@ impl RunManager {
 
                                 let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
                                 if method == "elicitation/create" {
-                                    if let Some(rpc_request_id) = v.get("id").and_then(|v| v.as_i64()) {
+                                    if let Some(rpc_request_id) =
+                                        v.get("id").and_then(|v| v.as_i64())
+                                    {
                                         let prompt = v
                                             .get("params")
                                             .and_then(|p| p.get("prompt"))
@@ -1339,7 +1625,9 @@ impl RunManager {
                                             });
                                         }
 
-                                        if let Ok(mut awaiting) = run_for_thread.awaiting_input.try_lock() {
+                                        if let Ok(mut awaiting) =
+                                            run_for_thread.awaiting_input.try_lock()
+                                        {
                                             *awaiting = true;
                                         }
 
@@ -1466,7 +1754,9 @@ impl RunManager {
                 return Err(anyhow::anyhow!("codex mcp server missing tool: codex"));
             }
             if !has_reply {
-                tracing::warn!("codex mcp server missing tool: codex-reply (will retry without threadId)");
+                tracing::warn!(
+                    "codex mcp server missing tool: codex-reply (will retry without threadId)"
+                );
             }
 
             let mut state = run.codex_mcp.lock().await;
@@ -1670,7 +1960,8 @@ impl RunManager {
                     Err(e) => last_err = Some(e),
                 }
             }
-            Err(last_err.unwrap_or_else(|| anyhow::anyhow!("no compatible codex mcp server args found")))
+            Err(last_err
+                .unwrap_or_else(|| anyhow::anyhow!("no compatible codex mcp server args found")))
         })
         .await?
     }
@@ -1699,10 +1990,72 @@ impl RunManager {
 
         let is_codex_mcp = { run.codex_mcp.lock().await.is_some() };
         let is_opencode_structured = run.opencode_structured;
+
+        let mut wrote_to_process = false;
         if !is_codex_mcp && !is_opencode_structured {
-            let mut w = run.writer.lock().await;
-            w.write_all(text.as_bytes()).context("write stdin")?;
-            w.flush().ok();
+            if let Some(session) = run.tmux_session.as_deref() {
+                #[cfg(unix)]
+                {
+                    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+                    let ends_with_nl = normalized.ends_with('\n');
+                    let mut parts = normalized.split('\n').collect::<Vec<_>>();
+                    if ends_with_nl && parts.last().is_some_and(|v| v.is_empty()) {
+                        parts.pop();
+                    }
+
+                    let target = {
+                        let out = Command::new("tmux")
+                            .args(["list-panes", "-t", session, "-F", "#{pane_id}"])
+                            .output()
+                            .context("tmux list-panes")?;
+                        if !out.status.success() {
+                            return Err(anyhow::anyhow!("tmux list-panes failed"));
+                        }
+                        let stdout = String::from_utf8_lossy(&out.stdout);
+                        let pane = stdout.lines().next().unwrap_or("").trim();
+                        if pane.is_empty() {
+                            session.to_string()
+                        } else {
+                            pane.to_string()
+                        }
+                    };
+
+                    for (idx, part) in parts.iter().enumerate() {
+                        if !part.is_empty() {
+                            let status = Command::new("tmux")
+                                .args(["send-keys", "-t"])
+                                .arg(&target)
+                                .arg("-l")
+                                .arg(part)
+                                .status()
+                                .context("tmux send-keys")?;
+                            if !status.success() {
+                                return Err(anyhow::anyhow!("tmux send-keys failed"));
+                            }
+                        }
+
+                        let is_last = idx + 1 == parts.len();
+                        if !is_last || ends_with_nl {
+                            let status = Command::new("tmux")
+                                .args(["send-keys", "-t"])
+                                .arg(&target)
+                                .arg("Enter")
+                                .status()
+                                .context("tmux send-keys Enter")?;
+                            if !status.success() {
+                                return Err(anyhow::anyhow!("tmux send-keys Enter failed"));
+                            }
+                        }
+                    }
+                    wrote_to_process = true;
+                }
+            }
+
+            if !wrote_to_process {
+                let mut w = run.writer.lock().await;
+                w.write_all(text.as_bytes()).context("write stdin")?;
+                w.flush().ok();
+            }
         }
 
         // Clear awaiting flag once we write an input.
@@ -1739,7 +2092,9 @@ impl RunManager {
                 tokio::spawn(async move {
                     let events2 = events.clone();
                     let host_id2 = host_id.clone();
-                    if let Err(e) = codex_mcp_submit_prompt(run2.clone(), events2, host_id2, prompt).await {
+                    if let Err(e) =
+                        codex_mcp_submit_prompt(run2.clone(), events2, host_id2, prompt).await
+                    {
                         let mut env = WsEnvelope::new(
                             "run.output",
                             json!({ "stream": "stderr", "text": format!("codex mcp prompt failed: {e:#}") }),
@@ -1759,9 +2114,14 @@ impl RunManager {
                 let events = self.events.clone();
                 let host_id = self.host_id.clone();
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        opencode_submit_prompt(run2.clone(), redactor.clone(), events.clone(), host_id.clone(), prompt)
-                            .await
+                    if let Err(e) = opencode_submit_prompt(
+                        run2.clone(),
+                        redactor.clone(),
+                        events.clone(),
+                        host_id.clone(),
+                        prompt,
+                    )
+                    .await
                     {
                         let mut env = WsEnvelope::new(
                             "run.output",
@@ -1899,14 +2259,19 @@ impl RunManager {
                     let events = self.events.clone();
                     let host_id = self.host_id.clone();
                     tokio::spawn(async move {
-                        if let Err(e) =
-                            opencode_submit_prompt(run2.clone(), redactor.clone(), events.clone(), host_id.clone(), prompt)
-                                .await
-                    {
-                        let mut env = WsEnvelope::new(
-                            "run.output",
-                            json!({ "stream": "stderr", "text": format!("opencode prompt failed: {e:#}") }),
-                        );
+                        if let Err(e) = opencode_submit_prompt(
+                            run2.clone(),
+                            redactor.clone(),
+                            events.clone(),
+                            host_id.clone(),
+                            prompt,
+                        )
+                        .await
+                        {
+                            let mut env = WsEnvelope::new(
+                                "run.output",
+                                json!({ "stream": "stderr", "text": format!("opencode prompt failed: {e:#}") }),
+                            );
                             env.host_id = Some(host_id);
                             env.run_id = Some(run2.run_id.clone());
                             env.seq = Some(run2.next_seq());
@@ -2049,11 +2414,7 @@ impl RunManager {
                     _ => Signal::SIGTERM,
                 };
 
-                let pid = run
-                    .opencode_active_pid
-                    .lock()
-                    .ok()
-                    .and_then(|pid| *pid);
+                let pid = run.opencode_active_pid.lock().ok().and_then(|pid| *pid);
                 if let Some(pid) = pid {
                     let _ = kill(Pid::from_raw(pid), sig);
                 }
@@ -2121,7 +2482,9 @@ impl RunManager {
             let Some(pty) = run.pty.as_ref() else {
                 return Ok(());
             };
-            let pty = pty.lock().map_err(|_| anyhow::anyhow!("pty lock poisoned"))?;
+            let pty = pty
+                .lock()
+                .map_err(|_| anyhow::anyhow!("pty lock poisoned"))?;
             pty.resize(PtySize {
                 rows,
                 cols,
@@ -2196,4 +2559,148 @@ pub struct RunSummary {
     pub cwd: String,
     pub awaiting_input: bool,
     pub pending_request_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{opencode_model_choices, opencode_structured_config_value, validate_run_cwd};
+    use serde_json::json;
+    use std::fs;
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: &str) -> Self {
+            let previous = std::env::var(name).ok();
+            unsafe {
+                std::env::set_var(name, value);
+            }
+            Self { name, previous }
+        }
+
+        fn unset(name: &'static str) -> Self {
+            let previous = std::env::var(name).ok();
+            unsafe {
+                std::env::remove_var(name);
+            }
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe {
+                    std::env::set_var(self.name, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(self.name);
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn validate_run_cwd_rejects_missing_directory() {
+        let missing = format!("/tmp/relay-missing-cwd-{}", uuid::Uuid::new_v4().simple());
+        let err = validate_run_cwd(&missing).expect_err("missing cwd should error");
+        assert!(err.to_string().contains("run cwd does not exist"));
+    }
+
+    #[test]
+    fn validate_run_cwd_accepts_existing_directory() {
+        let cwd = std::env::current_dir().expect("current_dir");
+        validate_run_cwd(cwd.to_str().expect("utf8 cwd")).expect("existing cwd should pass");
+    }
+
+    #[test]
+    fn opencode_structured_config_disables_share_and_plugins() {
+        let temp = std::env::temp_dir().join(format!(
+            "relay-opencode-config-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let config_dir = temp.join("opencode");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config_path = config_dir.join("opencode.json");
+        fs::write(
+            &config_path,
+            serde_json::to_string(&json!({
+                "share": "auto",
+                "plugin": ["demo-plugin"],
+                "model": "cch-oai/gpt-5.4"
+            }))
+            .expect("encode config"),
+        )
+        .expect("write config");
+
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.to_str().expect("utf8 temp"));
+        let value = opencode_structured_config_value(None).expect("structured config value");
+        assert_eq!(
+            value.get("share").and_then(|v| v.as_str()),
+            Some("disabled")
+        );
+        assert!(value.get("plugin").is_none());
+        assert_eq!(
+            value.get("model").and_then(|v| v.as_str()),
+            Some("cch-oai/gpt-5.4")
+        );
+
+        fs::remove_dir_all(&temp).ok();
+    }
+
+    #[test]
+    fn opencode_structured_config_defaults_when_global_missing() {
+        let _xdg = EnvVarGuard::unset("XDG_CONFIG_HOME");
+        let temp_home = std::env::temp_dir().join(format!(
+            "relay-opencode-home-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&temp_home).expect("create temp home");
+        let _home = EnvVarGuard::set("HOME", temp_home.to_str().expect("utf8 temp home"));
+
+        let value = opencode_structured_config_value(None).expect("default structured config");
+        assert_eq!(value, json!({ "share": "disabled" }));
+
+        fs::remove_dir_all(&temp_home).ok();
+    }
+
+    #[test]
+    fn opencode_model_choices_reads_provider_models_and_default() {
+        let temp = std::env::temp_dir().join(format!(
+            "relay-opencode-models-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let config_dir = temp.join("opencode");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config_path = config_dir.join("opencode.json");
+        fs::write(
+            &config_path,
+            serde_json::to_string(&json!({
+                "model": "cch-oai/gpt-5.4",
+                "provider": {
+                    "cch-oai": { "models": { "gpt-5.4": {}, "glm-5": {} } },
+                    "cch-claude": { "models": { "claude-opus-4-6": {} } }
+                }
+            }))
+            .expect("encode config"),
+        )
+        .expect("write config");
+
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.to_str().expect("utf8 temp"));
+        let (models, default_model) = opencode_model_choices().expect("model choices");
+        assert_eq!(default_model.as_deref(), Some("cch-oai/gpt-5.4"));
+        assert_eq!(
+            models,
+            vec![
+                "cch-claude/claude-opus-4-6".to_string(),
+                "cch-oai/glm-5".to_string(),
+                "cch-oai/gpt-5.4".to_string(),
+            ]
+        );
+
+        fs::remove_dir_all(&temp).ok();
+    }
 }

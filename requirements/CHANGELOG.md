@@ -1,5 +1,12 @@
 # Requirements Changelog
 
+## 2026-03-18
+- Clarify messages API supports `include_output=false` so event/card views can suppress bulk `run.output` history.
+- Clarify TUI sessions must not stream bulk `run.output` into the event view by default; output subscription belongs to terminal/output mode unless explicitly needed.
+- Clarify `opencode` structured mode must isolate user global config, disable share, strip plugins, and avoid inherited stdin to prevent share-link/hang regressions.
+- Add `opencode` per-run model override requirement and host info model discovery requirement for web/cli start flows.
+- Add start-form requirements for host-aware tool dropdown, optional `opencode` model selection, remembered cwd, and clearer cwd validation errors.
+
 ## 2026-02-08
 - Add mobile-first structured session cards requirement: on <=640 screens, opening/restoring/switching sessions defaults to Events (card stream), not Terminal.
 - Clarify mobile Terminal is secondary entry only and requires explicit user action.

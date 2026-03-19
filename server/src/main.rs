@@ -149,6 +149,11 @@ async fn http_send_input(
     };
 
     let actor = body.actor.as_deref().unwrap_or("web");
+    tracing::warn!(
+        "http_send_input: input_id={}, text={:?}",
+        body.input_id,
+        body.text
+    );
     let data = serde_json::json!({
         "input_id": body.input_id,
         "actor": actor,
@@ -333,6 +338,7 @@ async fn http_server_logs_tail(
 struct MessagesQuery {
     before_id: Option<i64>,
     limit: Option<i64>,
+    include_output: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -382,7 +388,10 @@ async fn http_list_messages(
     }
 
     let limit = q.limit.unwrap_or(200);
-    let rows = match db::list_message_events(&state.db, &run_id, q.before_id, limit).await {
+    let include_output = q.include_output.unwrap_or(true);
+    let rows = match db::list_message_events(&state.db, &run_id, include_output, q.before_id, limit)
+        .await
+    {
         Ok(r) => r,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     };
@@ -427,7 +436,12 @@ async fn http_list_messages(
                     .map(|s| s.to_string());
                 let args = parsed.get("args").unwrap_or(&JsonValue::Null);
                 let args = truncate_text(&json_compact(args), 2000);
-                ("system", format!("tool.call {tool} {args}"), req, parsed_data)
+                (
+                    "system",
+                    format!("tool.call {tool} {args}"),
+                    req,
+                    parsed_data,
+                )
             }
             "tool.result" => {
                 let parsed = parsed_data.clone().unwrap_or(JsonValue::Null);
@@ -532,9 +546,11 @@ fn sha256_hex(input: &str) -> String {
 fn redact_json_strings(redactor: &Redactor, v: &serde_json::Value) -> serde_json::Value {
     match v {
         serde_json::Value::String(s) => serde_json::Value::String(redactor.redact(s).text_redacted),
-        serde_json::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(|x| redact_json_strings(redactor, x)).collect())
-        }
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|x| redact_json_strings(redactor, x))
+                .collect(),
+        ),
         serde_json::Value::Object(map) => {
             let mut out = serde_json::Map::with_capacity(map.len());
             for (k, val) in map.iter() {
@@ -650,12 +666,32 @@ fn validate_jwt(state: &AppState, token: &str) -> anyhow::Result<Claims> {
 
 async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
     let mut rx = state.app_tx.subscribe();
+    let mut subscribed_runs: HashMap<String, bool> = HashMap::new();
 
     loop {
         tokio::select! {
             msg = rx.recv() => {
                 match msg {
                     Ok(env) => {
+                        if env.r#type == "run.output" {
+                            let Some(run_id) = env.run_id.as_deref() else {
+                                continue;
+                            };
+                            let Some(include_output) = subscribed_runs.get(run_id) else {
+                                continue;
+                            };
+                            if !*include_output {
+                                continue;
+                            }
+                        } else if !subscribed_runs.is_empty() {
+                            let is_high_volume = env.r#type == "tool.call" || env.r#type == "tool.result";
+                            if is_high_volume {
+                                let Some(run_id) = env.run_id.as_deref() else { continue; };
+                                let Some(_) = subscribed_runs.get(run_id) else {
+                                    continue;
+                                };
+                            }
+                        }
                         let Ok(text) = serde_json::to_string(&env) else { continue; };
                         if socket.send(Message::Text(text)).await.is_err() {
                             break;
@@ -677,10 +713,44 @@ async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
                             && env.r#type != "run.resize"
                             && env.r#type != "run.permission.approve"
                             && env.r#type != "run.permission.deny"
+                            && env.r#type != "run.subscribe"
+                            && env.r#type != "run.unsubscribe"
                             && !is_rpc
                         {
                             continue;
                         }
+                        if env.r#type == "run.subscribe" {
+                            let run_id = env
+                                .run_id
+                                .clone()
+                                .or_else(|| env.data.get("run_id").and_then(|v| v.as_str()).map(|s| s.to_string()));
+                            if let Some(run_id) = run_id {
+                                let replace = env.data.get("replace").and_then(|v| v.as_bool()).unwrap_or(false);
+                                let include_output = env
+                                    .data
+                                    .get("include_output")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
+                                if replace {
+                                    subscribed_runs.clear();
+                                }
+                                subscribed_runs.insert(run_id, include_output);
+                            }
+                            continue;
+                        }
+                        if env.r#type == "run.unsubscribe" {
+                            let run_id = env
+                                .run_id
+                                .clone()
+                                .or_else(|| env.data.get("run_id").and_then(|v| v.as_str()).map(|s| s.to_string()));
+                            if let Some(run_id) = run_id {
+                                subscribed_runs.remove(&run_id);
+                            } else {
+                                subscribed_runs.clear();
+                            }
+                            continue;
+                        }
+
                         let (host_id, run_id) = if env.r#type == "rpc.run.start"
                             || env.r#type == "rpc.host.info"
                             || env.r#type == "rpc.host.doctor"
@@ -839,6 +909,9 @@ ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at
                 let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
                     continue;
                 };
+                if env.r#type == "run.send_input" {
+                    tracing::debug!("WS run.send_input: data={:?}", env.data);
+                }
                 let now_inst = Instant::now();
                 if now_inst.duration_since(last_seen_written_at) >= seen_update_interval {
                     let _ = sqlx::query("UPDATE hosts SET last_seen_at=?2 WHERE id=?1")
@@ -1066,9 +1139,15 @@ async fn http_static_fallback(
         .insert(axum::http::header::CONTENT_TYPE, mime.parse().unwrap());
     // Avoid caching index.html so that deploys pick up new hashed asset URLs.
     // Cache hashed assets aggressively for performance.
-    let cache_control = if served_path == "index.html" {
+    let cache_control = if served_path == "index.html"
+        || served_path == "manifest.webmanifest"
+        || served_path == "sw.js"
+        || served_path == "registerSW.js"
+    {
         "no-store"
     } else if served_path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else if served_path.starts_with("workbox-") {
         "public, max-age=31536000, immutable"
     } else {
         "public, max-age=3600"
@@ -1305,5 +1384,58 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("mismatch"));
+    }
+
+    #[tokio::test]
+    async fn list_message_events_can_exclude_run_output() {
+        let db = db::connect("sqlite::memory:").await.unwrap();
+        db::init(&db).await.unwrap();
+
+        let ts = Utc::now();
+        db::insert_event(
+            &db,
+            "run-1",
+            Some(1),
+            ts,
+            "run.output",
+            Some("stdout"),
+            None,
+            None,
+            Some("hidden raw output"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        db::insert_event(
+            &db,
+            "run-1",
+            Some(2),
+            ts,
+            "tool.result",
+            None,
+            Some("assistant"),
+            None,
+            Some("structured result"),
+            None,
+            None,
+            Some("{}"),
+        )
+        .await
+        .unwrap();
+
+        let without_output = db::list_message_events(&db, "run-1", false, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(without_output.len(), 1);
+        assert_eq!(without_output[0].r#type, "tool.result");
+
+        let with_output = db::list_message_events(&db, "run-1", true, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(with_output.len(), 2);
+        assert_eq!(with_output[0].r#type, "tool.result");
+        assert_eq!(with_output[1].r#type, "run.output");
     }
 }

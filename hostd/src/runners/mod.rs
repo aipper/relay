@@ -5,6 +5,10 @@ use std::sync::Arc;
 pub struct RunnerSpec {
     pub command: CommandBuilder,
     pub prompt_regex: Arc<Regex>,
+    /// Text to send when user approves a detected prompt (default: "y\n").
+    pub approve_text: String,
+    /// Text to send when user denies a detected prompt (default: "n\n").
+    pub deny_text: String,
 }
 
 pub trait Runner: Send + Sync {

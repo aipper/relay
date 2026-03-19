@@ -2,9 +2,7 @@ import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { VitePWA } from "vite-plugin-pwa";
 
-const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "0", 10);
-const disablePwa =
-  process.env.RELAY_DISABLE_PWA === "1" || (nodeMajor >= 25 && process.env.RELAY_FORCE_PWA !== "1");
+const disablePwa = process.env.RELAY_DISABLE_PWA === "1";
 
 export default defineConfig({
   build: {

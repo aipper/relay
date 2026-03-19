@@ -68,9 +68,7 @@ fn detect_claude_mcp_support(bin: &str) -> ClaudeMcpSupport {
         .output();
 
     let Ok(output) = output else {
-        return ClaudeMcpSupport {
-            mcp_config: false,
-        };
+        return ClaudeMcpSupport { mcp_config: false };
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -153,6 +151,8 @@ impl Runner for ClaudeRunner {
         Ok(RunnerSpec {
             command,
             prompt_regex: base_prompt_regex("claude"),
+            approve_text: "y\n".to_string(),
+            deny_text: "n\n".to_string(),
         })
     }
 }

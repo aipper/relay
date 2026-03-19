@@ -11,9 +11,9 @@ This repo can run Codex CLI under `hostd` and expose filesystem/git/shell tools 
 
 ## Configure Codex MCP server
 
-When you start Codex via `relay-hostd`, hostd injects a per-run `--config` that registers `relay mcp` as an MCP server (no persistent changes to `~/.codex/config.toml`).
+When you start Codex via `relay-hostd`, hostd can inject a per-run `--config` that registers `relay mcp` as an MCP server (no persistent changes to `~/.codex/config.toml`).
 
-To opt out, set `RELAY_CODEX_DISABLE_RELAY_MCP=1` in the `relay-hostd` environment.
+To opt in, set `RELAY_CODEX_ENABLE_RELAY_MCP=1` in the `relay-hostd` environment.
 
 If your `relay` binary is not in `PATH`, hostd will try to use a sibling `relay` next to `relay-hostd`. You can override the command via `RELAY_MCP_COMMAND=/abs/path/to/relay`.
 
