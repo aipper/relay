@@ -116,7 +116,7 @@ pub fn opencode_model_choices() -> anyhow::Result<(Vec<String>, Option<String>)>
 
 fn opencode_structured_model_supported(model: &str) -> bool {
     let normalized = model.trim();
-    !normalized.starts_with("cch-claude/")
+    !normalized.starts_with("cch-claude/") && normalized != "cch-g/g3-flash-preview"
 }
 
 pub fn opencode_structured_model_choices()
@@ -130,7 +130,7 @@ pub fn opencode_structured_model_choices()
     let removed = models.len().saturating_sub(filtered.len());
     let note = if removed > 0 {
         Some(
-            "structured 模式下已隐藏已知不兼容模型（当前为 cch-claude/*）；这些模型在本机验证中会卡住且不产出 JSON 事件"
+            "structured 模式下已隐藏已知不兼容模型（当前为 cch-claude/* 与 cch-g/g3-flash-preview）；这些模型在本机验证中会卡住且不产出 JSON 事件"
                 .to_string(),
         )
     } else {
@@ -145,7 +145,7 @@ fn validate_opencode_structured_model(model: Option<&str>) -> anyhow::Result<()>
     if let Some(model) = model {
         if !opencode_structured_model_supported(model) {
             anyhow::bail!(
-                "opencode structured mode does not support model `{}` on this host; choose a non-cch-claude model",
+                "opencode structured mode does not support model `{}` on this host; choose a structured-compatible model (for example, avoid cch-claude/* and the known-bad cch-g/g3-flash-preview)",
                 model
             );
         }
@@ -3084,7 +3084,8 @@ mod tests {
                 "model": "cch-claude/claude-opus-4-6",
                 "provider": {
                     "cch-oai": { "models": { "gpt-5.4": {}, "glm-5": {} } },
-                    "cch-claude": { "models": { "claude-opus-4-6": {}, "claude-sonnet-4-6": {} } }
+                    "cch-claude": { "models": { "claude-opus-4-6": {}, "claude-sonnet-4-6": {} } },
+                    "cch-g": { "models": { "g3-flash-preview": {}, "g3-pro": {} } }
                 }
             }))
             .expect("encode config"),
@@ -3096,10 +3097,16 @@ mod tests {
             opencode_structured_model_choices().expect("structured model choices");
         assert_eq!(
             models,
-            vec!["cch-oai/glm-5".to_string(), "cch-oai/gpt-5.4".to_string()]
+            vec![
+                "cch-g/g3-pro".to_string(),
+                "cch-oai/glm-5".to_string(),
+                "cch-oai/gpt-5.4".to_string(),
+            ]
         );
         assert_eq!(default_model, None);
-        assert!(note.as_deref().unwrap_or_default().contains("cch-claude"));
+        let note = note.as_deref().unwrap_or_default();
+        assert!(note.contains("cch-claude"));
+        assert!(note.contains("cch-g/g3-flash-preview"));
 
         fs::remove_dir_all(&temp).ok();
     }
@@ -3110,5 +3117,9 @@ mod tests {
             .expect_err("cch-claude model should be rejected");
         assert!(err.to_string().contains("does not support model`") == false);
         assert!(err.to_string().contains("does not support model"));
+
+        let err = validate_opencode_structured_model(Some("cch-g/g3-flash-preview"))
+            .expect_err("cch-g model should be rejected");
+        assert!(err.to_string().contains("cch-g/g3-flash-preview"));
     }
 }
