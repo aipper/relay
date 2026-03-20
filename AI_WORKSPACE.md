@@ -80,10 +80,10 @@
 - 先 `/server-test-plan` → `/server-test` 跑到验收通过
 - 再 `/server-commit` 对 `server_dirs` 指定的 submodule 做 commit，并在工作区根仓库提交 submodule 指针更新
 
-建议 commit message 保持通用简洁（Conventional Commits 风格），例如：
-- `fix(api): ...`
-- `chore(server): api test fixes`
-- `chore(workspace): bump server submodules`
+建议 commit message 保持通用简洁，优先使用中文；英文也可以，例如：
+- `修复: API 健康检查空指针`
+- `构建: 调整 server 测试脚本`
+- `杂项: 更新 workspace submodule 指针`
 
 ## 3) 测试入口
 

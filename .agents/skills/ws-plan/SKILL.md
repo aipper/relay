@@ -7,6 +7,7 @@ description: 规划（生成可落盘 plan/ 工件；供 ws-dev 执行）
 
 目标：
 - 对齐真值文件（`AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`）
+- 若尚未进入本次 change 的工作上下文：先建立 `change/<change-id>` 分支 / worktree，再生成计划
 - 为当前任务生成一份可追踪的执行计划文件：`plan/<timestamp>-<slug>.md`
 - 计划必须包含可复现验证命令（优先引用 `AI_WORKSPACE.md`）
 - 计划必须包含“主索引绑定”：`Change_ID` / (`Req_ID` or `Problem_ID`) / `Contract_Row` / `Plan_File` / `Evidence_Path`
@@ -21,13 +22,46 @@ description: 规划（生成可落盘 plan/ 工件；供 ws-dev 执行）
 1) 先运行 `$ws-preflight`（读取真值文件并输出约束摘要）。
 2) 若用户任务描述不清：先问 1-3 个关键澄清问题（不要猜）。
 3) 判断复杂度：`simple / medium / complex`（给出一句理由），并估算步骤数。
-4) 识别主索引上下文（若存在）：
+4) 识别或建立主索引 / change 上下文：
    - 若存在 `changes/<change-id>/proposal.md`：读取其中 `Change_ID` / `Req_ID` / `Problem_ID` / `Contract_Row` / `Evidence_Path`
    - 若缺失关键绑定：先补齐 proposal（至少 `Change_ID`、`Req_ID|Problem_ID`、`Contract_Row`）再继续生成计划
+   - 若当前不在 `change/<change-id>` 分支 / worktree，且本次任务需要新建 change：先调用 `aiws change start` 建立上下文，再继续写 plan
+   - 推荐顺序：
+     - 工作区已存在未提交改动：不要先写 `plan/...`；先停下来说明原因，并要求用户先 commit/stash，或改用已有 change 上下文
+     - 仓库已有提交：优先创建独立 worktree；若仓库声明了 submodules，加上 `--submodules`
+     - 仓库尚无提交 / 不满足 worktree 前置条件：回退为 `--no-switch`
+```bash
+change_id="<change-id>"
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "error: working tree dirty before ws-plan creates change context"
+  echo "hint: commit/stash first, or continue inside an existing change/<change-id> context"
+  exit 2
+fi
+
+has_commits=0
+git rev-parse --verify HEAD >/dev/null 2>&1 && has_commits=1
+
+has_submodules=0
+if [[ -f .gitmodules ]] && git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' >/dev/null 2>&1; then
+  has_submodules=1
+fi
+
+if [[ "${has_commits}" -eq 1 ]]; then
+  if [[ "${has_submodules}" -eq 1 ]]; then
+    aiws change start "${change_id}" --hooks --worktree --submodules
+  else
+    aiws change start "${change_id}" --hooks --worktree
+  fi
+else
+  aiws change start "${change_id}" --hooks --no-switch
+fi
+```
+   - 若上一步创建了 worktree：后续所有读取/写入都必须切到 `aiws change start` 输出的 `worktree:` 路径中进行；不要把 `plan/...` 写回原工作区
 5) 生成计划文件：
    - 文件名：`plan/YYYY-MM-DD_HH-MM-SS-<slug>.md`（`<slug>` 用 kebab-case；同一任务调整计划时尽量复用同一文件）
    - 若 `plan/` 不存在先创建
    - 必须实际写入到磁盘（不要只在对话里输出）；如因权限/策略无法写盘，必须明确说明原因并输出可复制的完整内容
+   - 计划必须写在当前 active change 上下文内：若当前已进入 `change/<change-id>` worktree，则 `plan/...`、`proposal.md`、`tasks.md` 都应写在该 worktree 中
 6) 计划内容至少包含（不要留空）：
    - `Bindings`：`Change_ID` / `Req_ID` / `Problem_ID` / `Contract_Row` / `Plan_File` / `Evidence_Path`
    - `Goal`：要达成什么
@@ -76,4 +110,5 @@ echo "ok: wrote ${targets}"
 
 输出要求：
 - `Plan file:` <实际写入的路径>
+- `Change context:` <当前 change 分支或 worktree 路径；若新建了 worktree 需明确写出>
 - `Next:` 推荐下一步（先 `$ws-plan-verify`，通过后再 `$ws-dev`；或 `aiws change start <change-id> --hooks`，superproject + submodule 可用 `--worktree`）

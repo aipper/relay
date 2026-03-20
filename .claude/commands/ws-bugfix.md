@@ -8,15 +8,20 @@
 
 建议流程：
 1) 先运行 `/ws-preflight`。
-2) 建立变更工件（推荐）：`aiws change start <change-id> --hooks`（superproject+submodule 可用 `--worktree --submodules`）。
-3) 通过已配置 zentao MCP 拉取 bug 字段与附件列表。
-4) 落盘证据到 `changes/<change-id>/bug/`：
+2) 若当前不在 `change/<change-id>` 分支 / worktree，先建立 change 上下文：
+   - 工作区先保持干净
+   - 仓库已有提交：优先 `aiws change start <change-id> --hooks --worktree`
+   - superproject + submodule：优先 `aiws change start <change-id> --hooks --worktree --submodules`
+   - 仓库尚无提交 / 不满足 worktree 前置条件：回退 `aiws change start <change-id> --hooks --no-switch`
+3) 若上一步创建了 worktree：后续 bug 证据、CSV 更新、`/ws-dev` 修复都必须在该 worktree 中继续。
+4) 通过已配置 zentao MCP 拉取 bug 字段与附件列表。
+5) 落盘证据到当前 active change 上下文的 `changes/<change-id>/bug/`：
    - `zentao-bug-<bug-id>.json`
    - `zentao-bug-<bug-id>.md`
    - `images/<bug-id>/...`
-5) upsert `issues/fix_bus_issues.csv`（主键 `Bug_ID`）。
-6) 进入 `/ws-dev` 修复并回填状态字段 `Fix_Status/Verify_Command/Updated_At`。
-7) 质量门：`aiws change validate <change-id> --strict` + `aiws validate . --stamp`。
+6) upsert 当前 active change 上下文中的 `issues/fix_bus_issues.csv`（主键 `Bug_ID`）。
+7) 进入 `/ws-dev` 修复并回填状态字段 `Fix_Status/Verify_Command/Updated_At`。
+8) 质量门：`aiws change validate <change-id> --strict` + `aiws validate . --stamp`。
 
 强制约束：
 - 不自动 commit / push。

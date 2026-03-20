@@ -1,10 +1,10 @@
 {
   "manifest_version": 1,
   "template_id": "workspace",
-  "spec_version": "0.0.23",
-  "aiws_version": "0.0.23",
+  "spec_version": "0.0.24",
+  "aiws_version": "0.0.24",
   "installed_at": "2026-02-09T09:03:40Z",
-  "updated_at": "2026-03-17T09:52:19Z",
+  "updated_at": "2026-03-20T07:12:15Z",
   "tools": [
     "claude",
     "opencode",
@@ -110,27 +110,27 @@
     {
       "path": ".agents/skills/ws-bugfix/SKILL.md",
       "mode": "replace_file",
-      "sha256": "5ca9ed2cd74dbf50183bdddd515aa4abc6a5ce3cba6a1360093c141e7b12a08f"
+      "sha256": "e8e3a09bda5b87ae64a0d49b7b406350820852f5b8590d0f89b34f7684521dab"
     },
     {
       "path": ".agents/skills/ws-commit/SKILL.md",
       "mode": "replace_file",
-      "sha256": "88ea08165f5462e3887137a872de38fcf9d42b80783ebcc8ecf9078ed4f8a7cf"
+      "sha256": "3398e1e9b9dc46798008b4fadbdbc6058db35a3800c27878d1d4615b292e79a3"
     },
     {
       "path": ".agents/skills/ws-deliver/SKILL.md",
       "mode": "replace_file",
-      "sha256": "a872374c5bfbbd58c1c7c0350bbb1c0e6152e9c052315695baa564add6d87a07"
+      "sha256": "29fb54a730afbdda65905a401c254acccd4404235338c1ba63f9833b66b3cb29"
     },
     {
       "path": ".agents/skills/ws-dev/SKILL.md",
       "mode": "replace_file",
-      "sha256": "d64404ddbd7d93af689f19145862b138c378b560ce6d516ac3259e35ccb894f7"
+      "sha256": "2385fd78a87c9d8be9aa0090879b0d286624750024da021e6be1f96a71f9b845"
     },
     {
       "path": ".agents/skills/ws-finish/SKILL.md",
       "mode": "replace_file",
-      "sha256": "6538466b533336bfe1513907a786e5bc705a3ba7fd2860e0335d4400e66a363d"
+      "sha256": "c0935c3889b9359c78ba23c08464d418bbe257ba842ee69813a53e5a4a81d4c7"
     },
     {
       "path": ".agents/skills/ws-handoff/SKILL.md",
@@ -150,7 +150,7 @@
     {
       "path": ".agents/skills/ws-plan/SKILL.md",
       "mode": "replace_file",
-      "sha256": "61a9b5b865e6e16ec9e7f4917180e31aa88d89f6466879eb005205582ab482bc"
+      "sha256": "a0a523b2b1c807e82bb279762b7e93e1034c43ba23220e74c3134fde50469b81"
     },
     {
       "path": ".agents/skills/ws-preflight/SKILL.md",
@@ -401,41 +401,41 @@
     {
       "path": ".claude/commands/ws-bugfix.md",
       "mode": "replace_file",
-      "sha256": "e487118d4ecff329552cbcd20e9ed6420953a58b0a25943c57c6144dec72272b"
+      "sha256": "823639b222a09f202345ef66628343311bced24a69578ba2c996b2afa56e651b"
     },
     {
       "path": ".claude/commands/ws-bugfix.md",
       "mode": "managed_blocks",
       "blocks": {
-        "claude:ws-bugfix": "6b014be7993bcc25ce6ae60aee653b3cc8853fe71211a2d61e73035411d4452f"
+        "claude:ws-bugfix": "2287327b23d3de43dcdc33cd54903cdb920adf09b6f48e8154b819d2cc90103f"
       }
     },
     {
       "path": ".claude/commands/ws-commit.md",
       "mode": "managed_blocks",
       "blocks": {
-        "claude:ws-commit": "327ec37bd6fd40041463de42f9a71fec4d32b9d2ae26a21ac24961b4307095a1"
+        "claude:ws-commit": "5420fdabdfc03a4f42fe395c4266cc667cdf3ac83209ad0da5f2f888162f00db"
       }
     },
     {
       "path": ".claude/commands/ws-deliver.md",
       "mode": "managed_blocks",
       "blocks": {
-        "claude:ws-deliver": "1aa5590122d0f51494339761c1e7d2e271712faf804fcd9c78d8acdea2917196"
+        "claude:ws-deliver": "33b7d392b284cb72f2deee104be41268530b852fbb8094cacce8f0acab463155"
       }
     },
     {
       "path": ".claude/commands/ws-dev.md",
       "mode": "managed_blocks",
       "blocks": {
-        "claude:ws-dev": "8bb5410ecc1bb77a8274de9a64034ebf69cbedfb35b5c4bbf7953586ad4372c0"
+        "claude:ws-dev": "1e98a8d3e20c46b2a23921ef042de950847b999ff5e35821704da6b9eb78dcfd"
       }
     },
     {
       "path": ".claude/commands/ws-finish.md",
       "mode": "managed_blocks",
       "blocks": {
-        "claude:ws-finish": "cae7fe3310d115030227b5fdd2cf1116d80a1cefcca0673d4b11bee2ce9f67ec"
+        "claude:ws-finish": "d15973b17a7e15ba329ef3d817524faecc6da9888b3823be56ebe93a7dd58136"
       }
     },
     {
@@ -467,13 +467,13 @@
     {
       "path": ".claude/commands/ws-plan.md",
       "mode": "replace_file",
-      "sha256": "9d140769980035c226bfc9efc7a6b2bde69f4ec2cc48b8b08798fb2cc40173ac"
+      "sha256": "1a819aa2ca76e0a0575851f00795e793149e5889fac4d444d376431635d3c2a7"
     },
     {
       "path": ".claude/commands/ws-plan.md",
       "mode": "managed_blocks",
       "blocks": {
-        "claude:ws-plan": "8b8e6ea53aece02bbaedce31698384f87ed6aeb6f6716b19c927068647ad6a12"
+        "claude:ws-plan": "e322b825317fc0e223d71ec7202b70d059cd810e287a676045d2ee2341c09f73"
       }
     },
     {
@@ -552,6 +552,11 @@
       "blocks": {
         "claude:ws-submodule-setup": "9dd26045a04f25e40192d6af37badf111573d058487a4207358baeb6cdd0d980"
       }
+    },
+    {
+      "path": ".githooks/commit-msg",
+      "mode": "replace_file",
+      "sha256": "23afc5cad9cda7c8afd9dbc8a23cced5c3bab35016ba5edf98c805d77585741d"
     },
     {
       "path": ".githooks/pre-commit",
@@ -643,7 +648,7 @@
     {
       "path": ".iflow/commands/ws-commit.toml",
       "mode": "replace_file",
-      "sha256": "bffd2c27a97b7f49c8f2076113b44862f915b5a2c6c2dc2ca55d36cc22e69fac"
+      "sha256": "f390d8ce786672ea4a8d78acb7b9f9240259b89095d5fba5be679652aecd1e1b"
     },
     {
       "path": ".iflow/commands/ws-contract-check.toml",
@@ -653,7 +658,7 @@
     {
       "path": ".iflow/commands/ws-deliver.toml",
       "mode": "replace_file",
-      "sha256": "0979a7d3311f241c161d596e3eae0a3d5005614649539d9e2136b8d7f5d13b21"
+      "sha256": "c627241e65cb594e33cbdba0dcd0cdf8fbbe58fe62b6f483332bb729e3ef85cf"
     },
     {
       "path": ".iflow/commands/ws-dev.toml",
@@ -683,7 +688,7 @@
     {
       "path": ".iflow/commands/ws-finish.toml",
       "mode": "replace_file",
-      "sha256": "0f1043000ef4667e8d708048183d66ef51e231e7a7bf65ce341b0a9db604c641"
+      "sha256": "6733b570f4d6428da23a21139e797c0d443dfcc1383bab40b67c8c1e4248aebf"
     },
     {
       "path": ".iflow/commands/ws-init.toml",
@@ -949,41 +954,41 @@
     {
       "path": ".opencode/command/ws-bugfix.md",
       "mode": "replace_file",
-      "sha256": "8077529934eb81fb9570f6b9597342982fa0a4852552bc493dcf17a14a548d4e"
+      "sha256": "dc6685a7d117887bc9fb43b3e9cf84993eb6746bc62ecca65afb3b1660f48883"
     },
     {
       "path": ".opencode/command/ws-bugfix.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-bugfix": "891aa03ee735c3ab0dbd3bb83484933403cb36f94ef5b64947faf8aab32ee865"
+        "opencode:ws-bugfix": "ee9385496ad264d3dc1787cb71804a9eacdbcdb63612a2717972efdb17e2244c"
       }
     },
     {
       "path": ".opencode/command/ws-commit.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-commit": "327ec37bd6fd40041463de42f9a71fec4d32b9d2ae26a21ac24961b4307095a1"
+        "opencode:ws-commit": "5420fdabdfc03a4f42fe395c4266cc667cdf3ac83209ad0da5f2f888162f00db"
       }
     },
     {
       "path": ".opencode/command/ws-deliver.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-deliver": "fa2a26358b60feb9baac354351dd10021900d8f829e249b94c17f96fdc2080c5"
+        "opencode:ws-deliver": "b45967192c946d3005b29373ca49fabe424dea015bb05984194f9fc6d3e881ed"
       }
     },
     {
       "path": ".opencode/command/ws-dev.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-dev": "8bb5410ecc1bb77a8274de9a64034ebf69cbedfb35b5c4bbf7953586ad4372c0"
+        "opencode:ws-dev": "1e98a8d3e20c46b2a23921ef042de950847b999ff5e35821704da6b9eb78dcfd"
       }
     },
     {
       "path": ".opencode/command/ws-finish.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-finish": "cae7fe3310d115030227b5fdd2cf1116d80a1cefcca0673d4b11bee2ce9f67ec"
+        "opencode:ws-finish": "d15973b17a7e15ba329ef3d817524faecc6da9888b3823be56ebe93a7dd58136"
       }
     },
     {
@@ -1015,13 +1020,13 @@
     {
       "path": ".opencode/command/ws-plan.md",
       "mode": "replace_file",
-      "sha256": "563a2ef7d0b48268aae416be6ffd1e5a7620c1ee10540681b1463a61db1c1a30"
+      "sha256": "85b2d6fed7ff65e4bb0a3d3f372be5adc6115176594050d67b0795bd0b4e27b9"
     },
     {
       "path": ".opencode/command/ws-plan.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-plan": "849f9f1ba1753e5f542d1469750a6a8db664080a310d7b99633b3305ca2d09c2"
+        "opencode:ws-plan": "2c042351ee7cba4872e76fc536e368af748da9ec7bbc78b6ff8b112a68649fb1"
       }
     },
     {
@@ -1105,7 +1110,7 @@
       "path": "AGENTS.md",
       "mode": "managed_blocks",
       "blocks": {
-        "agents": "75a89730839247eba18bf9648ce5a3c1cefe3c17dbe0e91510472d4a7f5c637e"
+        "agents": "3ce942eb8ffa21c880b80414e4118dbbdb90fe1a35260cd6253e69dd597469e1"
       }
     },
     {
@@ -1119,7 +1124,7 @@
       "path": "AI_WORKSPACE.md",
       "mode": "managed_blocks",
       "blocks": {
-        "ai-workspace:core": "1d6b0c427b7b56b3f090704cad2288daa3dd5d42e1e451cb9eb2ee06b20067fc"
+        "ai-workspace:core": "31fb29dabfe0618fd4a41e73964cc0cd04e2cae28a96bfb971d2f2814d2492e3"
       }
     },
     {
@@ -1137,12 +1142,12 @@
     {
       "path": "tools/ws_change_check.py",
       "mode": "replace_file",
-      "sha256": "312bbdcb2713683568fff920d42baf7308858c454f42a7e04115fe5ca27a3603"
+      "sha256": "42fdf17113311565eb2e0e1736a5f00ec48257ba26fd965381b01c3f7d50a38f"
     },
     {
       "path": "tools/ws_resolve_sub_target.sh",
       "mode": "replace_file",
-      "sha256": "bd5214af9949c006882774f4144e7fefac57a217fb17b6f13b972bd241c0a563"
+      "sha256": "4a0648c5decefbb78078af793b7c848164a8ed86ebcc23e6e49c5dc1e0be88d1"
     },
     {
       "path": "tools/ws_tasks_plan.py",

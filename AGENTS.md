@@ -10,6 +10,7 @@
 协作约束（建议最小集）：
 - 每次变更使用分支 `change/<change-id>`，并维护 `changes/<change-id>/proposal.md`、`tasks.md`（可选 `design.md`）
 - 启用本机门禁（推荐）：`aiws hooks install .`（或手工：`git config core.hooksPath .githooks`；`git commit`/`git push` 会自动跑 `aiws validate .`）
+- 启用 hooks 后，`.githooks/commit-msg` 默认提示优先使用中文 commit message；如需强制，可执行：`git config aiws.commitMessagePolicy strict`
 - 提交前校验（强制门禁）：`aiws validate .`（包含：漂移检测 + `ws_change_check` + `requirements_contract`）
 - Codex（推荐）：本仓库内置 repo skills：`.agents/skills/`（可显式 `$ws-dev`，也可隐式套用工作流）
 - Codex skills 命名约定：`ws-*` 为常用链路入口；`p-*` 为私有原子入口（一般不需要直接调用）。

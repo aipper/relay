@@ -53,7 +53,7 @@ def list_submodules_from_gitmodules(root: Path) -> List[Tuple[str, str]]:
             continue
         key = line[:idx].strip()
         sub_path = line[idx + 1 :].strip()
-        m = re.match(r"^submodule\.([^.]+)\.path$", key)
+        m = re.match(r"^submodule\.(.+)\.path$", key)
         if not m:
             continue
         name = (m.group(1) or "").strip()

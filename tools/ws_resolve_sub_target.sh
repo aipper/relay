@@ -28,6 +28,7 @@ ws_resolve_sub_target() {
   if [[ -n "${override:-}" ]]; then
     _resolved_branch="${override%% *}"
     _resolved_remote="${override#* }"
+    if [[ "${_resolved_branch:-}" == "." ]]; then _resolved_branch="${base_branch}"; fi
   else
     # Priority 2: .gitmodules submodule.<name>.branch
     local cfg_branch

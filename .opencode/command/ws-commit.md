@@ -14,6 +14,7 @@ description: Commit：门禁/审计后提交（submodule 感知）
 - 不使用 `--no-verify` 绕过 hooks
 - 不自动 push
 - 不打印 secrets
+- commit message 优先使用中文；若启用了 `.githooks/commit-msg`，默认仅提示，只有 strict 模式才会拒绝全英文首行（`Merge/Revert/fixup!/squash!` 例外）
 
 步骤（建议）：
 1) 先运行 `/ws-preflight`。
@@ -54,7 +55,7 @@ git status --porcelain
 git diff --staged --submodule=short
 ```
 7) 若没有 staged changes：停止并提示用户先明确要提交哪些文件（例如 `git add -p` 或 `git add <path>`）。
-8) 让用户提供 commit message（必须确认后再执行）。
+8) 优先生成并确认中文 commit message（格式建议：`<类型>: <简述>`；若用户明确要求英文也可保留，但 strict 模式下会被 hook 拒绝）。
 9) 执行提交（不带 `--no-verify`）：
 ```bash
 git commit -m "<message>"

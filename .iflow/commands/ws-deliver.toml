@@ -8,7 +8,7 @@ description = "交付（submodules + superproject 分步提交，并安全合并
 prompt = """
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
 
-目标：适配 superproject + submodule（数量不固定）的交付收尾，降低“提交顺序/合并回 base 分支”出错概率：
+目标：适配 superproject + submodule（数量不固定）的交付收尾，降低提交顺序和合并回 base 分支的出错概率：
 1) 先逐个提交 submodule（每个 repo 单独确认 commit message；默认 `git add -p`）
 2) 再提交 superproject（包含 submodule gitlink 指针更新 + 自身改动/变更工件）
 3) 最后 fast-forward 合并回目标分支（复用 `aiws change finish`；建议用 `ws:finish`）
@@ -21,11 +21,15 @@ prompt = """
 建议流程（按顺序）：
 1) 先确认真值文件存在并遵守：`AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`。
 2) 如果存在 `.gitmodules` 但缺少 `submodule.<name>.branch`，先运行 `ws:submodule-setup` 并提交 `.gitmodules`（否则 `aiws validate .` 会失败，且 submodule 工作流会产生人为差异）。
+2.1) 若存在 submodule：必须准备 `changes/<change-id>/submodules.targets`，并覆盖所有 submodule path；这是本次交付的目标分支真值。
+   - 生成该文件时可先做默认预填：detached HEAD 默认建议取 `.gitmodules` 声明分支；已附着在本地分支时默认建议取当前分支。
+   - 上述都只是建议值；真正的 deliver/finish 只认 `submodules.targets`。
 2) 发现 submodules：
    - `git submodule status --recursive`
 3) 逐个提交 submodules（按上一步顺序）：
    - `git -C "<sub_path>" status --porcelain`
-   - 若当前为 detached HEAD：不要直接切 `change/<change-id>` / `main` / `master`；先按 `.gitmodules` 的目标分支挂到 `aiws/pin/<target-branch>`
+   - 先说明该 submodule 目标分支的来源：attached branch 默认建议取当前分支；detached HEAD 默认建议取 `.gitmodules`；若与 `submodules.targets` 已落盘值冲突，则以 `submodules.targets` 为准
+   - 若当前为 detached HEAD：不要直接切 `change/<change-id>` / `main` / `master`；先按 `submodules.targets`（若分支为 `.` 则展开为 `.ws-change.json` 的 `base_branch`）挂到 `aiws/pin/<target-branch>`
    - `git -C "<sub_path>" add -p`
    - `git -C "<sub_path>" diff --staged --stat`
    - 生成并让用户确认该 submodule 的 commit message（每个 repo 单独确认）
