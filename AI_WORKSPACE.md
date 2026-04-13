@@ -32,7 +32,7 @@
 
 <!-- AIWS_MANAGED_BEGIN:ai-workspace:core -->
 
-本文件描述“AI Workspace（多子项目工作区）”的结构与运行方式，供 Codex / Claude / OpenCode 共同读取。
+本文件描述“AI Workspace（多子项目工作区）”的结构与运行方式，供 OpenCode 读取。
 
 ## 1) 目录发现规则
 

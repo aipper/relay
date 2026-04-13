@@ -1,6 +1,6 @@
 ---
 name: ws-req-contract-validate
-description: 合同校验（requirements contract validate）
+description: 使用时机：需要校验需求合同完整性时。触发词：合同校验、contract validate、需求核对。注意：合同未同步请先 ws-req-contract-sync。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。

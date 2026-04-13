@@ -1,7 +1,7 @@
 # Secrets / local config
 # AIWS managed blocks
 # AIWS_MANAGED_BEGIN:gitignore
-.agentdocs/
+.aiws/tmp/
 .aiws/backups/
 secrets/test-accounts.json
 .env

@@ -30,3 +30,16 @@ if [[ -z "${aiws_bin:-}" ]]; then
 fi
 
 "$aiws_bin" validate .
+
+# Quality gates (non-blocking warnings)
+if [[ -f "package.json" ]] && grep -q '"lint"' package.json 2>/dev/null; then
+  npm run lint >/dev/null 2>&1 || echo "warn: lint found issues (non-blocking)" >&2
+fi
+
+if [[ -f "packages/aiws/package.json" ]] && grep -q '"build"' packages/aiws/package.json 2>/dev/null; then
+  npm run --workspace packages/aiws build >/dev/null 2>&1 || echo "warn: build/typecheck found issues (non-blocking)" >&2
+fi
+
+if [[ -f "package.json" ]] && grep -q '"test"' package.json 2>/dev/null; then
+  npm test >/dev/null 2>&1 || echo "warn: tests found issues (non-blocking)" >&2
+fi

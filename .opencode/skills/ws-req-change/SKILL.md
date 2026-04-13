@@ -1,6 +1,6 @@
 ---
 name: ws-req-change
-description: 需求变更（更新 REQUIREMENTS 并同步执行合同）
+description: 使用时机：需要修改需求文档、验收标准时。触发词：需求变更、验收、修改需求、REQUIREMENTS。注意：需求评审未通过请先走 ws-req-review。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。

@@ -2,10 +2,26 @@
   import { onMount, tick } from "svelte";
   import XtermTerminal from "./XtermTerminal.svelte";
   import BlocksRenderer from "./lib/components/BlocksRenderer.svelte";
+  import SessionSelector from "./lib/SessionSelector.svelte";
   import { reduceToBlocks } from "./lib/blocks/reduce";
   import { reconcileBlocks } from "./lib/blocks/reconcile";
   import type { UiBlock } from "./lib/blocks/types";
   import uiVersionMeta from "./ui-version.json";
+  import TopBar from "./lib/components/TopBar.svelte";
+  import NavBar from "./lib/components/NavBar.svelte";
+  import Toast from "./lib/components/Toast.svelte";
+  import LoginForm from "./lib/components/LoginForm.svelte";
+  import SettingsPanel from "./lib/components/SettingsPanel.svelte";
+  import SessionList from "./lib/components/SessionList.svelte";
+  import SessionDetail from "./lib/components/SessionDetail.svelte";
+  import TodoPanel from "./lib/components/TodoPanel.svelte";
+  import ToolsPanel from "./lib/components/ToolsPanel.svelte";
+  import HostDiagnostics from "./lib/components/HostDiagnostics.svelte";
+  import StartRun from "./lib/components/StartRun.svelte";
+  import EventLog from "./lib/components/EventLog.svelte";
+  import InputModal from "./lib/components/InputModal.svelte";
+  import ApprovalModal from "./lib/components/ApprovalModal.svelte";
+  import StopConfirmModal from "./lib/components/StopConfirmModal.svelte";
 
   // Polyfill: crypto.randomUUID is unavailable on non-secure (http://) contexts.
   const uuid: () => string =
@@ -155,7 +171,7 @@
   let status = "disconnected";
   let loginBusy = false;
   $: loginBusy = status === "checking" || status === "connecting";
-  let view: "sessions" | "hosts" | "start" | "tools" | "settings" = "sessions";
+  let view: string = "sessions";
   let health: Health | null = null;
   let events: WsEnvelope[] = [];
   let runs: RunRow[] = [];
@@ -187,6 +203,7 @@
   }
 
   let selectedRunId = "";
+  let showSessionSelector = false;
   let inputModalOpen = false;
   let inputModalText = "";
   let inputModalEl: HTMLTextAreaElement | null = null;
@@ -349,6 +366,7 @@
   let lastSuggestedStartCwd = "";
   let recentSessions: RunRow[] = [];
   let startOpencodeModel = "";
+  let startOpencodeSessionId = "";
 
   if (typeof window !== "undefined") {
     try {
@@ -1171,6 +1189,7 @@
     chatInputText = "";
     inlineAwaitingText = "";
     if (!messagesByRun[runId]) void loadMessages(runId);
+    else void loadMessages(runId);
     await tick();
     chatInputEl?.focus();
   }
@@ -2716,6 +2735,9 @@
       if (tool === "opencode" && startOpencodeModel.trim()) {
         data.model = startOpencodeModel.trim();
       }
+      if (tool === "opencode" && startOpencodeSessionId && startOpencodeSessionId.trim()) {
+        data.opencode_session_id = startOpencodeSessionId.trim();
+      }
       const resp = await rpcCallNoRun("rpc.run.start", data);
       const ok = dataBool(resp, "ok");
       if (!ok) throw new Error(dataString(resp, "error") ?? "rpc failed");
@@ -2733,6 +2755,15 @@
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       startError = humanizeStartError(message);
+    }
+  }
+
+  async function handleSessionSelect(event: CustomEvent<string>) {
+    const sessionId = event.detail;
+    if (sessionId) {
+      showSessionSelector = false;
+      await selectSession(sessionId);
+      setToast(`已切换到会话 ${sessionId}`);
     }
   }
 
@@ -3123,7 +3154,7 @@
     closeInputModal();
   }
 
-  function sendDecision(decision: "approve" | "deny") {
+  function sendDecision(decision: string) {
     if (!selectedRunId) return;
     const reqId = selectedAwaiting?.request_id;
     if (!reqId) {
@@ -3164,7 +3195,7 @@
     });
   }
 
-  function sendStop(signal: "int" | "term" | "kill" = "term") {
+  function sendStop(signal: string = "term") {
     if (!selectedRunId) return;
     sendWs({
       type: "run.stop",
@@ -3460,1093 +3491,273 @@
 </script>
 
 <main>
-  <header class="topbar">
-    <div>
-      <h1 style="margin:0">Relay</h1>
-      <div class="subtle subtle-row">
-        {#if health}
-          <span>{health.name} {health.version}</span>
-        {:else}
-          <span>{apiBaseUrl}</span>
-        {/if}
-        <span class="version-pill">ui v{uiVersion}</span>
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-      <span class="conn-status" data-kind={status}>
-        <span class="conn-dot" aria-hidden="true"></span>
-        <span>{connLabel(status)}</span>
-      </span>
-      {#if token}
-        <span class="subtle"><code>{username}</code></span>
-      {/if}
-    </div>
-  </header>
+  <TopBar {health} {apiBaseUrl} {uiVersion} {status} {connLabel} {token} {username} />
 
-  {#if token}
-    <nav class="segmented" aria-label="navigation">
-      <button class:active={view === "sessions"} on:click={() => (view = "sessions")}>会话</button>
-      <button class:active={view === "hosts"} on:click={() => (view = "hosts")}>主机</button>
-      <button class:active={view === "start"} on:click={() => (view = "start")}>启动</button>
-      <button class:active={view === "tools"} on:click={() => (view = "tools")}>工具</button>
-      <button class:active={view === "settings"} on:click={() => (view = "settings")}>设置</button>
-    </nav>
-  {/if}
+  <NavBar {view} {token} onSetView={(v) => (view = v)} />
 
   {#if !token}
-  <section>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-      <div>
-        <div style="font-weight:600">Server</div>
-        <div style="font-size:12px;color:#6b7280">
-          {#if useCustomServer}
-            自定义：<code>{apiBaseUrl}</code>
-          {:else}
-            当前页面（同源）：<code>{apiBaseUrl}</code>
-          {/if}
-        </div>
-      </div>
-      <label style="display:flex;gap:8px;align-items:center;margin:0">
-        <input
-          type="checkbox"
-          bind:checked={useCustomServer}
-          on:change={() => {
-            persistServerPrefs();
-          }}
-        />
-        使用自定义 Server URL
-      </label>
-    </div>
-    {#if useCustomServer}
-      <label>
-        Server URL
-        <input
-          bind:value={customBaseUrl}
-          placeholder="http(s)://host:8787"
-          on:change={() => {
-            persistServerPrefs();
-          }}
-        />
-      </label>
-    {/if}
-    <label>
-      用户名
-      <input bind:value={username} autocomplete="username" on:change={persistAuthPrefs} />
-    </label>
-    <label>
-      密码
-      <input type="password" bind:value={password} autocomplete="current-password" on:change={persistAuthPrefs} />
-    </label>
-    <div class="login-prefs">
-      <label class="checkbox">
-        <input
-          type="checkbox"
-          bind:checked={keepSignedIn}
-          on:change={() => {
-            persistAuthPrefs();
-          }}
-        />
-        刷新后保持登录
-      </label>
-      <label class="checkbox">
-        <input
-          type="checkbox"
-          bind:checked={rememberPassword}
-          on:change={() => {
-            if (!rememberPassword) password = "";
-            persistAuthPrefs();
-          }}
-        />
-        记住密码（本机）
-      </label>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button on:click={connect} disabled={loginBusy || !username.trim() || !password}>{loginBusy ? "登录中…" : "登录"}</button>
-    </div>
-    {#if isProbablyInsecureUrl(apiBaseUrl)}
-      <div style="margin-top:8px;padding:8px;border:1px solid #f59e0b;background:#fffbeb">
-        注意：当前是 <code>http://</code>，密码会明文传输。建议通过 HTTPS 访问（例如用 Caddy 反代）。
-      </div>
-    {/if}
-    {#if lastError}
-      <div style="color:#b91c1c">{lastError}</div>
-    {/if}
-  </section>
+  <LoginForm
+    {useCustomServer}
+    bind:customBaseUrl={customBaseUrl}
+    {apiBaseUrl}
+    bind:username={username}
+    bind:password={password}
+    bind:keepSignedIn={keepSignedIn}
+    bind:rememberPassword={rememberPassword}
+    {loginBusy}
+    {lastError}
+    {isProbablyInsecureUrl}
+    onConnect={connect}
+    onPersistServerPrefs={persistServerPrefs}
+    onPersistAuthPrefs={persistAuthPrefs}
+  />
   {/if}
 
-  {#if token && view === "settings"}
-  <section>
-    <h2>设置</h2>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-      <div>
-        <div style="font-weight:600">当前服务</div>
-        <div class="subtle subtle-row">
-          <code>{apiBaseUrl}</code>
-          {#if health}
-            <span>{health.name} {health.version}</span>
-          {/if}
-          <span class="version-pill">ui v{uiVersion}</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button on:click={disconnect} disabled={!ws && !token}>断开</button>
-      </div>
-    </div>
-
-    <div style="margin-top:12px">
-      <label style="display:flex;gap:8px;align-items:center;margin:0">
-        <input
-          type="checkbox"
-          bind:checked={useCustomServer}
-          on:change={() => {
-            persistServerPrefs();
-          }}
-        />
-        使用自定义 Server URL（仅当 PWA 与服务不同源时需要）
-      </label>
-      {#if useCustomServer}
-        <label style="margin-top:10px">
-          Server URL
-          <input
-            bind:value={customBaseUrl}
-            placeholder="http(s)://host:8787"
-            on:change={() => {
-              persistServerPrefs();
-            }}
-          />
-        </label>
-      {/if}
-      {#if isProbablyInsecureUrl(apiBaseUrl)}
-        <div style="margin-top:10px;padding:8px;border:1px solid #f59e0b;background:#fffbeb">
-          检测到 <code>http://</code>：密码与 token 在传输层不加密。建议通过 HTTPS 访问。
-        </div>
-      {/if}
-    </div>
-
-    <div style="margin-top:14px">
-      <div style="font-weight:600">登录</div>
-      <div class="subtle">当前用户：<code>{username}</code></div>
-      <div class="login-prefs" style="margin-top:8px">
-        <label class="checkbox">
-          <input
-            type="checkbox"
-            bind:checked={keepSignedIn}
-            on:change={() => {
-              persistAuthPrefs();
-            }}
-          />
-          刷新后保持登录
-        </label>
-        <label class="checkbox">
-          <input
-            type="checkbox"
-            bind:checked={rememberPassword}
-            on:change={() => {
-              if (!rememberPassword) password = "";
-              persistAuthPrefs();
-            }}
-          />
-          记住密码（本机）
-        </label>
-      </div>
-      {#if rememberPassword}
-        <label style="margin-top:10px">
-          密码
-          <input type="password" bind:value={password} autocomplete="current-password" on:change={persistAuthPrefs} />
-        </label>
-      {/if}
-    </div>
-
-    <div style="margin-top:14px">
-      <div style="font-weight:600">Server 日志</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:8px 0">
-        <label style="flex:1;min-width:140px">
-          lines
-          <input bind:value={serverLogsLines} placeholder="200" />
-        </label>
-        <label style="flex:1;min-width:140px">
-          max_bytes
-          <input bind:value={serverLogsMaxBytes} placeholder="200000" />
-        </label>
-        <button on:click={fetchServerLogs} disabled={status !== "connected"}>server.logs.tail</button>
-      </div>
-      {#if serverLogsError}
-        <div style="color:#b91c1c">{serverLogsError}</div>
-      {/if}
-      {#if serverLogsPath}
-        <div class="subtle" style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <code>{serverLogsPath}</code>
-          {#if serverLogsTruncated}
-            <span class="subtle">truncated</span>
-          {/if}
-        </div>
-        <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">{serverLogs}</pre>
-      {/if}
-    </div>
-  </section>
-  {/if}
+  <SettingsPanel
+    {apiBaseUrl}
+    {health}
+    {uiVersion}
+    {useCustomServer}
+    bind:customBaseUrl={customBaseUrl}
+    {isProbablyInsecureUrl}
+    {username}
+    {keepSignedIn}
+    {rememberPassword}
+    bind:password={password}
+    {status}
+    {token}
+    bind:serverLogsLines={serverLogsLines}
+    bind:serverLogsMaxBytes={serverLogsMaxBytes}
+    {serverLogs}
+    {serverLogsPath}
+    {serverLogsTruncated}
+    {serverLogsError}
+    onDisconnect={disconnect}
+    onPersistServerPrefs={persistServerPrefs}
+    onPersistAuthPrefs={persistAuthPrefs}
+    onFetchServerLogs={fetchServerLogs}
+  />
 
   {#if token && view === "sessions"}
   <div class="sessions-layout" class:mobile-detail-open={isMobile && Boolean(selectedRunId)}>
-  <section class="sessions-list">
-    <div class="list-head">
-      <h2 style="margin:0">会话</h2>
-      <button
-        class="secondary"
-        on:click={async () => {
-          await Promise.all([refreshHosts(), refreshRuns()]);
-        }}
-        disabled={!token}
-      >
-        刷新
-      </button>
-    </div>
-    <div class="list-search">
-      <input bind:value={sessionSearch} placeholder="搜索" />
-    </div>
+  <SessionList
+    {token}
+    {selectedRunId}
+    {sessionSearch}
+    apiBaseUrl={apiBaseUrl}
+    {runGroups}
+    {statusLabel}
+    {sessionTitle}
+    {sessionSummary}
+    {formatRelativeTime}
+    onSelectSession={selectSession}
+    onRefresh={async () => { await Promise.all([refreshHosts(), refreshRuns()]); }}
+    onSessionSelect={handleSessionSelect}
+  />
 
-  {#each runGroups as g (g.host_id)}
-      <div class="host-group">
-        <button class="host-group-header" on:click={() => toggleHostGroup(g.host_id)} aria-expanded={!hostGroupCollapsed[g.host_id]}>
-          <span class="chevron">{hostGroupCollapsed[g.host_id] ? "▸" : "▾"}</span>
-          <span class="dot" data-online={g.online ? "1" : "0"} aria-hidden="true"></span>
-          <span class="host-name">{g.display_name}</span>
-          <span class="host-last-seen">{formatRelativeTime(g.last_seen_at)}</span>
-        </button>
-        {#if !hostGroupCollapsed[g.host_id]}
-          <div class="session-items">
-            {#each g.sessions as r (r.id)}
-              {@const st = statusLabel(r)}
-              {@const title = sessionTitle(r)}
-              {@const summary = sessionSummary(r)}
-              <button class="session-item" class:selected={selectedRunId === r.id} on:click={() => selectSession(r.id)}>
-                <div class="session-item-top">
-                  {#if title}
-                    <div class="session-title">{title}</div>
-                  {/if}
-                  <span class="session-status" data-kind={st.kind}>{st.label}</span>
-                </div>
-                {#if r.status === "awaiting_approval"}
-                  <div class="session-meta">
-                    <span class="session-tool">{r.tool}</span>
-                    {#if r.pending_op_tool}<span class="session-op">{r.pending_op_tool}</span>{/if}
-                    {#if r.pending_op_args_summary}<span class="session-op-args">{r.pending_op_args_summary}</span>{/if}
-                  </div>
-                {:else}
-                  {#if summary}
-                    <div class="session-summary">{summary}</div>
-                  {/if}
-                {/if}
-                <div class="session-time">{formatRelativeTime(r.last_active_at ?? r.started_at)}</div>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/each}
-  </section>
-
-  <section class="sessions-detail">
-    {#if !selectedRun}
-      <div class="subtle"></div>
-    {:else}
-      {@const st = statusLabel(selectedRun)}
-      {@const host = hostsById[selectedRun.host_id] ?? null}
-      {@const title = sessionTitle(selectedRun)}
-      <div class="detail-head">
-        <div class="detail-title">
-          {#if title}
-            <div class="detail-title-main">{title}</div>
-          {/if}
-          <div class="detail-title-sub">
-            <span class="dot" data-online={host?.online ? "1" : "0"} aria-hidden="true"></span>
-            <span class="detail-host"><code>{selectedRun.host_id}</code></span>
-            <span class="subtle">最近 {formatRelativeTime(host?.last_seen_at ?? null)}</span>
-            <span class="subtle">活跃 {formatRelativeTime(selectedRun.last_active_at ?? selectedRun.started_at)}</span>
-          </div>
-          <div class="detail-meta">
-            <span class="meta-pill">
-              <span class="meta-k">tool</span>
-              <span class="meta-v">{selectedRun.tool}</span>
-            </span>
-            <span class="meta-pill">
-              <span class="meta-k">run</span>
-              <span class="meta-v"><code>{selectedRun.id}</code></span>
-            </span>
-            {#if selectedRun.tool === "opencode" && selectedRun.opencode_session_id}
-              <span class="meta-pill">
-                <span class="meta-k">opencode</span>
-                <span class="meta-v"><code>{selectedRun.opencode_session_id}</code></span>
-              </span>
-            {/if}
-            <span class="meta-pill meta-pill-cwd">
-              <span class="meta-k">cwd</span>
-              <span class="meta-v"><code>{selectedRun.cwd}</code></span>
-            </span>
-          </div>
-        </div>
-        <div class="detail-actions">
-          {#if isMobile}
-            <button class="secondary" on:click={() => (selectedRunId = "")} type="button">返回</button>
-          {/if}
-          <span class="session-status" data-kind={st.kind}>{st.label}</span>
-          {#if selectedAwaiting && awaitingIsApproval(selectedAwaiting)}
-            <button
-              on:click={() => {
-                approvalModalShowArgs = false;
-                approvalModalOpen = true;
-              }}
-              disabled={!selectedRunId}
-              type="button"
-            >
-              审批
-            </button>
-          {/if}
-          <button
-            class="secondary"
-            on:click={() => sendStop("int")}
-            disabled={!selectedRunId || status !== "connected"}
-            type="button"
-            title="Ctrl+C"
-          >
-            中断
-          </button>
-          <button on:click={() => (stopConfirmOpen = true)} disabled={!selectedRunId || status !== "connected"}>停止</button>
-        </div>
-      </div>
-
-      <div class="detail-tabs" role="tablist" aria-label="session detail tabs">
-        <button
-          class:active={sessionDetailTab === "output"}
-          role="tab"
-          on:click={async () => {
-            sessionDetailTab = "output";
-            if (selectedRunId) {
-              subscribeToRun(selectedRunId);
-              void loadMessages(selectedRunId, { includeOutput: true });
-            }
-            await focusOutputSearch();
-          }}
-        >
-          终端
-        </button>
-        <button
-          class:active={sessionDetailTab === "messages"}
-          role="tab"
-          on:click={() => {
-            sessionDetailTab = "messages";
-            if (selectedRunId) {
-              subscribeToRun(selectedRunId);
-              void loadMessages(selectedRunId, { includeOutput: includeOutputInMessages(selectedRunId) });
-            }
-          }}
-        >
-          事件
-        </button>
-        <button on:click={() => selectedRunId && loadMessages(selectedRunId)} disabled={!selectedRunId || !token} style="margin-left:auto">
-          刷新
-        </button>
-      </div>
-
-      {#if token && status !== "connected"}
-        <div class="offline-banner">
-          <span class="dot" data-online="0" aria-hidden="true"></span>
-          <span>离线</span>
-          <button class="secondary" on:click={resumeFromStoredToken} type="button">重连</button>
-          <button class="secondary" on:click={refreshSelectedSession} disabled={!selectedRunId} type="button">刷新</button>
-        </div>
-      {/if}
-
-      {#if sessionDetailTab === "messages"}
-        {#if selectedAwaiting}
-          <div class="pinned-actions">
-            {#if awaitingIsApproval(selectedAwaiting)}
-              <div class="approval-card">
-                <div class="approval-card-top">
-                  <span class="meta-pill">
-                    <span class="meta-k">tool</span>
-                    <span class="meta-v">{selectedRun.tool}</span>
-                  </span>
-                  {#if selectedAwaiting.op_tool}
-                    <span class="session-op">{selectedAwaiting.op_tool}</span>
-                  {/if}
-                  {#if selectedAwaiting.op_args_summary}
-                    <span class="session-op-args">{selectedAwaiting.op_args_summary}</span>
-                  {/if}
-                </div>
-                {#if selectedAwaiting.prompt}
-                  <div class="approval-card-prompt">{selectedAwaiting.prompt}</div>
-                {/if}
-
-                <div class="approval-card-footer">
-                  <label class="checkbox">
-                    <input type="checkbox" bind:checked={approvalForSession} disabled={!selectedAwaiting.op_tool || status !== "connected"} />
-                    本会话允许{#if selectedAwaiting.op_tool}（<code>{selectedAwaiting.op_tool}</code>）{/if}
-                  </label>
-
-                  {#if selectedAwaiting.questions !== undefined && selectedAwaiting.questions !== null}
-                    <div class="approval-questions">
-                      <div class="approval-questions-title">需要回答</div>
-                      <pre class="approval-questions-json">{JSON.stringify(selectedAwaiting.questions, null, 2)}</pre>
-                      <div class="approval-answers-label">answers（JSON）</div>
-                      <textarea
-                        class="approval-answers"
-                        rows="5"
-                        bind:value={approvalAnswersJson}
-                        placeholder={"{}"}
-                        disabled={status !== "connected"}
-                      ></textarea>
-                    </div>
-                  {/if}
-
-                  <div class="approval-card-actions">
-                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendDecision("deny")}>拒绝</button>
-                    <button type="button" disabled={status !== "connected"} on:click={() => sendDecision("approve")}>同意</button>
-                  </div>
-                </div>
-              </div>
-            {:else if awaitingIsPrompt(selectedAwaiting)}
-              <div class="awaiting-card">
-                {#if selectedAwaiting.prompt}
-                  <div class="awaiting-card-prompt">{selectedAwaiting.prompt}</div>
-                {/if}
-                <div class="awaiting-card-footer">
-                  <textarea
-                    class="awaiting-card-input"
-                    rows="2"
-                    bind:value={inlineAwaitingText}
-                    disabled={status !== "connected"}
-                    on:keydown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        const text = (inlineAwaitingText || "").trimEnd();
-                        if (!text.trim()) return;
-                        sendInput(text.endsWith("\n") ? text : `${text}\n`);
-                        inlineAwaitingText = "";
-                      }
-                    }}
-                  ></textarea>
-                  <div class="awaiting-card-actions">
-                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("y\n")}>y</button>
-                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("n\n")}>n</button>
-                    <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => sendInput("continue\n")}>continue</button>
-                    <button
-                      type="button"
-                      disabled={status !== "connected" || !inlineAwaitingText.trim()}
-                      on:click={() => {
-                        const text = (inlineAwaitingText || "").trimEnd();
-                        if (!text.trim()) return;
-                        sendInput(text.endsWith("\n") ? text : `${text}\n`);
-                        inlineAwaitingText = "";
-                      }}
-                    >
-                      发送
-                    </button>
-                  </div>
-                </div>
-              </div>
-            {/if}
-          </div>
-        {/if}
-
-        <div class="events-tail" style="margin:10px 0 12px">
-          <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
-            <div style="font-weight:600">输出摘要</div>
-            <button
-              class="secondary"
-              on:click={async () => {
-                sessionDetailTab = "output";
-                await focusOutputSearch();
-              }}
-              disabled={!selectedRunId}
-              type="button"
-            >
-              打开终端
-            </button>
-          </div>
-          {#if !selectedRunId}
-            <div class="subtle"></div>
-          {:else if selectedOutputMode === "tui"}
-            <div class="subtle">(TUI 终端输出请在“终端”里查看)</div>
-          {:else}
-            <pre class="output-pre" style="max-height:160px;overflow:auto">{tailLines(selectedOutput || "", 40)}</pre>
-          {/if}
-        </div>
-        <div class="chat-feed">
-          {#if uiBlocks.length === 0}
-            <div class="subtle"></div>
-          {:else}
-            <BlocksRenderer
-              blocks={uiBlocks}
-              runTool={selectedRun?.tool ?? ""}
-              {renderMarkdownBasic}
-              {formatAbsTime}
-              {copyText}
-            />
-          {/if}
-        </div>
-        <div class="chat-inputbar">
-          {#if selectedRunId && status === "connected" && !selectedRunReady}
-            <div class="subtle" style="margin:0 0 6px">终端连接中…（建立输出通道后会开始显示回复）</div>
-          {/if}
-          <textarea
-            class="chat-textarea"
-            bind:this={chatInputEl}
-            bind:value={chatInputText}
-            rows="2"
-            on:keydown={handleChatInputKeydown}
-            placeholder={
-              selectedAwaiting && (awaitingIsApproval(selectedAwaiting) || awaitingWantsYesNo(selectedAwaiting))
-                ? "待确认（Proceed?）：输入 y/n 或用上方按钮"
-                : selectedRunId && status === "connected" && !selectedRunReady
-                  ? "终端连接中…"
-                  : "输入消息（Enter 发送，Shift+Enter 换行）"
-            }
-            disabled={!selectedRunId || status !== "connected"}
-          ></textarea>
-          <div class="chat-input-actions">
-            <button on:click={sendChatInput} disabled={!selectedRunId || status !== "connected" || !chatInputText.trim()} type="button">
-              发送
-            </button>
-            <button class="secondary" on:click={() => openInputModal(chatInputText)} disabled={!selectedRunId || status !== "connected"} type="button">
-              更多
-            </button>
-          </div>
-        </div>
-      {:else}
-        <div class="output-toolbar">
-          {#if selectedOutputMode === "tui"}
-            <div class="output-actions">
-              <button on:click={toggleOutputAutoScroll} disabled={!selectedRunId}>
-                {outputAutoScroll ? "暂停" : "继续"}
-              </button>
-              <button class="secondary" on:click={() => queueStdin("\x03")} disabled={!selectedRunId || status !== "connected"} type="button">
-                Ctrl+C
-              </button>
-              <button class="secondary" on:click={() => queueStdin("\x1b")} disabled={!selectedRunId || status !== "connected"} type="button">
-                ESC
-              </button>
-              <button class="secondary" on:click={() => xtermRef?.focus()} disabled={!selectedRunId} type="button">聚焦</button>
-            </div>
-          {:else}
-            <div class="output-searchbar">
-              <input
-                bind:this={outputSearchInputEl}
-                bind:value={outputSearchText}
-                on:keydown={handleOutputSearchKeydown}
-                placeholder=""
-              />
-              <button on:click={runOutputSearch} disabled={!outputSearchText.trim()}>搜索</button>
-              <button on:click={prevOutputMatch} disabled={outputSearchMatches.length === 0}>↑</button>
-              <button on:click={nextOutputMatch} disabled={outputSearchMatches.length === 0}>↓</button>
-              {#if outputSearchActive}
-                <div class="output-count">
-                  {outputSearchMatches.length === 0 ? "0/0" : `${outputSearchCursor + 1}/${outputSearchMatches.length}`}
-                </div>
-              {/if}
-              <button on:click={clearOutputSearch} disabled={!outputSearchText && !outputSearchActive}>清空</button>
-            </div>
-            <div class="output-actions">
-              <button on:click={toggleOutputAutoScroll} disabled={!selectedRunId}>
-                {outputAutoScroll ? "暂停" : "继续"}
-              </button>
-              {#if !outputAutoScroll && !outputIsAtBottom}
-                <button on:click={jumpToLatest} disabled={!selectedRunId}>跳到最新</button>
-              {/if}
-              <button on:click={copyOutput} disabled={!selectedOutput}>复制输出</button>
-            </div>
-          {/if}
-        </div>
-        <div class="output-feed" class:tui={selectedOutputMode === "tui"} bind:this={outputFeedEl} on:scroll={handleOutputScroll}>
-          {#if selectedOutputMode === "tui"}
-            <div class="xterm-shell">
-              {#key selectedRunId}
-                <XtermTerminal
-                  bind:this={xtermRef}
-                  readOnly={status !== "connected"}
-                  autoFocus={true}
-                  on:ready={() => {
-                    const runId = selectedRunId;
-                    if (!runId) return;
-                    xtermRunId = runId;
-                    applyXtermBackfillIfReady();
-                  }}
-                  on:data={(e) => {
-                    const runId = selectedRunId;
-                    if (!runId || status !== "connected") return;
-                    queueStdin(e.detail.data);
-                  }}
-                  on:resize={(e) => {
-                    const runId = selectedRunId;
-                    if (!runId || status !== "connected") return;
-                    scheduleResize(runId, e.detail.cols, e.detail.rows);
-                  }}
-                />
-              {/key}
-            </div>
-          {:else if outputSearchActive}
-            <pre class="output-pre">{@html outputHtml}</pre>
-          {:else}
-            <pre class="output-pre">{outputDisplayText}</pre>
-          {/if}
-          {#if !outputAutoScroll}
-            <button class="paused-badge" on:click={resumeOutputAutoScroll} type="button">已暂停</button>
-          {/if}
-        </div>
-      {/if}
-
-      {#if sessionDetailTab !== "messages"}
-        <div class="detail-input">
-          <button class="secondary" on:click={() => openInputModal("")} disabled={!selectedRunId || status !== "connected"} type="button">
-            输入
-          </button>
-        </div>
-      {/if}
-    {/if}
-  </section>
-
-  <section class="sessions-todo">
-    <h2>待办</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-      <input bind:value={todoText} placeholder="新增待办…" />
-      <button
-        on:click={() => {
-          addTodo(todoText);
-          todoText = "";
-        }}
-        disabled={!selectedRunId}
-      >
-        添加
-      </button>
-    </div>
-
-    {#if todoSuggestions.length > 0}
-      <div style="margin:8px 0;padding:8px;border:1px solid #e5e7eb;background:#f8fafc">
-        <strong>建议（来自输出）</strong>
-        <ul>
-          {#each todoSuggestions as s (s)}
-            <li>
-              <button on:click={() => addTodo(s)} disabled={!selectedRunId} style="margin-right:8px">添加</button>
-              {s}
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
-
-    {#if todos.length > 0}
-      <ul>
-        {#each todos as t (t.id)}
-          <li>
-            <label style="display:flex;gap:8px;align-items:center">
-              <input type="checkbox" checked={t.done} on:change={() => toggleTodo(t.id)} />
-              <span style={t.done ? "text-decoration:line-through;color:#6b7280" : ""}>{t.text}</span>
-            </label>
-            <button on:click={() => removeTodo(t.id)} style="margin-left:8px">移除</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
+  <SessionDetail
+    {selectedRun}
+    {selectedRunId}
+    {isMobile}
+    {token}
+    {status}
+    {sessionDetailTab}
+    {statusLabel}
+    hostsById={hostsById}
+    {sessionTitle}
+    {formatRelativeTime}
+    {selectedAwaiting}
+    {approvalForSession}
+    bind:approvalAnswersJson={approvalAnswersJson}
+    {awaitingIsApproval}
+    {awaitingIsPrompt}
+    {awaitingWantsYesNo}
+    bind:chatInputText={chatInputText}
+    {uiBlocks}
+    {renderMarkdownBasic}
+    {formatAbsTime}
+    {copyText}
+    {selectedOutputMode}
+    {selectedOutput}
+    {tailLines}
+    {selectedRunReady}
+    {outputAutoScroll}
+    bind:outputSearchText={outputSearchText}
+    {outputSearchMatches}
+    {outputSearchCursor}
+    {outputSearchActive}
+    {outputHtml}
+    {outputDisplayText}
+    {outputIsAtBottom}
+    {xtermRef}
+    {xtermRunId}
+    onBack={() => selectedRunId = ""}
+    onOpenApprovalModal={() => { approvalModalShowArgs = false; approvalModalOpen = true; }}
+    onOpenStopConfirm={() => stopConfirmOpen = true}
+    onSendStop={sendStop}
+    onSwitchToOutputTabAction={async () => {
+      sessionDetailTab = "output";
+      if (selectedRunId) {
+        subscribeToRun(selectedRunId);
+        void loadMessages(selectedRunId, { includeOutput: true });
+      }
+      await focusOutputSearch();
+    }}
+    onSwitchToMessagesTab={() => {
+      sessionDetailTab = "messages";
+      if (selectedRunId) {
+        subscribeToRun(selectedRunId);
+        void loadMessages(selectedRunId, { includeOutput: includeOutputInMessages(selectedRunId) });
+      }
+    }}
+    onRefreshMessages={() => selectedRunId && loadMessages(selectedRunId)}
+    onFocusOutputSearch={focusOutputSearch}
+    onSendChatInput={sendChatInput}
+    onOpenInputModal={openInputModal}
+    onHandleChatInputKeydown={handleChatInputKeydown}
+    onSendDecision={sendDecision}
+    onToggleApprovalForSession={() => approvalForSession = !approvalForSession}
+    onToggleOutputAutoScroll={toggleOutputAutoScroll}
+    onQueueStdin={queueStdin}
+    onRunOutputSearch={runOutputSearch}
+    onPrevOutputMatch={prevOutputMatch}
+    onNextOutputMatch={nextOutputMatch}
+    onClearOutputSearch={clearOutputSearch}
+    onCopyOutput={copyOutput}
+    onJumpToLatest={jumpToLatest}
+    onResumeOutputAutoScroll={resumeOutputAutoScroll}
+    onOutputScroll={handleOutputScroll}
+    onXtermReady={() => {
+      const runId = selectedRunId;
+      if (!runId) return;
+      xtermRunId = runId;
+      applyXtermBackfillIfReady();
+    }}
+    onXtermData={(e) => {
+      const runId = selectedRunId;
+      if (!runId || status !== "connected") return;
+      queueStdin(e.detail.data);
+    }}
+    onXtermResize={(e) => {
+      const runId = selectedRunId;
+      if (!runId || status !== "connected") return;
+      scheduleResize(runId, e.detail.cols, e.detail.rows);
+    }}
+    onSearchKeydown={handleOutputSearchKeydown}
+    onResumeFromStoredToken={resumeFromStoredToken}
+    onRefreshSelectedSession={refreshSelectedSession}
+  />
+  <TodoPanel
+    {todos}
+    bind:todoText={todoText}
+    {todoSuggestions}
+    {selectedRunId}
+    onAddTodo={(text: string) => { addTodo(text); todoText = ""; }}
+    onToggleTodo={toggleTodo}
+    onRemoveTodo={removeTodo}
+  />
   </div>
   {/if}
 
-  <section class:hidden={!token || view !== "tools"}>
-    <h2>文件（run cwd）</h2>
-    <label>
-      路径（相对）
-      <input bind:value={filePath} placeholder="README.md" />
-    </label>
-    <button on:click={fetchFile} disabled={!selectedRunId || status !== "connected"}>读取</button>
-    {#if fileError}
-      <div style="color:#b91c1c">{fileError}</div>
-    {/if}
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{fileContent || "(empty)"}</pre
-    >
-  </section>
-
-  <section class:hidden={!token || view !== "tools"}>
-    <h2>搜索（run cwd）</h2>
-    <label>
-      Query
-      <input bind:value={searchQuery} placeholder="TODO" />
-    </label>
-    <button on:click={searchFiles} disabled={!selectedRunId || status !== "connected"}>Search</button>
-    {#if searchError}
-      <div style="color:#b91c1c">{searchError}</div>
-    {/if}
-    {#if searchMatches.length === 0}
-      <div>(no matches)</div>
-    {:else}
-      {#if searchTruncated}
-        <div style="color:#92400e">结果已截断</div>
-      {/if}
-      <ul>
-        {#each searchMatches as m (m.path + ":" + m.line + ":" + m.column)}
-          <li>
-            <code>{m.path}:{m.line}:{m.column}</code> {m.text}
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
-
-  <section class:hidden={!token || view !== "tools"}>
-    <h2>Git（run cwd）</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button on:click={fetchGitStatus} disabled={!selectedRunId || status !== "connected"}>状态</button>
-      <button on:click={fetchGitDiff} disabled={!selectedRunId || status !== "connected"}>差异</button>
-    </div>
-    <label>
-      Diff 路径（可选，相对）
-      <input bind:value={gitDiffPath} placeholder="src/main.rs" />
-    </label>
-    {#if gitError}
-      <div style="color:#b91c1c">{gitError}</div>
-    {/if}
-    <h3>status</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{gitStatus || "(empty)"}</pre
-    >
-    <h3>diff</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{gitDiff || "(empty)"}</pre
-    >
-  </section>
-
-  <section class:hidden={!token || view !== "hosts"}>
-    <h2>主机诊断（WS-RPC）</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-      <button on:click={refreshHosts} disabled={!token}>刷新主机</button>
-    </div>
-    <label>
-      主机 ID
-      {#if hosts.length > 0}
-        <select bind:value={hostDiagHostId} style="width:100%;padding:10px;box-sizing:border-box">
-          {#each hosts as h (h.id)}
-            <option value={h.id}>{h.id}{h.online ? "（在线）" : "（离线）"}</option>
-          {/each}
-        </select>
-      {:else}
-        <input bind:value={hostDiagHostId} placeholder="host-dev" />
-      {/if}
-    </label>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
-      <button on:click={fetchHostInfo} disabled={status !== "connected"}>host.info</button>
-      <button on:click={fetchHostDoctor} disabled={status !== "connected"}>host.doctor</button>
-      <button on:click={fetchHostCapabilities} disabled={status !== "connected"}>host.capabilities</button>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:8px 0">
-      <label style="flex:1;min-width:140px">
-        lines
-        <input bind:value={hostLogsLines} placeholder="200" />
-      </label>
-      <label style="flex:1;min-width:140px">
-        max_bytes
-        <input bind:value={hostLogsMaxBytes} placeholder="200000" />
-      </label>
-      <button on:click={fetchHostLogs} disabled={status !== "connected"}>host.logs.tail</button>
-    </div>
-    {#if hostDiagError}
-      <div style="color:#b91c1c">{hostDiagError}</div>
-    {/if}
-    {#if hostInfo}
-      <h3>info</h3>
-      <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{hostInfo}</pre
-      >
-    {/if}
-    {#if hostDoctor}
-      <h3>doctor</h3>
-      <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{hostDoctor}</pre
-      >
-    {/if}
-    {#if hostCapabilities}
-      <h3>capabilities</h3>
-      <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{hostCapabilities}</pre
-      >
-    {/if}
-    {#if hostLogs}
-      <h3>logs.tail</h3>
-      <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{hostLogs}</pre
-      >
-    {/if}
-  </section>
-
-  <section class:hidden={!token || view !== "start"}>
-    <h2>启动运行（远程）</h2>
-    <button on:click={refreshHosts} disabled={!token} style="margin-bottom:8px">刷新主机</button>
-    <label>
-      主机 ID
-      {#if hosts.length > 0}
-        <select bind:value={startHostId} style="width:100%;padding:10px;box-sizing:border-box">
-          {#each hosts as h (h.id)}
-            <option value={h.id}>{h.id}{h.online ? "（在线）" : "（离线）"}</option>
-          {/each}
-        </select>
-      {:else}
-        <input bind:value={startHostId} placeholder="host-dev" />
-      {/if}
-    </label>
-    <label>
-      工具
-      <select bind:value={startTool} style="width:100%;padding:10px;box-sizing:border-box">
-        {#each currentStartToolOptions as option (option.value)}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
-    </label>
-    <div style="font-size:12px;color:#475569;margin:-4px 0 10px 0">
-      {#if currentStartHostToolsLoading}
-        正在检测该主机已安装的工具…
-      {:else if currentStartToolStatuses && currentStartToolOptions.length > 0}
-        当前主机可用工具：{currentStartToolOptions.map((option) => option.label).join(" / ")}
-      {:else if currentStartToolStatuses && currentStartToolOptions.length === 0}
-        当前主机未检测到可用的受支持工具（opencode）。
-      {:else}
-        将根据所选 host 动态检测可用工具。
-      {/if}
-    </div>
-    {#if startTool === "opencode"}
-      <label>
-        模型
-        <select bind:value={startOpencodeModel} style="width:100%;padding:10px;box-sizing:border-box" disabled={currentStartHostToolsLoading || currentStartOpencodeModels.length === 0}>
-          {#if currentStartOpencodeModels.length === 0}
-            <option value="">使用 host 默认模型</option>
-          {:else}
-            {#each currentStartOpencodeModels as model (model)}
-              <option value={model}>{model}</option>
-            {/each}
-          {/if}
-        </select>
-      </label>
-      <div style="font-size:12px;color:#475569;margin:-4px 0 10px 0">
-        {#if currentStartHostToolsLoading}
-          正在读取该主机的 opencode 模型配置…
-        {:else if currentStartOpencodeModelsError}
-          当前主机的 opencode 模型配置读取失败：{currentStartOpencodeModelsError}
-        {:else if currentStartOpencodeModels.length > 0}
-          将以本次启动覆盖 opencode 模型。{#if currentStartOpencodeDefaultModel}当前默认：<code>{currentStartOpencodeDefaultModel}</code>。{/if}
-        {:else}
-          未从该主机读取到显式模型列表，将沿用 opencode 主机默认模型。
-        {/if}
-        {#if !currentStartHostToolsLoading && currentStartOpencodeModelsNote}
-          <br />{currentStartOpencodeModelsNote}
-        {/if}
-      </div>
-    {/if}
-    <label>
-      CWD（可选，主机路径）
-      <input bind:value={startCwd} placeholder={lastSuggestedStartCwd || "/path/to/project"} />
-    </label>
-    <div style="font-size:12px;color:#475569;margin:-4px 0 10px 0">
-      会记住每台主机最近一次成功启动的目录。{#if lastSuggestedStartCwd}最近可用路径：<code>{lastSuggestedStartCwd}</code>
-      <button type="button" class="secondary" style="margin-left:8px;padding:2px 8px" on:click={() => applySuggestedStartCwd(true)}>回填</button>{:else}请填写远程主机上的真实目录，例如 <code>/home/ab/test</code>。{/if}
-    </div>
-    <label>
-      命令
-      <input bind:value={startCmd} placeholder={`（留空：运行工具默认入口，例如 ${startTool}）`} />
-    </label>
-    <button on:click={startRun} disabled={status !== "connected" || currentStartHostToolsLoading || (currentStartToolStatuses !== null && currentStartToolOptions.length === 0)}>启动</button>
-    {#if startError}
-      <div style="color:#b91c1c">{startError}</div>
-    {/if}
-  </section>
+  <ToolsPanel
+    bind:filePath={filePath}
+    {fileContent}
+    {fileError}
+    bind:searchQuery={searchQuery}
+    {searchMatches}
+    {searchTruncated}
+    {searchError}
+    bind:gitDiffPath={gitDiffPath}
+    {gitStatus}
+    {gitDiff}
+    {gitError}
+    {selectedRunId}
+    {status}
+    onFetchFile={fetchFile}
+    onSearchFiles={searchFiles}
+    onFetchGitStatus={fetchGitStatus}
+    onFetchGitDiff={fetchGitDiff}
+  />
+  <HostDiagnostics
+    {hosts}
+    bind:hostDiagHostId={hostDiagHostId}
+    {hostDiagError}
+    {hostInfo}
+    {hostDoctor}
+    {hostCapabilities}
+    {hostLogs}
+    bind:hostLogsLines={hostLogsLines}
+    bind:hostLogsMaxBytes={hostLogsMaxBytes}
+    {status}
+    {token}
+    onRefreshHosts={refreshHosts}
+    onFetchHostInfo={fetchHostInfo}
+    onFetchHostDoctor={fetchHostDoctor}
+    onFetchHostCapabilities={fetchHostCapabilities}
+    onFetchHostLogs={fetchHostLogs}
+  />
+  <StartRun
+    {hosts}
+    bind:startHostId={startHostId}
+    {startTool}
+    {currentStartToolOptions}
+    {currentStartHostToolsLoading}
+    {currentStartToolStatuses}
+    bind:startOpencodeModel={startOpencodeModel}
+    {currentStartOpencodeModels}
+    {currentStartOpencodeModelsError}
+    {currentStartOpencodeDefaultModel}
+    {currentStartOpencodeModelsNote}
+    bind:startOpencodeSessionId={startOpencodeSessionId}
+    bind:startCwd={startCwd}
+    {lastSuggestedStartCwd}
+    bind:startCmd={startCmd}
+    {startError}
+    {status}
+    {token}
+    onRefreshHosts={refreshHosts}
+    onStartRun={startRun}
+    onApplySuggestedStartCwd={() => applySuggestedStartCwd(true)}
+  />
 
   {#if token && view === "settings"}
-  <section>
-    <h2>事件</h2>
-    <pre>{JSON.stringify(events[0] ?? null, null, 2)}</pre>
-    <ul>
-      {#each events as e (e.ts + e.type + (e.seq ?? 0))}
-        <li>
-          <code>{e.ts}</code> <strong>{e.type}</strong>
-          {#if e.host_id}<code> host={e.host_id}</code>{/if}
-          {#if e.run_id}<code> run={e.run_id}</code>{/if}
-          {#if e.seq !== undefined}<code> seq={e.seq}</code>{/if}
-        </li>
-      {/each}
-    </ul>
-  </section>
+    <EventLog {events} {token} {view} />
   {/if}
 
-  {#if inputModalOpen}
-    <div class="modal-overlay" role="dialog" aria-modal="true">
-      <div class="modal">
-        <div class="modal-head">
-          <div class="modal-title">输入</div>
-          <button class="secondary" on:click={closeInputModal} type="button">关闭</button>
-        </div>
-        <div class="modal-body">
-          <textarea
-            class="input-textarea"
-            bind:this={inputModalEl}
-            bind:value={inputModalText}
-            placeholder=""
-            rows="3"
-          ></textarea>
-          <div class="quick-inputs">
-            <button class="secondary" on:click={() => sendQuickInput("y\n")} type="button">y</button>
-            <button class="secondary" on:click={() => sendQuickInput("n\n")} type="button">n</button>
-            <button class="secondary" on:click={() => sendQuickInput("continue\n")} type="button">continue</button>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="secondary" on:click={closeInputModal} type="button">取消</button>
-          <button on:click={sendInputModalText} disabled={!selectedRunId || status !== "connected"} type="button">发送</button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <InputModal
+    show={inputModalOpen}
+    bind:text={inputModalText}
+    {selectedRunId}
+    {status}
+    onClose={closeInputModal}
+    onSend={sendInputModalText}
+    onQuickInput={sendQuickInput}
+  />
 
-  {#if approvalModalOpen && selectedRun && selectedAwaiting && awaitingIsApproval(selectedAwaiting)}
-    {@const risk = riskForOpTool(selectedAwaiting.op_tool)}
-    <div class="modal-overlay" role="dialog" aria-modal="true">
-      <div class="modal">
-        <div class="modal-head">
-          <div class="modal-title">待审批</div>
-          <button
-            class="secondary"
-            on:click={() => {
-              approvalModalOpen = false;
-              approvalModalShowArgs = false;
-            }}
-            type="button"
-          >
-            关闭
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="approval-meta">
-            <span class="meta-pill">
-              <span class="meta-k">tool</span>
-              <span class="meta-v">{selectedRun.tool}</span>
-            </span>
-            {#if selectedAwaiting.op_tool}
-              <span class="meta-pill">
-                <span class="meta-k">op</span>
-                <span class="meta-v"><code>{selectedAwaiting.op_tool}</code></span>
-              </span>
-            {/if}
-            {#if risk}
-              <span class="risk-pill" data-kind={risk.kind}>{risk.label}</span>
-            {/if}
-          </div>
+  <ApprovalModal
+    show={approvalModalOpen}
+    {selectedRunId}
+    {status}
+    awaiting={selectedAwaiting}
+    runTool={selectedRun?.tool ?? ""}
+    {approvalForSession}
+    bind:approvalAnswersJson={approvalAnswersJson}
+    showArgs={approvalModalShowArgs}
+    {riskForOpTool}
+    onClose={() => { approvalModalOpen = false; approvalModalShowArgs = false; }}
+    onSendDecision={(d) => { sendDecision(d); approvalModalOpen = false; approvalModalShowArgs = false; }}
+    onToggleApprovalForSession={(v) => (approvalForSession = v)}
+  />
 
-          {#if selectedAwaiting.op_args_summary}
-            <div class="approval-summary"><code>{selectedAwaiting.op_args_summary}</code></div>
-          {/if}
+  <StopConfirmModal
+    show={stopConfirmOpen}
+    runId={selectedRunId}
+    {status}
+    onClose={() => (stopConfirmOpen = false)}
+    onStop={(signal) => { sendStop(signal); stopConfirmOpen = false; }}
+  />
 
-          {#if selectedAwaiting.prompt}
-            <div class="approval-prompt">{selectedAwaiting.prompt}</div>
-          {/if}
-
-          <div class="approval-extra">
-            <label class="checkbox">
-              <input type="checkbox" bind:checked={approvalForSession} disabled={!selectedAwaiting.op_tool} />
-              本会话允许{#if selectedAwaiting.op_tool}（<code>{selectedAwaiting.op_tool}</code>）{/if}
-            </label>
-          </div>
-
-          {#if selectedAwaiting.questions !== undefined && selectedAwaiting.questions !== null}
-            <div class="approval-questions">
-              <div class="approval-questions-title">需要回答</div>
-              <pre class="approval-questions-json">{JSON.stringify(selectedAwaiting.questions, null, 2)}</pre>
-              <div class="approval-answers-label">answers（JSON）</div>
-              <textarea class="approval-answers" rows="5" bind:value={approvalAnswersJson} placeholder={"{}"}></textarea>
-            </div>
-          {/if}
-
-          {#if selectedAwaiting.op_args !== undefined && selectedAwaiting.op_args !== null}
-            <details class="approval-details" bind:open={approvalModalShowArgs}>
-              <summary>参数</summary>
-              <pre>{JSON.stringify(selectedAwaiting.op_args, null, 2)}</pre>
-            </details>
-          {/if}
-        </div>
-        <div class="modal-actions">
-          <button
-            class="secondary"
-            on:click={() => {
-              approvalModalOpen = false;
-              approvalModalShowArgs = false;
-            }}
-            type="button"
-          >
-            取消
-          </button>
-          <button
-            on:click={() => {
-              sendDecision("deny");
-              approvalModalOpen = false;
-              approvalModalShowArgs = false;
-            }}
-            disabled={!selectedRunId || status !== "connected"}
-            type="button"
-          >
-            拒绝
-          </button>
-          <button
-            on:click={() => {
-              sendDecision("approve");
-              approvalModalOpen = false;
-              approvalModalShowArgs = false;
-            }}
-            disabled={!selectedRunId || status !== "connected"}
-            type="button"
-          >
-            同意
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
-
-  {#if stopConfirmOpen}
-    <div class="modal-overlay" role="dialog" aria-modal="true">
-      <div class="modal">
-        <div class="modal-head">
-          <div class="modal-title">停止会话</div>
-          <button class="secondary" on:click={() => (stopConfirmOpen = false)} type="button">关闭</button>
-        </div>
-        <div class="modal-body">
-          <code>{selectedRunId}</code>
-        </div>
-        <div class="modal-actions">
-          <button class="secondary" on:click={() => (stopConfirmOpen = false)} type="button">取消</button>
-          <button
-            on:click={() => {
-              sendStop("term");
-              stopConfirmOpen = false;
-            }}
-            disabled={!selectedRunId || status !== "connected"}
-            type="button"
-          >
-            停止
-          </button>
-          <button
-            class="danger"
-            on:click={() => {
-              sendStop("kill");
-              stopConfirmOpen = false;
-            }}
-            disabled={!selectedRunId || status !== "connected"}
-            type="button"
-          >
-            强制停止
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
-
-  {#if toastText}
-    <div class="toast" role="status" aria-live="polite">{toastText}</div>
-  {/if}
+  <Toast text={toastText} />
 </main>
 
 <style>
@@ -4602,155 +3813,54 @@
     gap: 14px;
   }
 
-  .topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 12px 14px;
-    border: 1px solid rgba(14, 165, 233, 0.24);
-    border-radius: 22px;
-    background:
-      linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 249, 255, 0.86) 100%);
-    box-shadow: var(--shadow-sm);
-    backdrop-filter: blur(10px);
-    position: sticky;
-    top: 8px;
-    z-index: 20;
-  }
-
-  .subtle {
+  /* Shared utilities used across components */
+  :global(.subtle) {
     font-size: 12px;
     color: var(--muted);
     margin-top: 2px;
   }
 
-  .subtle-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+  :global(.secondary) {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 246, 255, 0.86));
   }
 
-  .version-pill {
+  :global(.session-status) {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    font-weight: 900;
-    color: #0c4a6e;
-    padding: 3px 8px;
     border-radius: 999px;
-    border: 1px solid rgba(14, 165, 233, 0.28);
-    background: rgba(186, 230, 253, 0.45);
-  }
-
-  .toast {
-    position: fixed;
-    left: 50%;
-    bottom: 18px;
-    transform: translateX(-50%);
-    padding: 10px 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(17, 24, 39, 0.86);
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 13px;
-    font-weight: 800;
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.12),
-      0 10px 30px rgba(0, 0, 0, 0.22);
-    z-index: 50;
-  }
-
-  .segmented {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 6px;
-    background: rgba(148, 163, 184, 0.16);
-    border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: 20px;
-    padding: 6px;
-  }
-
-  .segmented button {
-    border: none;
-    background: transparent;
-    border-radius: var(--radius-md);
-    padding: 10px 8px;
-    font-weight: 800;
-    font-size: 13px;
-    color: #334155;
-    transition:
-      background-color 180ms ease,
-      color 180ms ease,
-      box-shadow 180ms ease;
-  }
-
-  .segmented button.active {
-    background: linear-gradient(140deg, rgba(255, 255, 255, 0.92), rgba(224, 242, 254, 0.9));
-    box-shadow:
-      0 1px 2px rgba(2, 6, 23, 0.08),
-      0 6px 18px rgba(14, 165, 233, 0.16);
-    border: 1px solid rgba(14, 165, 233, 0.24);
-    color: #0c4a6e;
-  }
-
-  .conn-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border-radius: 999px;
-    padding: 6px 10px;
+    padding: 4px 8px;
     font-size: 12px;
+    font-weight: 800;
     border: 1px solid var(--border);
     background: var(--surface-2);
+    flex: 0 0 auto;
   }
 
-  .conn-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: rgba(100, 116, 139, 0.8);
-  }
-
-  .conn-status[data-kind="connected"] {
+  :global(.session-status[data-kind="running"]) {
     background: rgba(34, 197, 94, 0.12);
     border-color: rgba(34, 197, 94, 0.28);
     color: #065f46;
   }
 
-  .conn-status[data-kind="connected"] .conn-dot {
-    background: rgba(34, 197, 94, 0.95);
+  :global(.session-status[data-kind="warning"]) {
+    background: rgba(249, 115, 22, 0.12);
+    border-color: rgba(249, 115, 22, 0.28);
+    color: #92400e;
   }
 
-  .conn-status[data-kind="checking"],
-  .conn-status[data-kind="connecting"] {
-    background: rgba(37, 99, 235, 0.12);
-    border-color: rgba(37, 99, 235, 0.28);
-    color: #1d4ed8;
-  }
-
-  .conn-status[data-kind="checking"] .conn-dot,
-  .conn-status[data-kind="connecting"] .conn-dot {
-    background: rgba(37, 99, 235, 0.95);
-  }
-
-  .conn-status[data-kind="error"] {
+  :global(.session-status[data-kind="error"]) {
     background: rgba(239, 68, 68, 0.1);
     border-color: rgba(239, 68, 68, 0.22);
     color: #991b1b;
   }
 
-  .conn-status[data-kind="error"] .conn-dot {
-    background: rgba(239, 68, 68, 0.9);
+  :global(.session-status[data-kind="done"]) {
+    background: rgba(107, 114, 128, 0.12);
+    border-color: rgba(107, 114, 128, 0.22);
+    color: #374151;
   }
 
-  .hidden {
-    display: none;
-  }
-
+  /* Session layout grid */
   .sessions-layout {
     display: grid;
     grid-template-columns: clamp(320px, 34vw, 360px) 1fr;
@@ -4764,550 +3874,24 @@
     }
   }
 
-  .sessions-list {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-  }
-
-  @media (max-width: 640px) {
-    .sessions-list {
-      grid-row: auto;
-    }
-  }
-
   @media (max-width: 640px) {
     .sessions-layout {
       grid-template-columns: 1fr;
     }
-
-    .sessions-layout.mobile-detail-open .sessions-list {
+    .sessions-layout.mobile-detail-open :global(.sessions-list) {
       display: none;
     }
-
-    .sessions-layout:not(.mobile-detail-open) .sessions-detail,
-    .sessions-layout:not(.mobile-detail-open) .sessions-todo {
-      display: none;
-    }
-  }
-
-  .list-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .secondary {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 246, 255, 0.86));
-  }
-
-  .list-search {
-    margin: 10px 0 12px 0;
-  }
-
-  .list-search input {
-    border-radius: 999px;
-    padding-left: 14px;
-    padding-right: 14px;
-  }
-
-  .host-group {
-    margin: 10px 0;
-  }
-
-  .host-group-header {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: linear-gradient(150deg, rgba(255, 255, 255, 0.86), rgba(239, 246, 255, 0.88));
-    text-align: left;
-    box-shadow: var(--shadow-sm);
-  }
-
-  .host-group-header:hover {
-    border-color: var(--border-strong);
-    background: linear-gradient(150deg, rgba(255, 255, 255, 0.95), rgba(224, 242, 254, 0.9));
-  }
-
-  .chevron {
-    width: 16px;
-    color: var(--muted);
-    flex: 0 0 auto;
-  }
-
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: rgba(100, 116, 139, 0.7);
-    flex: 0 0 auto;
-  }
-
-  .dot[data-online="1"] {
-    background: var(--success);
-  }
-
-  .host-name {
-    font-weight: 800;
-    font-size: 13px;
-    flex: 1;
-  }
-
-  .host-last-seen {
-    font-size: 12px;
-    color: var(--muted);
-    flex: 0 0 auto;
-  }
-
-  .session-items {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 8px;
-  }
-
-  .session-item {
-    width: 100%;
-    text-align: left;
-    position: relative;
-    padding: 10px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: linear-gradient(150deg, rgba(255, 255, 255, 0.94), rgba(240, 249, 255, 0.88));
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    box-shadow: var(--shadow-sm);
-    transition:
-      border-color 160ms ease,
-      background-color 160ms ease,
-      box-shadow 160ms ease;
-  }
-
-  .session-item:hover {
-    border-color: var(--border-strong);
-    box-shadow: 0 10px 20px rgba(2, 6, 23, 0.1);
-  }
-
-  .session-item.selected {
-    border-color: rgba(14, 165, 233, 0.45);
-    background: linear-gradient(150deg, rgba(224, 242, 254, 0.9), rgba(186, 230, 253, 0.45));
-  }
-
-  .session-item.selected::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 10px;
-    bottom: 10px;
-    width: 3px;
-    border-radius: 999px;
-    background: linear-gradient(180deg, #0ea5e9, #22d3ee);
-  }
-
-  .session-item-top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .session-title {
-    font-weight: 900;
-    font-size: 13px;
-    line-height: 1.2;
-    color: var(--text-strong);
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .session-status {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    padding: 4px 8px;
-    font-size: 12px;
-    font-weight: 800;
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    flex: 0 0 auto;
-  }
-
-  .session-status[data-kind="running"] {
-    background: rgba(34, 197, 94, 0.12);
-    border-color: rgba(34, 197, 94, 0.28);
-    color: #065f46;
-  }
-
-  .session-status[data-kind="warning"] {
-    background: rgba(249, 115, 22, 0.12);
-    border-color: rgba(249, 115, 22, 0.28);
-    color: #92400e;
-  }
-
-  .session-status[data-kind="error"] {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.22);
-    color: #991b1b;
-  }
-
-  .session-status[data-kind="done"] {
-    background: rgba(107, 114, 128, 0.12);
-    border-color: rgba(107, 114, 128, 0.22);
-    color: #374151;
-  }
-
-  .session-meta {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-    font-size: 12px;
-    color: #355271;
-  }
-
-  .session-tool {
-    font-weight: 900;
-    color: var(--text-strong);
-  }
-
-  .session-op,
-  .session-op-args {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 12px;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(14, 165, 233, 0.2);
-    padding: 2px 6px;
-    border-radius: 8px;
-  }
-
-  .session-summary {
-    font-size: 12px;
-    color: var(--muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  @media (max-width: 1024px) {
-    .session-summary {
+    .sessions-layout:not(.mobile-detail-open) :global(.sessions-detail),
+    .sessions-layout:not(.mobile-detail-open) :global(.sessions-todo) {
       display: none;
     }
   }
 
-  .session-time {
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  .sessions-detail {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .detail-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .detail-title {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .detail-title-main {
-    font-weight: 900;
-    font-size: 15px;
-    line-height: 1.2;
-  }
-
-  .detail-title-sub {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  .detail-host code {
-    font-weight: 900;
-    color: var(--text-strong);
-  }
-
-  .detail-meta {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-    font-size: 12px;
-  }
-
-  .meta-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    max-width: 100%;
-    min-width: 0;
-  }
-
-  .meta-k {
-    color: var(--muted);
-    font-weight: 900;
-  }
-
-  .meta-v {
-    color: var(--text-strong);
-    font-weight: 900;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .meta-pill-cwd {
-    flex: 1 1 360px;
-  }
-
-  .detail-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-  }
-
-  .offline-banner {
-    margin-top: 10px;
-    padding: 10px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(239, 68, 68, 0.18);
-    background: rgba(239, 68, 68, 0.06);
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
-    font-size: 12px;
-    font-weight: 900;
-    color: #991b1b;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(17, 24, 39, 0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-    z-index: 100;
-  }
-
-  .modal {
-    width: 100%;
-    max-width: 520px;
-    border-radius: 18px;
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.98);
-    padding: 14px;
-    box-shadow:
-      0 2px 12px rgba(0, 0, 0, 0.16),
-      0 18px 50px rgba(0, 0, 0, 0.22);
-  }
-
-  .modal-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .modal-title {
-    font-weight: 900;
-    font-size: 14px;
-  }
-
-  .modal-body {
-    margin-top: 10px;
-    color: var(--muted);
-  }
-
-  .input-textarea {
-    width: 100%;
-    min-height: 96px;
-    padding: 10px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.9);
-    font: inherit;
-    font-size: 13px;
-    color: var(--text-strong);
-    box-sizing: border-box;
-    resize: vertical;
-  }
-
-  .quick-inputs {
-    margin-top: 10px;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .modal-actions {
-    margin-top: 12px;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .approval-meta {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .risk-pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    font-weight: 900;
-    font-size: 12px;
-    text-transform: uppercase;
-  }
-
-  .risk-pill[data-kind="read"] {
-    background: rgba(37, 99, 235, 0.12);
-    border-color: rgba(37, 99, 235, 0.22);
-    color: #1d4ed8;
-  }
-
-  .risk-pill[data-kind="write"] {
-    background: rgba(249, 115, 22, 0.12);
-    border-color: rgba(249, 115, 22, 0.28);
-    color: #92400e;
-  }
-
-  .risk-pill[data-kind="exec"] {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.22);
-    color: #991b1b;
-  }
-
-  .risk-pill[data-kind="other"] {
-    background: rgba(107, 114, 128, 0.12);
-    border-color: rgba(107, 114, 128, 0.22);
-    color: #374151;
-  }
-
-  .approval-summary {
-    margin-top: 10px;
-    color: var(--text-strong);
-  }
-
-  .approval-summary code {
-    font-size: 12px;
-  }
-
-  .approval-prompt {
-    margin-top: 10px;
-    font-size: 13px;
-    color: var(--text-strong);
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .approval-details {
-    margin-top: 10px;
-  }
-
-  .approval-details summary {
-    cursor: pointer;
-    font-weight: 900;
-    color: #374151;
-  }
-
-  button.danger {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.26);
-    color: #991b1b;
-  }
-
-  .detail-tabs {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 12px;
-    padding: 6px;
-    border-radius: var(--radius-lg);
-    background: rgba(148, 163, 184, 0.16);
-    border: 1px solid rgba(148, 163, 184, 0.24);
-  }
-
-  .detail-tabs button {
-    border: none;
-    background: transparent;
-    border-radius: 12px;
-    padding: 10px 10px;
-    font-weight: 800;
-    font-size: 13px;
-  }
-
-  .detail-tabs button.active {
-    background: linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(224, 242, 254, 0.86));
-    box-shadow: var(--shadow-sm);
-    border: 1px solid rgba(14, 165, 233, 0.24);
-  }
-
-  .chat-feed {
-    margin-top: 12px;
-    max-height: clamp(320px, 60vh, 720px);
-    overflow: auto;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(241, 245, 255, 0.95));
-    padding: 12px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  }
-
-  :global(.chat-row) {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin: 10px 0;
-  }
-
-  :global(.chat-row[data-role="assistant"]) {
-    align-items: flex-start;
-  }
-
-  :global(.chat-row[data-role="user"]) {
-    align-items: flex-end;
-  }
-
-  :global(.chat-row[data-role="system"]) {
-    align-items: center;
-    text-align: center;
-  }
+  /* BlocksRenderer shared global styles (used via @html rendering) */
+  :global(.chat-row) { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+  :global(.chat-row[data-role="assistant"]) { align-items: flex-start; }
+  :global(.chat-row[data-role="user"]) { align-items: flex-end; }
+  :global(.chat-row[data-role="system"]) { align-items: center; text-align: center; }
 
   :global(.chat-bubble) {
     max-width: 70%;
@@ -5318,27 +3902,11 @@
     word-break: break-word;
     white-space: pre-wrap;
   }
+  :global(.chat-bubble[data-role="assistant"]) { background: rgba(248, 250, 255, 0.98); }
+  :global(.chat-bubble[data-role="user"]) { background: rgba(14, 165, 233, 0.16); border-color: rgba(14, 165, 233, 0.3); }
 
-  :global(.chat-bubble[data-role="assistant"]) {
-    background: rgba(248, 250, 255, 0.98);
-  }
-
-  :global(.chat-bubble[data-role="user"]) {
-    background: rgba(14, 165, 233, 0.16);
-    border-color: rgba(14, 165, 233, 0.3);
-  }
-
-  :global(.chat-system) {
-    max-width: 70%;
-    font-size: 12px;
-    color: var(--muted);
-    word-break: break-word;
-  }
-
-  :global(.chat-ts) {
-    font-size: 11px;
-    color: var(--muted);
-  }
+  :global(.chat-system) { max-width: 70%; font-size: 12px; color: var(--muted); word-break: break-word; }
+  :global(.chat-ts) { font-size: 11px; color: var(--muted); }
 
   :global(.tool-card) {
     width: 100%;
@@ -5347,448 +3915,24 @@
     background: linear-gradient(155deg, rgba(255, 255, 255, 0.92), rgba(241, 245, 255, 0.92));
     padding: 10px 12px;
   }
-
-  .approval-card {
-    width: 100%;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(249, 115, 22, 0.28);
-    background: linear-gradient(165deg, rgba(255, 247, 237, 0.95), rgba(254, 243, 199, 0.74));
-    padding: 10px 12px;
-  }
-
-  .approval-card-top {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .approval-card-prompt {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #9a3412;
-    word-break: break-word;
-    white-space: pre-wrap;
-  }
-
-  .approval-card-footer {
-    margin-top: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    text-align: left;
-  }
-
-  .approval-card-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-  }
-
-  .approval-questions-title {
-    font-size: 12px;
-    color: #9a3412;
-    font-weight: 800;
-    margin-bottom: 6px;
-  }
-
-  .approval-questions-json {
-    margin: 0;
-    padding: 10px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(249, 115, 22, 0.25);
-    background: rgba(255, 255, 255, 0.86);
-    font-size: 12px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow: auto;
-    max-height: 240px;
-  }
-
-  .approval-answers-label {
-    display: block;
-    margin-top: 10px;
-    font-size: 12px;
-    color: #9a3412;
-    font-weight: 800;
-  }
-
-  .approval-answers {
-    width: 100%;
-    margin-top: 6px;
-    font-size: 12px;
-  }
-
-  :global(.tool-card summary) {
-    cursor: pointer;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
-    list-style: none;
-  }
-
-  :global(.tool-card summary::-webkit-details-marker) {
-    display: none;
-  }
-
-  :global(.tool-card-body) {
-    margin-top: 8px;
-    text-align: left;
-  }
-
-  :global(.tool-card-actions) {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 10px;
-  }
-
-  :global(.tool-card-label) {
-    font-size: 12px;
-    color: var(--muted);
-    margin-bottom: 6px;
-  }
-
+  :global(.tool-card summary) { cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; list-style: none; }
+  :global(.tool-card summary::-webkit-details-marker) { display: none; }
+  :global(.tool-card-body) { margin-top: 8px; text-align: left; }
+  :global(.tool-card-actions) { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  :global(.tool-card-label) { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   :global(.tool-json) {
-    margin: 0;
-    padding: 10px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: rgba(241, 245, 255, 0.78);
-    font-size: 12px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow: auto;
-    max-height: 240px;
+    margin: 0; padding: 10px 12px; border-radius: var(--radius-lg);
+    border: 1px solid var(--border); background: rgba(241, 245, 255, 0.78);
+    font-size: 12px; white-space: pre-wrap; word-break: break-word; overflow: auto; max-height: 240px;
   }
 
-  .awaiting-card {
-    width: 100%;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(249, 115, 22, 0.28);
-    background: linear-gradient(165deg, rgba(255, 247, 237, 0.95), rgba(254, 243, 199, 0.72));
-    padding: 10px 12px;
-  }
-
-  .pinned-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 10px 0 12px;
-  }
-
-  .awaiting-card-prompt {
-    font-size: 12px;
-    color: #9a3412;
-    word-break: break-word;
-    white-space: pre-wrap;
-  }
-
-  .awaiting-card-footer {
-    margin-top: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    text-align: left;
-  }
-
-  .awaiting-card-input {
-    width: 100%;
-    font-size: 12px;
-  }
-
-  .awaiting-card-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .chat-inputbar {
-    margin-top: 10px;
-    display: flex;
-    gap: 8px;
-    align-items: flex-end;
-  }
-
-  .chat-textarea {
-    flex: 1;
-    min-height: 44px;
-    resize: vertical;
-  }
-
-  .chat-input-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: stretch;
-  }
-
-  .output-toolbar {
-    margin-top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .output-searchbar {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .output-searchbar input {
-    flex: 1;
-    min-width: 160px;
-    border-radius: 999px;
-  }
-
-  .output-count {
-    font-size: 12px;
-    color: var(--muted);
-    font-weight: 800;
-    padding: 0 4px;
-  }
-
-  .output-actions {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .output-feed {
-    margin-top: 10px;
-    max-height: clamp(320px, 60vh, 720px);
-    overflow: auto;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: var(--surface-muted);
-    padding: 0;
-    position: relative;
-  }
-
-  .output-feed.tui {
-    overflow: hidden;
-    background: #0b1020;
-  }
-
-  .xterm-shell {
-    width: 100%;
-    height: clamp(320px, 60vh, 720px);
-  }
-
-  .output-pre {
-    margin: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    max-height: none;
-  }
-
-  .paused-badge {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    border-radius: 999px;
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 900;
-    border: 1px solid rgba(249, 115, 22, 0.28);
-    background: rgba(255, 247, 237, 0.94);
-    color: #9a3412;
-  }
-
-  :global(.out-mark) {
-    background: rgba(245, 158, 11, 0.35);
-    color: inherit;
-    border-radius: 4px;
-    padding: 0 1px;
-  }
-
-  :global(.out-mark.current) {
-    background: rgba(245, 158, 11, 0.7);
-  }
-
-  .detail-input {
-    margin-top: 12px;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .sessions-todo {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  @media (max-width: 640px) {
-    .sessions-detail,
-    .sessions-todo {
-      grid-column: 1;
-      grid-row: auto;
-    }
-
-    .chat-inputbar {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .chat-input-actions {
-      flex-direction: row;
-      justify-content: flex-end;
-    }
-  }
-
-  h1 {
-    margin: 6px 0 2px 0;
-    font-weight: 800;
-    letter-spacing: 0.2px;
-    font-size: 20px;
-  }
-
-  h2 {
-    margin: 0 0 10px 0;
-    font-size: 15px;
-    font-weight: 800;
-  }
-
-  h3 {
-    margin: 12px 0 6px 0;
-    font-size: 13px;
-    font-weight: 800;
-    color: #334155;
-  }
-
-  section {
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(239, 246, 255, 0.82));
-    border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: var(--radius-lg);
-    padding: 14px;
-    box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.86),
-      0 10px 28px rgba(2, 6, 23, 0.1);
-    backdrop-filter: blur(8px);
-  }
-
-  label {
-    display: block;
-    margin: 10px 0;
-    font-size: 12px;
-    font-weight: 700;
-    color: #334155;
-  }
-
-  .login-prefs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 14px;
-    margin: 6px 0 2px;
-  }
-
-  label.checkbox {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-    font-size: 13px;
-    font-weight: 700;
-    color: #334155;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  input,
-  select {
-    width: 100%;
-    min-height: 40px;
-    padding: 10px 12px;
-    box-sizing: border-box;
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(148, 163, 184, 0.34);
-    background: var(--surface);
-    font-size: 14px;
-    outline: none;
-  }
-
-  input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    padding: 0;
-    border-radius: 6px;
-    accent-color: var(--primary);
-  }
-
-  input:focus,
-  select:focus {
-    border-color: rgba(14, 165, 233, 0.5);
-    box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.16);
-  }
-
-  button {
-    border: 1px solid rgba(148, 163, 184, 0.32);
-    border-radius: var(--radius-md);
-    min-height: 40px;
-    padding: 10px 12px;
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(241, 245, 255, 0.9));
-    font-weight: 700;
-    font-size: 13px;
-    cursor: pointer;
-    color: #0f2a4a;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
-    transition:
-      border-color 160ms ease,
-      background-color 160ms ease,
-      box-shadow 160ms ease,
-      transform 40ms ease;
-  }
-
-  button:hover:not(:disabled) {
-    border-color: var(--border-strong);
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(224, 242, 254, 0.9));
-    box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.9),
-      0 8px 22px rgba(14, 165, 233, 0.14);
-  }
-
-  button:active:not(:disabled) {
-    transform: translateY(1px);
-  }
-
-  button:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  button:focus-visible,
-  input:focus-visible,
-  select:focus-visible,
-  summary:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.16);
-  }
+  :global(.out-mark) { background: rgba(245, 158, 11, 0.35); color: inherit; border-radius: 4px; padding: 0 1px; }
+  :global(.out-mark.current) { background: rgba(245, 158, 11, 0.7); }
 
   @media (prefers-reduced-motion: reduce) {
     * {
       transition: none !important;
       scroll-behavior: auto !important;
     }
-  }
-
-  pre {
-    white-space: pre-wrap;
-    word-break: break-word;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: var(--surface);
-    padding: 12px;
-    overflow: auto;
-  }
-
-  ul {
-    padding-left: 18px;
   }
 </style>

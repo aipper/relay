@@ -9,9 +9,10 @@ description: 预检：读取真值文件并输出约束摘要
 目标：在开始任何“写代码/改配置/落盘文件”之前，对齐工作区真值文件，避免规则漂移。
 
 执行步骤（强制）：
-1) 定位项目根目录：
-   - 优先：`git rev-parse --show-toplevel`
-   - 若失败：停止并让用户确认当前目录是否为项目根（不要猜测）。
+1) 定位项目根目录（submodule 感知）：
+   - 优先：`git rev-parse --show-superproject-working-tree`（submodule 内上溯到 superproject 根）
+   - 若为空：`git rev-parse --show-toplevel`
+   - 若两者都失败：停止并让用户确认当前目录是否为项目根（不要猜测）。
 2) 在项目根目录读取以下文件（存在则必须读取；缺失则明确报告缺失项，不要臆测内容）：
    - `AI_PROJECT.md`
    - `REQUIREMENTS.md`

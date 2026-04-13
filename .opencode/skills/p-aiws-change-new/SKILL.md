@@ -1,10 +1,10 @@
 ---
 name: p-aiws-change-new
-description: 私有：创建 changes/<change-id> 工件
+description: 私有：创建 .aiws/changes/<change-id> 工件
 ---
 
 目标：
-- 创建 `changes/<change-id>/` 工件目录与基础文件（proposal/tasks/可选 design）
+- 创建 `.aiws/changes/<change-id>/` 工件目录与基础文件（proposal/tasks/可选 design）
 
 要求：
 - `change-id` 必须是 kebab-case：`^[a-z0-9]+(-[a-z0-9]+)*$`

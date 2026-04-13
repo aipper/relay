@@ -1,6 +1,6 @@
 ---
 name: ws-req-contract-sync
-description: 合同同步（requirements contract sync）
+description: 使用时机：需要同步需求执行合同到代码时。触发词：合同同步、contract、req sync。注意：合同内容变更请先 ws-req-change。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。

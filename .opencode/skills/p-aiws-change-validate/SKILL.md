@@ -4,7 +4,7 @@ description: 私有：校验 changes 工件（可 strict）
 ---
 
 目标：
-- 校验 `changes/<change-id>/` 工件完整性、归因与 WS:TODO（用于 hooks/CI）
+- 校验 `.aiws/changes/<change-id>/` 工件完整性、归因与 WS:TODO（用于 hooks/CI）
 
 执行（在仓库根目录）：
 ```bash

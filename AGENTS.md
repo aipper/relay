@@ -1,90 +1,36 @@
 # Repository Guidelines
 
 <!-- AIWS_MANAGED_BEGIN:agents -->
-本仓库启用 AIWS（AI Workspace）约定，请先读取并遵守（按优先级）：
-1) `AI_PROJECT.md`（规则/边界）
-2) `REQUIREMENTS.md`（需求与验收真值）
-3) `AI_WORKSPACE.md`（运行/测试入口真值）
-4) `changes/README.md`（变更工件流程与归档）
+本仓库启用 AIWS（AI Workspace）约定。真值文件（按优先读取）：
+1) `AI_PROJECT.md`（规则/边界）→ 2) `REQUIREMENTS.md`（需求与验收真值）→ 3) `AI_WORKSPACE.md`（运行/测试入口真值）
 
-最小协作约束：
-- 不确定先跑 `/using-aiws`（Codex 对应 `$using-aiws`）；它会先读真值，再把任务路由到合适的 `ws-*` 入口。
-- 若你已经明确只是做预检，也可以直接跑 `/ws-preflight`（Codex 对应 `$ws-preflight`）；所有实现/修复都以 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md` 为准。
-- 每次变更建议进入 `change/<change-id>`，并维护 `changes/<change-id>/proposal.md`、`tasks.md`（可选 `design.md`）。
-- 若仓库存在 `.gitmodules`：优先 `aiws change start <change-id> --worktree`；不要在当前 superproject worktree 里直接切分支。
-- 提交前执行 `aiws validate .`；需要本机门禁时运行 `aiws hooks install .`（或 `git config core.hooksPath .githooks`）。
-- 不要把敏感信息写入 git：`secrets/test-accounts.json`、`.env*`、token、内网地址等。
+快速分流：
+- 小修（≤3 文件，≤100 行）→ `/ws-dev-lite`
+- 常规实现 → `/ws-plan` → `ws-dev`
+- 高风险变更 → 加 `ws-spec-review` + `ws-quality-review` 双审查
+- 不确定 → `/using-aiws`（先读真值，再路由）
 
-标准链路（建议默认）：
-- `using-aiws`：默认 bootstrap/router；先读真值，先判 workflow，再进入具体阶段；意图不明确时先澄清。
-- `ws-preflight`：读取真值文件，输出约束摘要；若真值缺失，先停止，不直接开工。
-- `ws-intake`：计划前置澄清；适用于新需求或中大型变更，按“一题一线程”逐条冻结问题，产出 `plan/*.intake.md` 轻量草案。
-- `ws-plan`：建立 `change/<change-id>` 绑定，落盘 `plan/...`，明确 Verify / Risks / Evidence。
-- `ws-plan-verify`：在编码前做计划质检 + 多视角方案审查；不过门禁就先修 plan，不跳步进实现。
-- `ws-dev`：只做可归因、可验证的小步实现；输出 Changed / Verify / Evidence。
-- `ws-dev-lite`：`ws-dev` 的轻量入口；适用于 simple/local 单点修复，默认不建 `plan/...`、不跑 `ws-plan-verify`，治理归属仍收敛到 `ws-dev`。
-- `ws-delegate`：仅在任务已绑定且 scope 可控时，使用原生多 agent / sub-agent；否则明确降级为单 agent + 协同工件模式。
-- `ws-review`：对当前改动做通用审计；高风险或准备交付时，继续细化到 `ws-spec-review` + `ws-quality-review`。
-- `ws-spec-review`：审查 requirements 归因、plan/change 绑定、evidence 与 workflow gate 完整性。
-- `ws-quality-review`：审查行为回归、边界条件、测试覆盖与实现质量。
-- `ws-commit`：串联 review + validate stamp + commit message 确认；不跳过 hooks。
-- `ws-verify-before-complete`：在 finish / handoff 前检查双审查、validate stamp 与交付证据是否齐全。
-- `ws-deliver` / `ws-finish`：做交付收尾、fast-forward 合并、submodule 感知 push，并在完整 finish 后自动归档。
-- `ws-handoff`：查看/补充归档后的 handoff，给下一次会话或下一位协作者接力。
+协作约束：
+- 变更绑定 `change/<id>`，走 plan→verify→dev→review→commit→finish
+- review 完成 → `ws-verify-before-complete` 确认验证通过 → 再 finish
+- review 三方（spec/quality/verify）需 triage 确定是否有 HIGH blocker
+- 主 session 编排收敛，不直接写业务代码；实现与验证由 subagent 产出
+- 提交前 `aiws validate .`；敏感信息不入 git
+- 缺真值文件先 stop，不直接开工
+- handoff 产出 `handoff-evidence.md` 供后续 session 恢复
 
-阶段产物（最少）：
-- intake：`plan/*.intake.md`
-- planning：`plan/...`、`changes/<change-id>/proposal.md`、`tasks.md`
-- implementation：代码 / 配置改动 + Verify 命令记录
-- collaboration：`changes/<change-id>/analysis/...`、`patches/...`、`review/...`
-- review：`changes/<change-id>/review/...` 或回退 `.agentdocs/tmp/review/...`
-- validate：`.agentdocs/tmp/aiws-validate/*.json`
-- handoff / archive：`changes/<change-id>/evidence/...`、`changes/archive/.../handoff.md`
+Red Flags（这些想法都是错的）：
+| 你想的 | 实际 |
+|--------|------|
+| "看着简单直接改" | 简单→ws-dev-lite，不确定→先 /using-aiws |
+| "先动手再说" | 评估先于行动，分流在实现之前 |
+| "跳过 review" | review 是门禁，不是建议 |
+| "主 session 自己写代码" | 编排收敛，subagent 实现 |
+| "不想走流程直接改" | escape-hatch: 可走 ws-dev-lite，但须遵守最小约束（降级需标明） |
 
-OpenCode（如果你主要用 OpenCode，优先）：
-- native skills 在 `.opencode/skills/`；native commands 在 `.opencode/commands/`
-- 若项目启用了 `.opencode/oh-my-opencode.json`：`ws-plan` / `ws-review` / `ws-spec-review` / `ws-quality-review` / `ws-delegate` 会优先借用 oMo 的 `planner-sisyphus` / `explore` / `librarian` / `oracle`
-- 若你想按项目固定这组 agent，可参考 `.opencode/oh-my-opencode.json.example`；它只覆盖 `agents`，不接管 hooks/MCP/LSP
-- 常用手动入口继续保留在 `.opencode/commands/`（migration window 内 `.opencode/command/` 也会保留）；直接使用 `/ws-*`
-- 若你不确定当前任务该先 plan、dev、review 还是 finish：先用 `/using-aiws`
-- 需求还没冻结、想逐条把问题聊清楚：先用 `/ws-intake`
-- `/ws-preflight`：读取真值文件并输出约束摘要
-- `/ws-plan` / `/ws-plan-verify`：先生成计划，再做执行前质检与多视角方案审查
-- `/ws-dev`：常规实现/改配置/改测试
-- `/ws-dev-lite`：小问题直修；若复杂度升高，立刻回到 `/ws-dev` 或 `/ws-plan`
-- `/ws-delegate`：按 AIWS 委托合同拆分子任务，并优先借用 oMo agent
-- `/ws-bugfix`：缺陷修复 + 证据落盘 + CSV 汇总
-- `/ws-review` / `/ws-commit`：提交前审计、门禁与 commit
-- `/ws-spec-review` / `/ws-quality-review`：高风险改动建议显式拆成流程审查 + 质量审查
-- `/ws-verify-before-complete`：finish / handoff 前检查双审查和 validate/evidence
-- `/ws-finish` / `/ws-deliver`：交付收尾（fast-forward / submodule 感知）
-- `/ws-pull` / `/ws-push` / `/ws-submodule-setup`：submodule 场景辅助
-- `/p-aiws-*` 为底层原子入口；模板会同时写入 `.opencode/commands/` 与 `.opencode/command/`，一般不需要直接调用
+阶段产物（最少）：intake=`.aiws/plan/*.intake.md` | planning=`.aiws/plan/...`+`proposal.md`+`tasks.md` | dev=代码+Verify | review=`review/...` | validate=`aiws-validate/*.json` | archive=`evidence/...`+`handoff.md`
 
-Claude Code（如果你主要用 Claude Code）：
-- native skills 在 `.claude/skills/`；command-style 兼容入口保留在 `.claude/commands/`
-- 常用链路可按 `ws-*` / `p-aiws-*` 理解；native skills 与 compatibility commands 指向同一套 AIWS workflow
-- 若你不确定当前任务该走哪个阶段：先用 `/using-aiws`
-- 需求还没冻结、想逐条把问题聊清楚：先用 `/ws-intake`
-- 高风险改动或准备 finish 时，建议额外跑 `/ws-spec-review`、`/ws-quality-review`、`/ws-verify-before-complete`
-
-Codex（对应入口，可选）：
-- 若你不想先记住阶段，先用 `$using-aiws` 让 router 判定下一步
-- 对应入口在 `.agents/skills/`；显式调用时使用 `$ws-*`
-- `$using-aiws`
-- `$ws-preflight` / `$ws-intake` / `$ws-plan` / `$ws-plan-verify` / `$ws-dev` / `$ws-dev-lite` / `$ws-delegate` / `$ws-frontend-design`
-- `$ws-review` / `$ws-spec-review` / `$ws-quality-review` / `$ws-commit`
-- `$ws-verify-before-complete` / `$ws-finish` / `$ws-deliver`
-- `$ws-pull` / `$ws-push` / `$ws-submodule-setup`
-- 其它入口见 `.agents/skills/`：`ws-*` 为常用链路；`p-*` 为底层原子入口，一般不需要直接调用
-
-Codex 全局入口（可选）：
-- `npx @aipper/aiws codex install-skills`（推荐；安装全局 skills）
-- `npx @aipper/aiws codex install-prompts`（遗留兼容；prompts 已 deprecated）
-
-缺文件或模板漂移时：
-- `npx @aipper/aiws init`（初始化）
-- `npx @aipper/aiws update`（按模板更新托管内容）
+平台前缀：OpenCode=`/` | 例：`/ws-dev`
 <!-- AIWS_MANAGED_END:agents -->
 
 ## Overview

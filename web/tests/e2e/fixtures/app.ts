@@ -132,6 +132,9 @@ export const test = base.extend<TestFixtures>({
         if (path.startsWith("/sessions/recent") && method === "GET") {
           return new Response(JSON.stringify(DEFAULT_SESSIONS), { status: 200, headers: { "Content-Type": "application/json" } });
         }
+        if (path === "/sessions" && method === "GET") {
+          return new Response(JSON.stringify(DEFAULT_SESSIONS), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
         const msgMatch = path.match(/^\/sessions\/([^/]+)\/messages$/);
         if (msgMatch && method === "GET") {
           return new Response(JSON.stringify(DEFAULT_MESSAGES), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -144,6 +147,7 @@ export const test = base.extend<TestFixtures>({
 
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(500);
     await use(page);
     await context.close();
   },

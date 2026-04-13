@@ -3,7 +3,7 @@
 <!-- AIWS_MANAGED_BEGIN:ai-project:core -->
 <!-- AI_PROJECT_VERSION: 2 -->
 
-本文件用于在**具体项目/工作区**内统一 Codex / Claude / OpenCode 的执行约束与协作方式，避免多套规则各写一份导致漂移。
+本文件用于在**具体项目/工作区**内统一 OpenCode 的执行约束与协作方式，避免多套规则各写一份导致漂移。
 
 定位：
 - `REQUIREMENTS.md`：定义“要做什么/验收是什么”（需求真值）
@@ -29,16 +29,21 @@
 ## 3) 产物与证据（强制）
 
 每轮迭代必须落盘至少一个“可追溯产物”（三选一即可）：
-- 证据：`.agentdocs/tmp/...`（report/log/resp）
+- 证据：`.aiws/tmp/...`（report/log/resp）
 - 合同：`issues/*.csv`（状态变化：TODO/DOING/DONE/BLOCKED/SKIP）
-- 变更工件：`changes/<change-id>/`（proposal/tasks/design；详见 `changes/README.md`）
+- 变更工件：`.aiws/changes/<change-id>/`（proposal/tasks/design；详见 `.aiws/changes/README.md`）
 
 不得只在对话里口头描述“已验证/已修复”。
 
+完成小结（change finish 时，主 session 应输出一段中文工作摘要）：
+- 目标：概括本轮 change 解决了什么问题
+- 改动范围：改了什么文件/模块（增删改各多少）
+- 验证结果：怎么确认没问题（构建/测试/LSP/validate 等关键门禁结果）
+
 推荐（防规则/范围漂移）：
-- 创建工件：补齐 `changes/<change-id>/proposal.md`、`tasks.md`（可选 `design.md`）
+- 创建工件：补齐 `.aiws/changes/<change-id>/proposal.md`、`tasks.md`（可选 `design.md`）
 - 声明 active change（团队共享）：切到分支 `change/<change-id>`（也支持 `changes/`、`ws/`、`ws-change/`）
-- 若仓库存在 `.gitmodules`：优先使用 `aiws change start <change-id> --worktree`（或至少 `--no-switch`）；不要在当前 superproject worktree 里直接手工切分支。
+- 若仓库存在 `.gitmodules`：使用 `aiws change start <change-id> --switch`；不要在当前 superproject 里直接手工切分支。
 - 若 submodule 因 gitlink checkout 处于 detached HEAD：只允许挂到 `aiws/pin/<target-branch>`；不要直接切 `change/<change-id>` / `main` / `master` 等业务分支来“解 detached”。
 - 严格校验：`aiws validate .`（包含：漂移检测 + `ws_change_check` + `requirements_contract`）
 - 启用 hooks（本地生效）：`git config core.hooksPath .githooks`（提交/推送时自动跑 `aiws validate .`）
@@ -74,7 +79,7 @@
 
 - `X-Request-Id`：自动化测试请求必须携带；服务端必须回传同名响应头；日志应包含 `request_id=<id>` 以便按单次请求定位问题。
 - 接口清单真值：优先使用 `docs/openapi.json`。若缺失，先补齐导出方式并生成到该路径，再做全量覆盖测试（避免“覆盖范围不可复现”）。
-- 证据落盘：每轮至少更新一次 `.agentdocs/tmp/...` 或 `issues/*.csv`（禁止只在对话里口头宣称“已验证/已修复”）。
+- 证据落盘：每轮至少更新一次 `.aiws/tmp/...` 或 `issues/*.csv`（禁止只在对话里口头宣称“已验证/已修复”）。
 
 <!-- AIWS_MANAGED_END:ai-project:core -->
 

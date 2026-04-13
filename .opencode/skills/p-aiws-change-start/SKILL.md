@@ -4,7 +4,7 @@ description: 私有：切分支并初始化变更工件（可选安装 hooks）
 ---
 
 目标：
-- 切到分支 `change/<change-id>` 并初始化 `changes/<change-id>/` 工件
+- 切到分支 `change/<change-id>` 并初始化 `.aiws/changes/<change-id>/` 工件
   - 若检测到 `.gitmodules`（git submodules），默认优先使用 `--worktree`（失败则回退为 `--no-switch`），避免切走 superproject 分支导致 submodule 状态混乱
 
 要求：

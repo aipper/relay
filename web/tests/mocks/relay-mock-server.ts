@@ -354,7 +354,7 @@ const server = Bun.serve({
       return Response.json(state.hosts);
     }
 
-    if (path === "/sessions/recent" && req.method === "GET") {
+    if ((path === "/sessions" || path === "/sessions/recent") && req.method === "GET") {
       const auth = req.headers.get("Authorization");
       if (!auth?.startsWith("Bearer ")) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });

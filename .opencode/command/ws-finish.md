@@ -66,6 +66,10 @@ fi
 7) submodules 全部成功后，再回到主仓库执行：
    - `aiws change finish <change-id> --push`
 8) `aiws change finish --push` 成功后会自动归档并生成 handoff；只有历史/异常场景才需要手工运行 `aiws change archive <change-id>`。
+9) 输出本轮 change 的中文工作摘要，包含：
+   - 目标：解决了什么问题
+   - 改动范围：改了哪些文件/模块（可引用 handoff 或 evidence）
+   - 验证结果：构建/测试/LSP/validate 等关键门禁的结果
 
 安全：
 - push 前先输出状态并说明远端/分支。

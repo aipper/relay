@@ -1,6 +1,6 @@
 ---
 name: ws-req-flow-sync
-description: Flow 同步（生成 api-flow 与场景执行合同）
+description: 使用时机：需要同步 API flow 和场景执行合同时。触发词：flow 同步、api flow、场景合同。注意：flow 定义变更请先 ws-req-change。
 ---
 
 用中文输出；命令与路径保持原样不翻译。

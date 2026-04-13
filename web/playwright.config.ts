@@ -18,21 +18,19 @@ export default defineConfig({
       ]
     : [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: "http://localhost:4173",
     trace: "retain-on-failure",
     video: "retain-on-failure",
     screenshot: "only-on-failure",
     locale: "zh-CN",
     timezoneId: "Asia/Shanghai",
   },
-  webServer: [
-    {
-      command: "RELAY_DISABLE_PWA=1 bunx vite --host 127.0.0.1 --port 4173",
-      url: "http://127.0.0.1:4173",
-      timeout: 60_000,
-      reuseExistingServer: !CI,
-    },
-  ],
+  webServer: {
+    command: "bun run preview --port 4173",
+    url: "http://localhost:4173",
+    timeout: 60_000,
+    reuseExistingServer: true,
+  },
   projects: [
     {
       name: "desktop",

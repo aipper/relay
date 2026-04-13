@@ -1,168 +1,127 @@
 ---
 name: ws-dev
-description: 开发（按需求实现并验证；适用于任何需要修改代码/配置的任务）
+description: 使用时机：需要修改代码、配置、测试时。触发词：实现、修复、开发、编码、写代码、改bug。注意：需求未冻结先用 ws-intake；极简修复可走 ws-dev-lite。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
 
 目标：在 AIWS 约束下完成一个可回放、可验证的小步交付。
 
-阶段定位：
-- implementation 阶段；负责在既定计划/需求绑定下完成最小实现与验证。
+阶段定位：implementation 阶段。
 
-必需输入：
+## 必需输入
+
 - 真值文件：`AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`
 - 当前任务的归因目标（`Req_ID` 或 `Problem_ID`）
 - 若为 medium/complex：已通过 `$ws-plan` / `$ws-plan-verify` 的计划
 - 当前 `change/<change-id>` 上下文或等价变更归因
 
-必需输出：
+## 必需输出
+
 - `变更文件（Changed）:` 实际改动清单
 - `验证（Verify）:` 实际运行的命令与结果说明
-- `证据（Evidence）:` `plan/...`、`changes/<change-id>/...`、`.agentdocs/tmp/...` 等证据路径
+- `证据（Evidence）:` `plan/...`、`.aiws/changes/<change-id>/...`、`.aiws/tmp/...` 等证据路径
 - `Next:` 若准备提交，建议 `$ws-review` 或 `$ws-commit`
 
-阻断条件：
-- 无法把改动归因到 `REQUIREMENTS.md` 或问题单
-- 没有可复现验证入口
-- 需要创建 change 上下文但当前工作区状态不允许安全切换
+## 前置条件（硬阻断 — 必须最先检查）
 
-完成判定：
-- 改动已落盘、验证已执行或明确未执行原因、证据路径可回放，并可进入 review/commit 阶段。
+在开始任何代码改动之前，必须完成以下检查：
 
-建议流程：
-1) 先做 preflight：定位项目根目录，读取 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`，输出约束摘要。
-   - 若是中大型任务：建议先用 `$ws-plan` 生成 `plan/` 工件，再进入实现（便于可回放与对齐验证入口）。
-   - 若已有 `plan/` 工件：先执行 `$ws-plan-verify`；通过后再进入实现（防止计划过长/跑偏）。
-   - 若 `$ws-plan` 刚创建了 `change/<change-id>` worktree：后续实现必须在该 worktree 中继续；不要回到原工作区重复 `aiws change start ...`
-2) 建立变更归因（推荐）：
-   - ⚠️ 若你准备执行 `aiws change start ... --switch/--worktree` 或手工 `git switch ...` 改变 checkout 上下文，先确认工作区状态：`git status --porcelain`。否则切分支/创建 worktree 后，未提交改动可能看起来丢了（worktree 只从 `HEAD` checkout，未提交内容会留在原目录）。
-   - 若当前目录已经是 `change/<change-id>` worktree（例如由 `$ws-plan` 创建）：直接在这里继续，不要再创建第二个 worktree，也不要回原工作区写代码。
-   - 若 `git status --porcelain` 非空仅因为上一轮 `$ws-plan` / `aiws change new|sync` 生成了 `plan/...`、`changes/<change-id>/proposal.md`、`tasks.md`、`design.md`、`submodules.targets`，这是预期行为，不等于流程出错。处理方式：
-     - 已经在 `change/<change-id>` 分支：直接继续实现，并把这些文件作为计划/证据工件保留。
-     - 还没进入 `change/<change-id>`：先运行 `aiws change start <change-id> --hooks --no-switch` 建立 change 上下文；若你仍要 `--switch/--worktree`，先提交这些规划工件，再切换上下文。
-   - 强制（当你准备执行 `aiws change start ... --worktree/--switch` 创建新 change 时）：先同步线上代码（含 submodules），避免基线过旧导致的 rebase/冲突与别人已更新但本地没拉的协作摩擦。
-     - 若你已经在 `change/<change-id>` 上继续开发：不要在此处强制 pull（避免把远端变动拉进变更分支）；改为按需 `git fetch`/rebase，并保持门禁与验证可复现。
-     - 在 AI 工具中运行：`$ws-pull`（推荐；会在工作区不干净时阻断）
-     - 或等价手工（必须工作区干净；失败则停止并人工处理）：
-```bash
-cur="$(git branch --show-current)"
-if [[ "${cur}" =~ ^(change|changes|ws|ws-change)/ ]]; then
-  echo "info: already on change branch (${cur}); skip pull here"
-else
-  git status --porcelain
-  git pull --ff-only
-  if [[ -f .gitmodules ]]; then
-    git submodule sync --recursive
-    git submodule update --init --recursive
-  fi
-fi
-```
-   - 推荐更安全（默认）：`aiws change start <change-id> --hooks --no-switch`（只创建分支/工件 + 启用 hooks；不切分支）
-   - 准备进入实现时：若当前已在 `change/<change-id>` 直接继续；若需切换到该分支，先确认除规划工件外无额外未提交改动，再执行：`git switch change/<change-id>`
-   - 若你明确要一键切分支（不推荐，且 dirty 会被拦截）：`aiws change start <change-id> --hooks --switch`
-   - superproject + submodule（推荐）：`aiws change start <change-id> --hooks --worktree --submodules`（创建独立 worktree；当前目录分支保持不变；会在新 worktree 内初始化 submodules；若忘了 `--submodules` 也会强制初始化）
-   - 若后续需要在 detached submodule 内提交：先挂到 `aiws/pin/<target-branch>`；不要直接切 `change/<change-id>` / `main` / `master`
-   - 若仓库存在 submodule（`.gitmodules` 声明了 submodule 条目）：进入编码前必须准备好 `changes/<change-id>/submodules.targets`，并把每个 submodule 挂到对应的 `aiws/pin/<target_branch>`（必要时切到 `<remote>/<target_branch>`；这可能会改变 superproject 的 gitlink 指针，属于预期的选渠道行为；缺失该文件会被门禁阻断）
-   - 允许用当前 submodule 状态来做默认预填，但必须显式说明来源，并最终落盘到 `submodules.targets`：
-     - detached HEAD：默认建议取 `.gitmodules` 中声明的 `submodule.<name>.branch`
-     - 已附着在某个本地分支：默认建议取该 submodule 的当前分支名
-     - 上述两条都只是建议值，不是运行时真值；真正的 finish/push 只认 `changes/<change-id>/submodules.targets`
-```bash
-change_id="<change-id>"
-targets="changes/${change_id}/submodules.targets"
-has_submodules=0
-if [[ -f .gitmodules ]]; then
-  if git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' >/dev/null 2>&1; then
-    has_submodules=1
-  fi
-fi
-if [[ "${has_submodules}" -eq 1 && ! -f "${targets}" ]]; then
-  echo "error: missing ${targets} (required when .gitmodules declares submodules)"
-  echo "hint: create it first; defaults may be inferred, but the final truth must be written explicitly"
-  exit 2
-fi
+1. **Design Gate**：若 `.aiws/changes/<change-id>/proposal.md` 不存在：
+   - 立即停止，不要写代码
+   - 输出：`BLOCKED: 缺少 proposal。请先执行 $ws-plan 创建变更计划与任务分解。`
+2. **Task Gate**：若 `.aiws/changes/<change-id>/tasks.md` 不存在：
+   - 立即停止，不要写代码
+   - 输出：`BLOCKED: 缺少 tasks。请先执行 $ws-plan 创建任务分解。`
 
-if [[ -f "${targets}" ]]; then
-  echo "info: applying submodule targets: ${targets}"
-  while read -r sub_path target_branch remote; do
-    [[ -z "${sub_path:-}" ]] && continue
-    [[ "${sub_path}" == \#* ]] && continue
-    [[ -z "${target_branch:-}" ]] && { echo "error: missing target_branch for path=${sub_path}"; exit 2; }
-    remote="${remote:-origin}"
+> 例外：`ws-dev-lite` 是轻量入口，可豁免 Design Gate，但仅限单文件/typo/config/bugfix 场景。
 
-    echo "== submodule: ${sub_path} target=${remote}/${target_branch} =="
-    if [[ -n "$(git -C "${sub_path}" status --porcelain 2>/dev/null)" ]]; then
-      echo "error: submodule dirty: ${sub_path} (commit/stash first)"
-      exit 2
-    fi
-    git -C "${sub_path}" fetch "${remote}" --prune
-    # 选渠道：默认切到远端目标分支，并用 pin 分支承载本地提交（避免 detached）
-    git -C "${sub_path}" checkout -B "aiws/pin/${target_branch}" "${remote}/${target_branch}"
-    git -C "${sub_path}" branch --set-upstream-to "${remote}/${target_branch}" "aiws/pin/${target_branch}" >/dev/null 2>&1 || true
-    git -C "${sub_path}" status -sb
-  done < "${targets}"
+## TDD 约束（强制）
 
-  # 检查 superproject 的 gitlink 是否发生变化（预期：若切了不同渠道，会看到差异）
-  git diff --submodule
-fi
-```
-   - 若你还没写 `submodules.targets`，可按下面方式先生成建议值，再人工确认后落盘：
-```bash
-change_id="<change-id>"
-targets="changes/${change_id}/submodules.targets"
-: > "${targets}"
+对于所有需要编写新代码或修改业务逻辑的任务，必须遵守 RED-GREEN-REFACTOR 流程：
 
-git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' 2>/dev/null | while read -r key sub_path; do
-  name="${key#submodule.}"; name="${name%.path}"
-  current_branch="$(git -C "${sub_path}" branch --show-current 2>/dev/null || true)"
-  declared_branch="$(git config --file .gitmodules --get "submodule.${name}.branch" 2>/dev/null || true)"
+1. **RED**：先编写测试用例，运行并确认测试失败（或确认现有测试覆盖缺口）
+2. **GREEN**：编写最小实现代码使测试通过
+3. **REFACTOR**：重构代码，保持测试通过
 
-  if [[ -n "${current_branch}" ]]; then
-    inferred_branch="${current_branch}"
-    inferred_from="current branch"
-  else
-    inferred_branch="${declared_branch}"
-    inferred_from=".gitmodules"
-  fi
+禁止：
+- 先写实现代码再补测试
+- 跳过测试步骤直接提交
 
-  if [[ -z "${inferred_branch}" ]]; then
-    echo "error: cannot infer target branch for ${sub_path}; set it manually"
-    exit 2
-  fi
+自我检查顺序（每次修改后）：`lint → typecheck → test`。若项目无对应脚本则跳过该项。
 
-  printf "%s %s\n" "${sub_path}" "${inferred_branch}" >> "${targets}"
-  echo "info: ${sub_path} -> ${inferred_branch} (inferred from ${inferred_from}; remote defaults to origin unless you edit ${targets})"
-done
+## 完成判定
 
-echo "review required: ${targets}"
-cat "${targets}"
-```
-   - 若你明确要在 superproject 直接切分支：`aiws change start <change-id> --hooks --switch`（仅在存在 `.gitmodules` 时有意义；会尝试让 submodules 工作区跟随 superproject 指针）
-   - 或手工：`git switch -c change/<change-id>`，并创建 `changes/<change-id>/proposal.md` 与 `changes/<change-id>/tasks.md`（参考 `changes/README.md`）
-3) 若需要外部 / 子 agent 协作：
-   - 分析结论落盘到 `changes/<change-id>/analysis/`
-   - patch 草案落盘到 `changes/<change-id>/patches/`
-   - 不要把 `patches/` 当成“已应用代码”；主 agent 必须先审查再决定是否采用
-   - 若采用了委托结果，后续在 `ws-review` 或 `changes/<change-id>/review/` 中收敛最终结论
-4) 如涉及需求调整：先做需求评审（可用 `$ws-req-review`）→ 用户确认后再做需求落盘（可用 `$ws-req-change`）（避免需求漂移）。
-5) 实施最小改动：任何改动都要能归因到 `REQUIREMENTS.md`（验收）或 `issues/problem-issues.csv`（问题）。
-6) 运行 `AI_WORKSPACE.md` 里声明的验证命令；未运行不声称已运行。
-7) 多步任务（≥2 步）：使用 `update_plan` 工具跟踪 `pending → in_progress → completed`，每完成一步立即更新（不要事后批量更新）。
-8) 提交前强制门禁（commit/push hooks 也会阻断）：
-```bash
-if [[ -x "./node_modules/.bin/aiws" ]]; then
-  ./node_modules/.bin/aiws validate .
-elif command -v aiws >/dev/null 2>&1; then
+改动已落盘、验证已执行或明确未执行原因、证据路径可回放，并可进入 review/commit 阶段。
+
+## 建议流程
+
+### 1. Preflight
+
+定位项目根目录，读取 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`，输出约束摘要。
+
+- 中大型任务：建议先用 `$ws-plan` 生成 `plan/` 工件。
+- 中大型任务默认执行 [3.1 自我修正循环](#31-自我修正循环evaluate-optimize)——这是必经步骤，不是可选项：实现后先自审修正（最多 2 轮），再进入 review
+- 已有计划：先 `$ws-plan-verify`，通过后进入实现。
+- `$ws-plan` 已创建 worktree：直接在该 worktree 中继续。
+
+### 1.5 Spec Refresh（进入实现前必做）
+
+在开始任何代码改动前，强制重读并输出摘要：
+- `AI_PROJECT.md` 安全边界（哪些目录不能动、哪些约束必须遵守）
+- `REQUIREMENTS.md` 中与本次 `Req_ID` 相关的条目（摘要 2-3 段即可）
+
+目的：避免落地时遗忘约束或需求边界。仅需 2-3 段摘要，不需要全文复读。
+
+### 2. 建立变更归因
+
+- 若 `git status --porcelain` 仅有计划/工件文件，属于预期行为，继续即可。
+- 若需创建新 change：`aiws change start <change-id> --hooks --no-switch`
+- 若需切换分支：先确认无额外未提交改动，再 `git switch change/<change-id>`
+- 若存在 submodule（`.gitmodules`）：进入编码前必须准备好 `.aiws/changes/<change-id>/submodules.targets`。`aiws change start` 的 `--submodules` 标志会自动处理。参考 `changes/README.md` 和 `.aiws/changes/<change-id>/submodules.targets` 格式。
+
+### 3. 实现策略：默认 dispatch aiws-worker（Subagent-First）
+
+详细执行循环见 `packages/spec/docs/opencode-subagent-first.md`。
+
+- 主 session **默认不直接写实现代码**；通过 `$ws-delegate` 派发 `aiws-worker`
+- `task()` 调用中指定 `role: worker`，让 `aiws-inject-context` 插件自动注入 JSONL 上下文
+- worker 返回后，派发 `aiws-reviewer` 做独立审查
+- 根据 review 结果决定 fix 或收敛 evidence
+- **Inline escape hatch**：如果用户明确说"你直接改"或"do it inline"，主 session 可直接写代码，但必须落盘 evidence 记录理由
+
+**验证先行推荐**：对于非 trivial 改动，建议先确认验证入口再开始实现：
+1. 先确认 `AI_WORKSPACE.md` 中对应的验证命令
+2. 若验证命令不明确：先补验证入口，再开始实现
+3. 可选模式（不强求 TDD）：先写最小验证 → 实现 → 补完整验证
+
+### 3.1 自我修正循环（evaluate-optimize）——必经步骤
+
+在 dispatch subagent 前，主 session 必须执行最多 **2 轮** 自审+修正循环：
+
+1. **实现** → subagent 产出代码
+2. **自审** → 主 session 检查：lint/type-check 是否通过？是否符合现有代码模式？是否有明显 bug？
+3. **修正** → 如果发现问题，要求 subagent 修正后重新提交
+4. **2 轮上限** → 如果 2 轮后仍有问题，升级到 `$ws-review` 做正式审查
+
+**适用场景**：所有非 trivial 改动（单文件修复、配置调整、小步实现、中大型任务均适用）。不适合跨模块架构变更——此类变更直接走 $ws-review。
+
+**注意**：这不是替代 `$ws-review` 的门禁；自审通过后仍需走正式 review gate。
+
+### 4. 其他规则
+
+- 需求调整：先 `$ws-req-review` → 确认后 `$ws-req-change`
+- 最小改动：每处改动必须归因到 `REQUIREMENTS.md` 或 `issues/problem-issues.csv`
+- 验证：运行 `AI_WORKSPACE.md` 声明的命令；未运行不声称已运行
+- 多步任务：使用 `update_plan` 工具跟踪状态
+- 提交前门禁：
+  ```bash
   aiws validate .
-else
-  npx @aipper/aiws validate .
-fi
-```
-9) 若使用了协同工件，交付前建议执行 `aiws change evidence <change-id>`，把 review / validate / collaboration summary 收敛到 `changes/<change-id>/evidence/`。
-10) 交付收尾（推荐，减少手动 merge 出错）：运行 `$ws-finish`（底层调用 `aiws change finish`，默认 fast-forward 安全合并回目标分支）。
+  ```
+- 交付收尾：`$ws-finish`
 
-输出要求：
+## 输出要求
+
 - `变更文件（Changed）:` 文件清单
 - `验证（Verify）:` 实际运行的命令 + 期望结果
-- `证据（Evidence）:` 证据路径（例如 `changes/<change-id>/review/...`、`plan/...`、`.agentdocs/tmp/aiws-validate/...` 或 `changes/<change-id>/...`）
+- `证据（Evidence）:` 证据路径

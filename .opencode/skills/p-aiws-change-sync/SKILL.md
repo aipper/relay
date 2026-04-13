@@ -1,10 +1,10 @@
 ---
 name: p-aiws-change-sync
-description: 私有：同步真值基线到 changes/<change-id>（写入 .ws-change.json）
+description: 私有：同步真值基线到 .aiws/changes/<change-id>（写入 .ws-change.json）
 ---
 
 目标：
-- 将当前真值文件（`AI_PROJECT.md` / `AI_WORKSPACE.md` / `REQUIREMENTS.md`）的 hash 快照同步到 `changes/<change-id>/.ws-change.json`
+- 将当前真值文件（`AI_PROJECT.md` / `AI_WORKSPACE.md` / `REQUIREMENTS.md`）的 hash 快照同步到 `.aiws/changes/<change-id>/.ws-change.json`
 
 执行（在仓库根目录）：
 ```bash

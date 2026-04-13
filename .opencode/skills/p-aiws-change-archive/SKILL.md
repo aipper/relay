@@ -4,7 +4,7 @@ description: 私有：归档变更工件（会先做严格校验并生成 handof
 ---
 
 目标：
-- 将 `changes/<change-id>/` 归档到 `changes/archive/<YYYY-MM-DD>/...`
+- 将 `.aiws/changes/<change-id>/` 归档到 `changes/archive/<YYYY-MM-DD>/...`
 
 执行（在仓库根目录）：
 ```bash

@@ -1,59 +1,49 @@
 ---
 name: ws-verify-before-complete
-description: 完成前验证（finish / handoff 前检查双审查与 validate/evidence 是否齐全）
+description: Thin wrapper for `aiws verify-bc`
 ---
 
-用中文输出（命令/路径/代码标识符保持原样不翻译）。
+# ws-verify-before-complete
 
-目标：
-- 在进入 `$ws-finish` / `$ws-handoff` 前，检查 review、validate stamp 和证据是否齐全
-- 输出明确的 pass/fail 结论，避免“看起来完成了但 gate 没过”的伪完成
+## 完成前验证 Gate
 
-阶段定位：
-- finish 前 gate；负责 completion readiness 检查，不直接做 merge / push / handoff。
+进入 `ws-finish` / `ws-handoff` 前必须确认：
 
-必需输入：
-- `changes/<change-id>/review/spec-review.md`
-- `changes/<change-id>/review/quality-review.md`
-- `.agentdocs/tmp/aiws-validate/*.json`
-- 若存在：`changes/<change-id>/evidence/...`、`git status`
+- [ ] `ws-spec-review` 已完成：`test -f .aiws/changes/<id>/review/spec-review.md` (→ PASS/FAIL)
+- [ ] `ws-quality-review` 已完成：`test -f .aiws/changes/<id>/review/quality-review.md` (→ PASS/FAIL)
+- [ ] `aiws validate .` stamp 存在：`ls .aiws/tmp/aiws-validate/*.json 2>/dev/null` (→ PASS/FAIL)
+- [ ] 无未关闭 Critical blocker：`grep -c 'Critical' .aiws/changes/<id>/review/*.md` = 0 或已标记 resolved (→ PASS/FAIL)
+- [ ] 评审-返工循环 handoff 记录：`test -f .aiws/changes/<id>/handoff-evidence.md` 且含 rework round 记录 (→ PASS/FAIL)
 
-必需输出：
-- `证据（Evidence）:` `changes/<change-id>/evidence/verify-before-complete.md` 或回退 `.agentdocs/tmp/review/verify-before-complete.md`
-- `结论（Result）:` pass / fail
-- `缺失项（Missing）:` 未满足的 gate
-- `下一步（Next）:` 进入 `$ws-finish` / `$ws-handoff`，或回退前置 gate
+## Gate Result（结构化输出）
 
-阻断条件：
-- 缺少 spec review
-- 缺少 quality review
-- 缺少 validate stamp
-- review 中仍有未关闭 blocker
-- 无法写 verification 证据
+```
+Gate: PASS / FAIL
+Items:
+1. spec-review: PASS
+2. quality-review: PASS
+3. validate-stamp: PASS
+4. no-critical-blocker: PASS
+5. rework-handoff: N/A (未经过返工循环)
+Summary: <一句话总结>
+Action: → ws-finish / → 需补齐: <缺失项>
+```
 
-完成判定：
-- 已落盘 verify-before-complete 证据，并明确能否进入 `$ws-finish` / `$ws-handoff`。
+任一项 FAIL 即阻断 finish；输出中必须给出具体缺失项与补救路径。
 
-步骤（建议）：
-1) 识别当前 `change/<change-id>`。
-2) 检查以下最小 gate：
-   - `changes/<change-id>/review/spec-review.md`
-   - `changes/<change-id>/review/quality-review.md`
-   - `.agentdocs/tmp/aiws-validate/*.json`
-3) 若存在 `changes/<change-id>/evidence/`，检查是否已经收敛 review / validate / collaboration summary。
-4) 将结果落盘到：
-   - 默认：`changes/<change-id>/evidence/verify-before-complete.md`
-   - 回退：`.agentdocs/tmp/review/verify-before-complete.md`
-5) 输出：
-   - `证据（Evidence）:`
-   - `结论（Result）: pass|fail`
-   - `缺失项（Missing）:`
-   - `下一步（Next）:`
+Thin skill wrapper. Delegates to `aiws verify-bc`. See `aiws verify-bc --help` for details.
 
-重点：
-- 这个 gate 不替代 `$ws-finish`；它只判断“是否具备进入 finish / handoff 的前置条件”。
-- 若 fail，必须明确回退到哪个 gate：`$ws-spec-review`、`$ws-quality-review`、`aiws validate . --stamp` 或 `aiws change evidence <change-id>`。
+```bash
+if [[ -x "./node_modules/.bin/aiws" ]]; then
+  ./node_modules/.bin/aiws verify-bc
+elif command -v aiws >/dev/null 2>&1; then
+  aiws verify-bc
+else
+  npx @aipper/aiws verify-bc
+fi
+```
 
-安全：
-- 不打印 secrets。
-- 不执行破坏性命令。
+## 执行要求
+
+- 按 Gate Result 结构化输出逐项验证；任一项 FAIL 即阻断 finish。
+- finish 前门禁证据：须确认存在 spec-review.md + quality-review.md（双审查）+ 有效 validate stamp + 已关闭所有 blocker；缺任一项即阻断 finish。

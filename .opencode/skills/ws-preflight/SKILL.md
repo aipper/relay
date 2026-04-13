@@ -1,6 +1,6 @@
 ---
 name: ws-preflight
-description: 预检（提交前快速检查与建议）
+description: 使用时机：新会话开始、仓库首次操作时。触发词：预检、初始化、首次、preflight、检查环境。注意：已经开工可直接 ws-dev。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
@@ -32,9 +32,10 @@ description: 预检（提交前快速检查与建议）
 - 使用者已经知道当前仓库能否继续进入后续阶段，以及必须遵守的约束与下一步入口。
 
 执行步骤（强制）：
-1) 定位项目根目录：
-   - 优先：`git rev-parse --show-toplevel`
-   - 若失败：停止并让用户确认当前目录是否为项目根（不要猜测）。
+1) 定位项目根目录（submodule 感知）：
+   - 优先：`git rev-parse --show-superproject-working-tree`（submodule 内上溯到 superproject 根）
+   - 若为空：`git rev-parse --show-toplevel`
+   - 若两者都失败：停止并让用户确认当前目录是否为项目根（不要猜测）。
 2) 在项目根目录读取以下文件（存在则必须读取；缺失则明确报告缺失项，不要臆测内容）：
    - `AI_PROJECT.md`
    - `REQUIREMENTS.md`

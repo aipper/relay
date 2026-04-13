@@ -14,7 +14,11 @@
 3) 将审计落盘到（目录不存在则创建）：
    - 默认：`changes/<change-id>/review/codex-review.md`
    - 回退：`.agentdocs/tmp/review/codex-review.md`（仅在无法确定 `change-id` 时使用）
-4) 回复中输出：
+4) 若当前任务已进入“准备提交/交付/finish”的语境，继续补齐 dual review gate：
+   - 运行/收敛 `/ws-spec-review`，落盘 `changes/<change-id>/review/spec-review.md`
+   - 运行/收敛 `/ws-quality-review`，落盘 `changes/<change-id>/review/quality-review.md`
+   - 不要把单个 `codex-review.md` 误当成 finish gate 已完成
+5) 回复中输出：
    - `证据（Evidence）:` 证据文件路径
    - `主要风险（Top risks）:` 3–8 条（高→低）
    - `下一步（Next）:` 最小修复清单 + 最小验证命令

@@ -1,13 +1,13 @@
 ---
 name: ws-bugfix
-description: 缺陷修复（通过禅道 MCP 拉取 bug 与附件，下载图片证据，汇总到 issues/fix_bus_issues.csv，并绑定到 changes/<change-id>/）
+description: 使用时机：从禅道/外部系统拉取 bug 进行修复时。触发词：bug、缺陷、修复、禅道、zentao。注意：非禅道小修复请用 ws-dev-lite。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
 
 目标：
 - 用禅道 MCP 拉取 bug 详情与附件（尤其图片）
-- 把证据落盘到 `changes/<change-id>/bug/`（避免只停留在对话）
+- 把证据落盘到 `.aiws/changes/<change-id>/bug/`（避免只停留在对话）
 - 把修复任务汇总/更新到 `issues/fix_bus_issues.csv`
 - 与 `ws-dev` / `aiws change` 流程绑定，确保可追溯、可验证
 
@@ -21,7 +21,7 @@ description: 缺陷修复（通过禅道 MCP 拉取 bug 与附件，下载图片
 2) 准备 `change-id`（建议：`bug-<bug-id>` 或 `bugfix-<bug-id>-<slug>`）。
 3) 建立 change 上下文（推荐先于任何落盘）：
    - 若当前还不在 `change/<change-id>` 分支 / worktree，先调用 `aiws change start`
-   - 工作区必须先干净；否则不要先写 `changes/<change-id>/bug/` 或 `issues/fix_bus_issues.csv`，避免后续切 worktree 时工件留在原工作区
+   - 工作区必须先干净；否则不要先写 `.aiws/changes/<change-id>/bug/` 或 `issues/fix_bus_issues.csv`，避免后续切 worktree 时工件留在原工作区
    - 仓库已有提交：优先 `--worktree`
    - superproject + submodule：优先 `--worktree --submodules`
    - 仓库尚无提交 / 不满足 worktree 前置条件：回退 `--no-switch`
@@ -46,7 +46,7 @@ fi
      - 优先复用 `$ws-dev` 的 `submodules.targets` 生成/确认流程
      - detached HEAD 时默认建议取 `.gitmodules` 声明的分支
      - 已附着在某个本地分支时默认建议取当前分支
-     - 以上都只是建议值，最终必须显式写入 `changes/<change-id>/submodules.targets`
+     - 以上都只是建议值，最终必须显式写入 `.aiws/changes/<change-id>/submodules.targets`
 
 建议流程（按顺序）：
 
@@ -58,14 +58,14 @@ fi
 - 若当前环境没有 zentao MCP 工具：立即停止并提示用户先配置，不要猜数据。
 
 ## 2) 证据落盘（强制）
-在当前 active change 上下文的 `changes/<change-id>/bug/` 下落盘：
+在当前 active change 上下文的 `.aiws/changes/<change-id>/bug/` 下落盘：
 - `zentao-bug-<bug-id>.json`：原始字段快照（避免信息丢失）
 - `zentao-bug-<bug-id>.md`：人类可读摘要（复现步骤/期望/实际/风险）
 - `images/<bug-id>/...`：下载的图片附件（保留原扩展名）
 
 建议目录：
 ```text
-changes/<change-id>/bug/
+.aiws/changes/<change-id>/bug/
   zentao-bug-<bug-id>.json
   zentao-bug-<bug-id>.md
   images/<bug-id>/
@@ -83,7 +83,7 @@ Bug_ID,Title,Severity,Module,Status,Assigned_To,Change_ID,Image_Count,Image_Path
 
 字段约束：
 - `Change_ID`：必须等于当前 `change-id`
-- `Evidence_Path`：指向 `changes/<change-id>/bug/zentao-bug-<bug-id>.md`
+- `Evidence_Path`：指向 `.aiws/changes/<change-id>/bug/zentao-bug-<bug-id>.md`
 - `Image_Paths`：多个路径用 `;` 分隔
 - `Fix_Status`：`TODO|DOING|DONE|BLOCKED`
 
@@ -107,5 +107,5 @@ aiws validate . --stamp
 - `Change_ID:` `<change-id>`
 - `Change context:` `<当前分支或 worktree 路径>`
 - `CSV:` `issues/fix_bus_issues.csv` 中对应 `Bug_ID` 行的关键字段
-- `Evidence:` `changes/<change-id>/bug/zentao-bug-<bug-id>.md` + 图片目录
+- `Evidence:` `.aiws/changes/<change-id>/bug/zentao-bug-<bug-id>.md` + 图片目录
 - `Verify:` 实际运行命令与结果（未运行不声称已运行）

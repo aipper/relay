@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p .agentdocs/tmp/opencode-autonomy && printf '[user-prompt-submit] %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> .agentdocs/tmp/opencode-autonomy/claude-hooks.log"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p .agentdocs/tmp/opencode-autonomy && printf '[stop] %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> .agentdocs/tmp/opencode-autonomy/claude-hooks.log"
+          }
+        ]
+      }
+    ]
+  }
+}

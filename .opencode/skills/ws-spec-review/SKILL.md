@@ -1,13 +1,13 @@
 ---
 name: ws-spec-review
-description: 规范审查（requirements / plan / evidence / gate 完整性）
+description: 使用时机：需要审查流程完整性、requirements 归因时。触发词：规范审查、流程审计、spec review。注意：实现质量审查请用 ws-quality-review。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
 
 目标：
 - 审查当前改动是否满足真值文件、change 绑定、证据路径和 gate 完整性要求
-- 把“流程/规范层 blocker”与“代码层问题”区分开，优先落盘到 `changes/<change-id>/review/spec-review.md`
+- 把“流程/规范层 blocker”与“代码层问题”区分开，优先落盘到 `.aiws/changes/<change-id>/review/spec-review.md`
 
 OpenCode + oMo 优先策略：
 - 若检测到 `.opencode/oh-my-opencode.json`，或当前会话明确可用 `oracle` / `librarian`，优先借用它们做 spec / gate 审查。
@@ -22,10 +22,10 @@ OpenCode + oMo 优先策略：
 - `REQUIREMENTS.md`
 - `AI_WORKSPACE.md`
 - 当前 `git diff`
-- 若存在：`plan/...`、`changes/<change-id>/proposal.md`、`tasks.md`、`review/`、`evidence/`
+- 若存在：`plan/...`、`.aiws/changes/<change-id>/proposal.md`、`tasks.md`、`review/`、`evidence/`
 
 必需输出：
-- `证据（Evidence）:` `changes/<change-id>/review/spec-review.md` 或回退 `.agentdocs/tmp/review/spec-review.md`
+- `证据（Evidence）:` `.aiws/changes/<change-id>/review/spec-review.md` 或回退 `.aiws/tmp/review/spec-review.md`
 - `阻断项（Blockers）:` requirements 归因 / gate / evidence 缺口
 - `下一步（Next）:` 修复项与最小验证命令
 
@@ -46,8 +46,8 @@ OpenCode + oMo 优先策略：
    - 是否存在越界目录改动、危险操作、未声明的非目标扩张
    - 是否已经准备好可复现验证入口
 3) 把结论落盘到：
-   - 默认：`changes/<change-id>/review/spec-review.md`
-   - 回退：`.agentdocs/tmp/review/spec-review.md`
+   - 默认：`.aiws/changes/<change-id>/review/spec-review.md`
+   - 回退：`.aiws/tmp/review/spec-review.md`
 4) 输出：
    - `证据（Evidence）:`
    - `阻断项（Blockers）:`

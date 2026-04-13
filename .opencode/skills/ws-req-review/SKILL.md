@@ -1,6 +1,6 @@
 ---
 name: ws-req-review
-description: 需求评审（对齐真值与验收）
+description: 使用时机：需要评审需求、验收条件、合同时。触发词：需求评审、验收评审、合同评审。注意：需求已确认直接进 ws-plan。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
@@ -8,7 +8,7 @@ description: 需求评审（对齐真值与验收）
 目标：在不修改任何文件的前提下，对 `REQUIREMENTS.md` 做一次整体 QA，输出缺口/冲突/风险，减少实现漂移。
 
 执行步骤（强制）：
-1) 定位项目根目录：`git rev-parse --show-toplevel`（失败则停止并让用户确认根目录）。
+1) 定位项目根目录：先尝试 `git rev-parse --show-superproject-working-tree`（submodule 感知上溯）；若为空再用 `git rev-parse --show-toplevel`。都失败则停止并让用户确认根目录。
 2) 读取（存在则必须读取；缺失则明确列出，不要臆测）：
    - `AI_PROJECT.md`
    - `REQUIREMENTS.md`

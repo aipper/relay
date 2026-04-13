@@ -20,5 +20,5 @@ fi
 
 说明：
 - 默认等价于：`git merge --ff-only change/<change-id>`
-- 若你当前就在 `change/<change-id>` 分支上，`finish` 会尝试读取 `changes/<change-id>/.ws-change.json` 的 `base_branch` 作为目标分支
+- 若你当前就在 `change/<change-id>` 分支上，`finish` 会尝试读取 `.aiws/changes/<change-id>/.ws-change.json` 的 `base_branch` 作为目标分支
 - 若无法 fast-forward：先在 change 分支（或对应 worktree）里 `git rebase <target-branch>`，再重试 `aiws change finish`

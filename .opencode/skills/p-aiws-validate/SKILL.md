@@ -19,4 +19,4 @@ fi
 ```
 
 证据（可选）：
-- stamp：`.agentdocs/tmp/aiws-validate/*.json`（由 `.gitignore` 忽略）
+- stamp：`.aiws/tmp/aiws-validate/*.json`（由 `.gitignore` 忽略）

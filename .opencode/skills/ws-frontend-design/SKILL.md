@@ -1,6 +1,6 @@
 ---
 name: ws-frontend-design
-description: 前端设计实现（用于视觉型 landing page / 网站 / 应用界面 / demo / prototype；强调构图、层级、图像、动效与克制，不做通用卡片墙）
+description: 使用时机：需要前端设计、UI/UX 实现时。触发词：设计、前端、UI、页面、视觉、界面。注意：非视觉实现请用 ws-dev。
 ---
 
 用中文输出（命令/路径/代码标识符保持原样不翻译）。
@@ -123,4 +123,4 @@ app-ui 规则：
 - `Visual thesis:` 一句话
 - `Changed:` 改动文件清单
 - `Verify:` 实际运行命令 + 预期结果
-- `Evidence:` 相关 `plan/...`、`changes/<change-id>/...` 或截图/审计路径
+- `Evidence:` 相关 `plan/...`、`.aiws/changes/<change-id>/...` 或截图/审计路径

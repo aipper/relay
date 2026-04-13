@@ -9,7 +9,7 @@ description: 需求评审：对 REQUIREMENTS 做整体 QA（不改文件）
 目标：在不修改任何文件的前提下，对 `REQUIREMENTS.md` 做一次整体 QA，输出缺口/冲突/风险，减少实现漂移。
 
 执行步骤（强制）：
-1) 定位项目根目录：`git rev-parse --show-toplevel`（失败则停止并让用户确认根目录）。
+1) 定位项目根目录：先尝试 `git rev-parse --show-superproject-working-tree`（submodule 感知上溯）；若为空再用 `git rev-parse --show-toplevel`。都失败则停止并让用户确认根目录。
 2) 读取（存在则必须读取；缺失则明确列出，不要臆测）：
    - `AI_PROJECT.md`
    - `REQUIREMENTS.md`

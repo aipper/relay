@@ -30,3 +30,10 @@ if [[ -z "${aiws_bin:-}" ]]; then
 fi
 
 "$aiws_bin" validate .
+
+# Quality gates — non-blocking (failures downgraded to warning to avoid false positives)
+if [[ -f "$root/package.json" ]]; then
+  npm --prefix "$root" run lint --if-present 2>/dev/null || echo "[aiws] lint: skipped or failed (non-blocking)" >&2
+  npm --prefix "$root" run typecheck --if-present 2>/dev/null || echo "[aiws] typecheck: skipped or failed (non-blocking)" >&2
+  npm --prefix "$root" test --if-present 2>/dev/null || echo "[aiws] test: skipped or failed (non-blocking)" >&2
+fi

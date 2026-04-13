@@ -1,893 +1,43 @@
 {
   "manifest_version": 1,
   "template_id": "workspace",
-  "spec_version": "0.0.28",
-  "aiws_version": "0.0.28",
+  "spec_version": "0.0.39",
+  "aiws_version": "0.0.39",
   "installed_at": "2026-02-09T09:03:40Z",
-  "updated_at": "2026-04-13T13:41:57Z",
+  "updated_at": "2026-06-24T10:00:50Z",
   "tools": [
-    "claude",
-    "opencode",
-    "codex"
+    "opencode"
   ],
   "managed": [
     {
-      "path": ".agents/skills/p-aiws-change-archive/SKILL.md",
+      "path": ".aiws/changes/README.md",
       "mode": "replace_file",
-      "sha256": "fff58b97e7b76c5d8ac2ac2326aaf675eea95daf4f0e77c0e3896d17ce903a38"
+      "sha256": "fb23f64e696e3606dad7fcbac5bb101d730e274722e0b96eada3ee22bcc2e8fe"
     },
     {
-      "path": ".agents/skills/p-aiws-change-finish/SKILL.md",
+      "path": ".aiws/tmp/.gitkeep",
       "mode": "replace_file",
-      "sha256": "97863434e009bf390e116c32dcada042ec5d69e74fb2391fbb1c8df8fc461232"
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
-      "path": ".agents/skills/p-aiws-change-list/SKILL.md",
+      "path": ".aiws/tools/requirements_contract.py",
       "mode": "replace_file",
-      "sha256": "8d80bddc31b35c2cf16d7edf5d78c0d919c290bebbffaa126be23f34b98db45d"
+      "sha256": "1fad5cb72f41aeb18912cb63b3214a0e5af4af22389a8b3acdb4a4b1c857dd44"
     },
     {
-      "path": ".agents/skills/p-aiws-change-new/SKILL.md",
+      "path": ".aiws/tools/ws_change_check.py",
       "mode": "replace_file",
-      "sha256": "0a7a3bef8566331916a467f21f0c40b3c94a22c39b245206dec2c5d57fa64aa3"
+      "sha256": "cd03e8b62114f9455da211e64723cf6555fe43bd73c19b821b024c4ff55863c1"
     },
     {
-      "path": ".agents/skills/p-aiws-change-next/SKILL.md",
+      "path": ".aiws/tools/ws_resolve_sub_target.sh",
       "mode": "replace_file",
-      "sha256": "388338d822144bef91a38bcc417cca368870c7e1d3fa4fb373ed7c418d0158aa"
+      "sha256": "52266f5830cb17631050ad939dcb920de46ea12b574535eddd7b969942f33f89"
     },
     {
-      "path": ".agents/skills/p-aiws-change-start/SKILL.md",
+      "path": ".aiws/tools/ws_tasks_plan.py",
       "mode": "replace_file",
-      "sha256": "945087c68e2f18bcc16a36b3556b211b1a8812a699714bc59a4ba5c664a5467f"
-    },
-    {
-      "path": ".agents/skills/p-aiws-change-status/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "270b847c587680c66bed0744a1354a5b963435bc7da45f23fc118da6b6087d3a"
-    },
-    {
-      "path": ".agents/skills/p-aiws-change-sync/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "6d271ae1a9161014bfbeb831b50cb238d78815687390e06ecd155abb15543fa1"
-    },
-    {
-      "path": ".agents/skills/p-aiws-change-templates-init/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "51c76bd74f8b88ec633ea864d27b8f54460b9b181c57286ffcb8abf37810c079"
-    },
-    {
-      "path": ".agents/skills/p-aiws-change-templates-which/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "d3aa92779c615431e83cd019acc4bc6555cadaef23a8aaedbb0fcbcfcc6b7208"
-    },
-    {
-      "path": ".agents/skills/p-aiws-change-validate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "6773d53bc69dc19b33afcfb4972e4ab6d920e84c0083a233c4559503e4b9be3a"
-    },
-    {
-      "path": ".agents/skills/p-aiws-hooks-install/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "f2a4a09642e89f005c1b041c183a88f1529f306fdcf7643ce66c6c47c14c6c57"
-    },
-    {
-      "path": ".agents/skills/p-aiws-hooks-status/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "264555c9cd562a0c1f0bc058d520e4eac3059f37271e3d17f3da02025c628c63"
-    },
-    {
-      "path": ".agents/skills/p-aiws-init/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "fed1b533a397585032aae989fe3718fc5e799744c6a4fd105bfb998f0d6b2230"
-    },
-    {
-      "path": ".agents/skills/p-aiws-rollback/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "bce1795479096a63b43bb804ce9497d83290d15f179833e5393ccf02562dacdf"
-    },
-    {
-      "path": ".agents/skills/p-aiws-update/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a2c60370945af1d7662aeea96487fc3ba6d33a712e492e961424e6bf078b7ff7"
-    },
-    {
-      "path": ".agents/skills/p-aiws-validate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "073b6adb44d03468a1b772e9c73bbe233ccf2fd44a60f503f4673a1b98eeca0f"
-    },
-    {
-      "path": ".agents/skills/p-tasks-plan/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a42e81f1b6e4c2e5432d8d48fa9563aa5371ca79de9aa235c12026afca652f67"
-    },
-    {
-      "path": ".agents/skills/using-aiws/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "1fa34cca29b726b1ae294194c0dd337400e11da79390052cd8956fbd63a8f461"
-    },
-    {
-      "path": ".agents/skills/ws-analyze/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "82609bdaf050725d9f0de3e53469cc5d707e00044c7bb554e532c6ff700aab6b"
-    },
-    {
-      "path": ".agents/skills/ws-bugfix/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "e8e3a09bda5b87ae64a0d49b7b406350820852f5b8590d0f89b34f7684521dab"
-    },
-    {
-      "path": ".agents/skills/ws-commit/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "ba66e84eb267d0f951ff29bfd3979272abf33d751b3c550b7a61ceb2c1c2371f"
-    },
-    {
-      "path": ".agents/skills/ws-delegate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "725339eb610e46ac6474f1296311d21fd6399fa54df44c4bc87860e348ff68fa"
-    },
-    {
-      "path": ".agents/skills/ws-deliver/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "c11cbf08c9e71fe4851309733b3d20f5b5c27638bffa959a3f42aa05bab7b4ad"
-    },
-    {
-      "path": ".agents/skills/ws-dev-lite/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "5a263c7b314cd8c81c641af05c145faa73c46eab2d9c0a1fa25290ff221f49ee"
-    },
-    {
-      "path": ".agents/skills/ws-dev/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "614359f935e79c5b5151ffdd48a084d67d63fe7ca2aa0301d16c4623b2ae0192"
-    },
-    {
-      "path": ".agents/skills/ws-finish/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a80007e804c29e1a3883ca27bd070e9eefd75a1b1307f8e9c279f8e70b0da7f1"
-    },
-    {
-      "path": ".agents/skills/ws-frontend-design/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "7a4352b9a9c4d27ddfe48e05b55c8618d13d89a5176f9b0781e4f51d9a478833"
-    },
-    {
-      "path": ".agents/skills/ws-handoff/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "586d41d7c4ee44e6af5dff38821a4384dab15c34fccea8c4c80d72e4287d07f0"
-    },
-    {
-      "path": ".agents/skills/ws-intake/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "b23cbc8290bb3ac58708e9a7fc4c60a7f66adc38879a1ebe03c21fdabb50dc68"
-    },
-    {
-      "path": ".agents/skills/ws-migrate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "b73e457428d2459b0c3588c19417a1eac427011108228564f5b17374a159d148"
-    },
-    {
-      "path": ".agents/skills/ws-plan-verify/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "0952c4536278b9b63ab2e5fa4ce21765d72733e30ab41005178b38e50f61beca"
-    },
-    {
-      "path": ".agents/skills/ws-plan/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "9be5f570247ad84f5692b4020432549a475620ce332d21c49a0405d34fd3ebe8"
-    },
-    {
-      "path": ".agents/skills/ws-preflight/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "eb9f1ea6bd7e6d27b84a00841381ccd3cd89302bc8ae5fab0d5e3fa5521da5be"
-    },
-    {
-      "path": ".agents/skills/ws-pull/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "8b5b63b39db8c8a3947708fcd047b6a69943357dab538b374a7e6c9b55a64de7"
-    },
-    {
-      "path": ".agents/skills/ws-push/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "abd1894f699be549d83220fe7e22bfb2f2b6d38975d0249845766529d2849159"
-    },
-    {
-      "path": ".agents/skills/ws-quality-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "acba9770cab40cf547f3904ff2f1bc000eb6c550ba93e11728a5e8700f89edac"
-    },
-    {
-      "path": ".agents/skills/ws-req-change/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "90c8ed17d99d1005adeba328670ece50fa2c4593d5a3ef79d195a6cfdd4eb387"
-    },
-    {
-      "path": ".agents/skills/ws-req-contract-sync/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "78cdb980f9c8a20593afcee6d5135356ae97f16939fb256e460f00f51462dedc"
-    },
-    {
-      "path": ".agents/skills/ws-req-contract-validate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "2caa6116d2a11c4f6b64028a09546531b61d618d03f13ce0f9e51acaf006879d"
-    },
-    {
-      "path": ".agents/skills/ws-req-flow-sync/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "e7e7fa6f376c3bcc274f708837a8f36bf4cb6e9e6ce37033bd1bcbf30dde6a87"
-    },
-    {
-      "path": ".agents/skills/ws-req-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a4b4db4aa718cdc1911df948a9129b7601eb9407aa4e2e35717092e8bff92767"
-    },
-    {
-      "path": ".agents/skills/ws-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "16b56b78274f594154c70e7b6687363a9f127b6331ab36176503996f602b224b"
-    },
-    {
-      "path": ".agents/skills/ws-rule/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "7921f2e7365f746b9f6d6518d285b96182442d1e2261b0e46d349450f26b9841"
-    },
-    {
-      "path": ".agents/skills/ws-spec-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "fca81523088450ef1709330044d93e1cc114c803261a36e0812181acec4a1bc1"
-    },
-    {
-      "path": ".agents/skills/ws-submodule-setup/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "2a63f2bea4460f8df063fd8f8afadaab7287b9161996d152f34dea710fd3d1de"
-    },
-    {
-      "path": ".agents/skills/ws-verify-before-complete/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "987966a6c84bceef39493de3ba99e00facdd3e84cba83aad280549dae2ddd2d1"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-archive.md",
-      "mode": "replace_file",
-      "sha256": "14869c23f4cfe4e44e9042d7dd66cf13e9a9fb72614aa319299d3bd217eb944e"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-archive.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-archive": "013d964a857054f1e2be584c8c249d5dd65530ddc89c6c0b8b95355f1691ab37"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-finish.md",
-      "mode": "replace_file",
-      "sha256": "3e69a7a9d0ecebdd402723363ab9179c174bc4d00ac2b1ee6497f04a8c9ee5a1"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-finish.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-finish": "2ac9f39d95f3c4b717f425649abadf3ce5daeb17addcbd1b8b30d25d13fe2b5d"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-list.md",
-      "mode": "replace_file",
-      "sha256": "2de27256d4d482fd9e06dff6917083e4ee251c1c405180b096ac8f05a2cb4769"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-list.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-list": "d7cc9aa66245935af83851df7a9ef2cceac962f876d0561a66f7597823107ca6"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-new.md",
-      "mode": "replace_file",
-      "sha256": "04b4b152e8fa1548e786649591c3656ba22ba47838adab98e4081689d5498a5c"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-new.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-new": "41ee2a1fdb4283128e751ad48f2f1cdd7832d2ff04d1715aafcd2b5c2056b9a0"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-next.md",
-      "mode": "replace_file",
-      "sha256": "83c0985ffc25824a27d8b2bfad63c5735ffce95e554fcc90589d662bb7a875b6"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-next.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-next": "e79537495b8ed9847b384bdb61d4c973e7149ef51bd9cf4e8277c853cb4d8806"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-start.md",
-      "mode": "replace_file",
-      "sha256": "a48ab7d3cea449267378065b9e9c20da61aa7f8278dba09348510ba3896111f0"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-start.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-start": "2c64c74d9a861125049d2b5ad8a80237c0cd05131a93944b3f7a5829b609c21d"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-status.md",
-      "mode": "replace_file",
-      "sha256": "1620ff7e11168460dc5ae17dbe159b496cc12d33183d428d44dbe7aa38c14b01"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-status.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-status": "b727225c7f4c25459efdc30cc7f208176e1ca370dd5e81863cf87b93a68ef63c"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-sync.md",
-      "mode": "replace_file",
-      "sha256": "38f3b4689b97f4a3c51962c1f02a9badb71bca33ae47b6e6b075bcbc5bc2c765"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-sync.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-sync": "6bc57b8437b406ef24ad0a9efe03a867f734d69035ae1bf9810de909c9d8be54"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-templates-init.md",
-      "mode": "replace_file",
-      "sha256": "2e256993de5128677e1f3a40b61bd8dd2c6b1e95b1cc573a47bd33386c9bb4a8"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-templates-init.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-templates-init": "564e818279db06ade4eb7ec3b7cc8ad06049b61ca8fef7cb737faf110cdce84b"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-templates-which.md",
-      "mode": "replace_file",
-      "sha256": "c393ca8be8df2ec35d7e0a9d05480d45d475e83f2279b1f79e4ee15c5faeb48b"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-templates-which.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-templates-which": "1dbfdc7cd4f7c52349181e406fa6b1d9af54776a6fdfa74251f99324f21f9c7f"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-validate.md",
-      "mode": "replace_file",
-      "sha256": "f0c5ad2fd36be722f394cf7f252c24a6b35c98d3eb94cbcfe72beace078fc46b"
-    },
-    {
-      "path": ".claude/commands/p-aiws-change-validate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-change-validate": "4929a399c399cd8079b5748e15dfed8ba61887b4c16dd3b362afad1a4bb14537"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-hooks-install.md",
-      "mode": "replace_file",
-      "sha256": "ba851857466a515855ddfcbb658a614b764b1ea1519e9667d08871c4e404ee11"
-    },
-    {
-      "path": ".claude/commands/p-aiws-hooks-install.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-hooks-install": "8777f23642b859223ce757e05d90197e83606a41729eab83d8f56c4f2050f555"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-hooks-status.md",
-      "mode": "replace_file",
-      "sha256": "b55353977e1f39267ec1bb7e2f81e873c29cfdc0f43a4ceaf26ce8861f2c9567"
-    },
-    {
-      "path": ".claude/commands/p-aiws-hooks-status.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-hooks-status": "6f0ffb830b6563eb6a770a9b8defd090efd684bf08fa95528b0c47cca2504344"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-init.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-init": "41c4aec1a16efc29ce3d42c8746a9775f08fb2a6cf4ecc9eef285921d2fe3331"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-rollback.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-rollback": "22461e85debca6f0f327ad0411598a920d7826d22e5cbc4d07f1e51fa4179247"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-update.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-update": "3ca4c7dd11b76c4ad709fa9e45ee78390edcb3de4fbfe5eaf4aaabe003cb4fa8"
-      }
-    },
-    {
-      "path": ".claude/commands/p-aiws-validate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:aiws-validate": "11a6cabb27b425f2919eff970467bc05a80a4ca346604c441247bc95fe8ae378"
-      }
-    },
-    {
-      "path": ".claude/commands/using-aiws.md",
-      "mode": "replace_file",
-      "sha256": "14731c001fd9910f9a91754444b8cec1d46ec3b9752faff395b606316ed45a4b"
-    },
-    {
-      "path": ".claude/commands/using-aiws.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:using-aiws": "7ff2068421f24c93cea1c87b14940706a3abddb7298a175217eab8628327246b"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-analyze.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-analyze": "a4a1a7fa0b0c00b7555984b923458c0403932a66c1c8f30c96388ba59a3d17b9"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-bugfix.md",
-      "mode": "replace_file",
-      "sha256": "823639b222a09f202345ef66628343311bced24a69578ba2c996b2afa56e651b"
-    },
-    {
-      "path": ".claude/commands/ws-bugfix.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-bugfix": "2287327b23d3de43dcdc33cd54903cdb920adf09b6f48e8154b819d2cc90103f"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-commit.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-commit": "5420fdabdfc03a4f42fe395c4266cc667cdf3ac83209ad0da5f2f888162f00db"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-deliver.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-deliver": "33b7d392b284cb72f2deee104be41268530b852fbb8094cacce8f0acab463155"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-dev-lite.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-dev-lite": "d053c7480f6b101f1bc0040eace847d07652a8e92ee80f9f68f5f151d1151b52"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-dev.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-dev": "1e98a8d3e20c46b2a23921ef042de950847b999ff5e35821704da6b9eb78dcfd"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-finish.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-finish": "67e632f34f0f4d94ee647f8a43c38cd2c4013fa4dfd076f644debd1a60e8f1b0"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-handoff.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-handoff": "129b4bbc9138f0c68201f6e8fbe691fa24c4dd1b834096fe51e2a0c42f7b662f"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-intake.md",
-      "mode": "replace_file",
-      "sha256": "2af5ea097f5c03385baa24b8380d91c5db0d65db3f34d3036b4b35c114499589"
-    },
-    {
-      "path": ".claude/commands/ws-intake.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-intake": "dfb95739fdf3cf9ad5350abe520e63100b924295591823b3c0b21924ca47ae23"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-migrate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-migrate": "b4727f004de214c22a24383afa8b4bef1f4ea3781e96ce19d934fcb2984b2813"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-plan-verify.md",
-      "mode": "replace_file",
-      "sha256": "e50687ab70239ff56b4a9fd8c0c25d858606207b4000cae231674f7b76243887"
-    },
-    {
-      "path": ".claude/commands/ws-plan-verify.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-plan-verify": "7e0ebc5fdb773f42ff857fb15735ee5928f8a792cf2d5e2d410b1723d36e0c88"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-plan.md",
-      "mode": "replace_file",
-      "sha256": "1a819aa2ca76e0a0575851f00795e793149e5889fac4d444d376431635d3c2a7"
-    },
-    {
-      "path": ".claude/commands/ws-plan.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-plan": "e322b825317fc0e223d71ec7202b70d059cd810e287a676045d2ee2341c09f73"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-preflight.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-preflight": "9dab48c86a7df2706d132cbd95ff31c58fcffd0406bbaac1fd3ed68531af14cc"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-pull.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-pull": "ae717adb5059a23fceca9818463cbbefc2d7c9c90b3d002185d39deb90823de9"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-push.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-push": "6c2487d467b030de12a9255d18cc10fedca86fd50e51245f4e06a50524273c35"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-quality-review.md",
-      "mode": "replace_file",
-      "sha256": "36b49436d7db0c4b360e6c77750655d594c033b1d599203a8c4b0d4f9cba4d74"
-    },
-    {
-      "path": ".claude/commands/ws-quality-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-quality-review": "5bb55a5157a54d348e872f7c6cfb2b072f231fee452c0c736eae7f7620eab0a3"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-req-change.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-req-change": "b2aefcd88ebae5f8748b586d585b6c0d4d78bb16b8f81b9ea9e9c0e3f4a553ce"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-req-contract-sync.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-req-contract-sync": "c61bf210cff5dbf29223fe12baf51877c7eeeccf282c0c12f5b9c91bea726360"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-req-contract-validate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-req-contract-validate": "acd3feace99c6cfb2ea8b4ea20346687967d8dda8d4ec604e50dfd4cb3303bec"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-req-flow-sync.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-req-flow-sync": "913d34f22f5f1895d4f4a4df5b3be3ce63707c3adee3c2081f7507502ef2cc00"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-req-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-req-review": "014ec7145de03f47aebb7622283760b8e0830bb998bb15fda11f0db79f2eaf6c"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-review": "3998aca37c50862375fa529a3c62f9f0a3ce2780a2fa50f94df23163fe1d0e5e"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-rule.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-rule": "b97ffd12dd3c44f4cc1c5ec90ab3ea1b523c5771062f878369c2ba25b01ca91e"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-spec-review.md",
-      "mode": "replace_file",
-      "sha256": "61d8990cecdfbb16585d8c0d3485d24e8abddb94258bae521c488fe54ac42408"
-    },
-    {
-      "path": ".claude/commands/ws-spec-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-spec-review": "b586723e10326bace9f3432a5324c20c3983337fc282b91d101fad5f412c8adb"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-submodule-setup.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-submodule-setup": "9dd26045a04f25e40192d6af37badf111573d058487a4207358baeb6cdd0d980"
-      }
-    },
-    {
-      "path": ".claude/commands/ws-verify-before-complete.md",
-      "mode": "replace_file",
-      "sha256": "c303e6811a0a7f9fe71157e0d9741bafee66c40261555a3d46f0e8a35f492da5"
-    },
-    {
-      "path": ".claude/commands/ws-verify-before-complete.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "claude:ws-verify-before-complete": "04a505434dc88f836890044ffbd38a4eccd6744597019818ed849686281b7562"
-      }
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-archive/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "fff58b97e7b76c5d8ac2ac2326aaf675eea95daf4f0e77c0e3896d17ce903a38"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-finish/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "97863434e009bf390e116c32dcada042ec5d69e74fb2391fbb1c8df8fc461232"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-list/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "8d80bddc31b35c2cf16d7edf5d78c0d919c290bebbffaa126be23f34b98db45d"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-new/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "0a7a3bef8566331916a467f21f0c40b3c94a22c39b245206dec2c5d57fa64aa3"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-next/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "388338d822144bef91a38bcc417cca368870c7e1d3fa4fb373ed7c418d0158aa"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-start/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "945087c68e2f18bcc16a36b3556b211b1a8812a699714bc59a4ba5c664a5467f"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-status/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "270b847c587680c66bed0744a1354a5b963435bc7da45f23fc118da6b6087d3a"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-sync/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "6d271ae1a9161014bfbeb831b50cb238d78815687390e06ecd155abb15543fa1"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-templates-init/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "51c76bd74f8b88ec633ea864d27b8f54460b9b181c57286ffcb8abf37810c079"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-templates-which/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "d3aa92779c615431e83cd019acc4bc6555cadaef23a8aaedbb0fcbcfcc6b7208"
-    },
-    {
-      "path": ".claude/skills/p-aiws-change-validate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "6773d53bc69dc19b33afcfb4972e4ab6d920e84c0083a233c4559503e4b9be3a"
-    },
-    {
-      "path": ".claude/skills/p-aiws-hooks-install/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "f2a4a09642e89f005c1b041c183a88f1529f306fdcf7643ce66c6c47c14c6c57"
-    },
-    {
-      "path": ".claude/skills/p-aiws-hooks-status/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "264555c9cd562a0c1f0bc058d520e4eac3059f37271e3d17f3da02025c628c63"
-    },
-    {
-      "path": ".claude/skills/p-aiws-init/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "fed1b533a397585032aae989fe3718fc5e799744c6a4fd105bfb998f0d6b2230"
-    },
-    {
-      "path": ".claude/skills/p-aiws-rollback/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "bce1795479096a63b43bb804ce9497d83290d15f179833e5393ccf02562dacdf"
-    },
-    {
-      "path": ".claude/skills/p-aiws-update/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a2c60370945af1d7662aeea96487fc3ba6d33a712e492e961424e6bf078b7ff7"
-    },
-    {
-      "path": ".claude/skills/p-aiws-validate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "073b6adb44d03468a1b772e9c73bbe233ccf2fd44a60f503f4673a1b98eeca0f"
-    },
-    {
-      "path": ".claude/skills/p-tasks-plan/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a42e81f1b6e4c2e5432d8d48fa9563aa5371ca79de9aa235c12026afca652f67"
-    },
-    {
-      "path": ".claude/skills/using-aiws/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "6eb38ac71ee1439d49f462c396a570edc22f16bb2ad2ec6aec4f64a6e6856ab6"
-    },
-    {
-      "path": ".claude/skills/ws-analyze/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "82609bdaf050725d9f0de3e53469cc5d707e00044c7bb554e532c6ff700aab6b"
-    },
-    {
-      "path": ".claude/skills/ws-bugfix/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "e8e3a09bda5b87ae64a0d49b7b406350820852f5b8590d0f89b34f7684521dab"
-    },
-    {
-      "path": ".claude/skills/ws-commit/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "ba66e84eb267d0f951ff29bfd3979272abf33d751b3c550b7a61ceb2c1c2371f"
-    },
-    {
-      "path": ".claude/skills/ws-deliver/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "c11cbf08c9e71fe4851309733b3d20f5b5c27638bffa959a3f42aa05bab7b4ad"
-    },
-    {
-      "path": ".claude/skills/ws-dev-lite/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "5a263c7b314cd8c81c641af05c145faa73c46eab2d9c0a1fa25290ff221f49ee"
-    },
-    {
-      "path": ".claude/skills/ws-dev/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "614359f935e79c5b5151ffdd48a084d67d63fe7ca2aa0301d16c4623b2ae0192"
-    },
-    {
-      "path": ".claude/skills/ws-finish/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a80007e804c29e1a3883ca27bd070e9eefd75a1b1307f8e9c279f8e70b0da7f1"
-    },
-    {
-      "path": ".claude/skills/ws-frontend-design/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "7a4352b9a9c4d27ddfe48e05b55c8618d13d89a5176f9b0781e4f51d9a478833"
-    },
-    {
-      "path": ".claude/skills/ws-handoff/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "586d41d7c4ee44e6af5dff38821a4384dab15c34fccea8c4c80d72e4287d07f0"
-    },
-    {
-      "path": ".claude/skills/ws-intake/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "274a3e306f0428fe3a220dc9a17902df8b6b59d4e27a2a6bb882ebbbdaf076d9"
-    },
-    {
-      "path": ".claude/skills/ws-migrate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "b73e457428d2459b0c3588c19417a1eac427011108228564f5b17374a159d148"
-    },
-    {
-      "path": ".claude/skills/ws-plan-verify/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "54eb96daaae4ad4bc9cfac05f499cbdfab30337d6de7d54bcf094fb88f8c264a"
-    },
-    {
-      "path": ".claude/skills/ws-plan/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "ba1ca349b8f892df9c0a52be3508767c8f698f757638bb1fd935d05f94632426"
-    },
-    {
-      "path": ".claude/skills/ws-preflight/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "eb9f1ea6bd7e6d27b84a00841381ccd3cd89302bc8ae5fab0d5e3fa5521da5be"
-    },
-    {
-      "path": ".claude/skills/ws-pull/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "8b5b63b39db8c8a3947708fcd047b6a69943357dab538b374a7e6c9b55a64de7"
-    },
-    {
-      "path": ".claude/skills/ws-push/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "abd1894f699be549d83220fe7e22bfb2f2b6d38975d0249845766529d2849159"
-    },
-    {
-      "path": ".claude/skills/ws-quality-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "acba9770cab40cf547f3904ff2f1bc000eb6c550ba93e11728a5e8700f89edac"
-    },
-    {
-      "path": ".claude/skills/ws-req-change/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "90c8ed17d99d1005adeba328670ece50fa2c4593d5a3ef79d195a6cfdd4eb387"
-    },
-    {
-      "path": ".claude/skills/ws-req-contract-sync/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "78cdb980f9c8a20593afcee6d5135356ae97f16939fb256e460f00f51462dedc"
-    },
-    {
-      "path": ".claude/skills/ws-req-contract-validate/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "2caa6116d2a11c4f6b64028a09546531b61d618d03f13ce0f9e51acaf006879d"
-    },
-    {
-      "path": ".claude/skills/ws-req-flow-sync/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "e7e7fa6f376c3bcc274f708837a8f36bf4cb6e9e6ce37033bd1bcbf30dde6a87"
-    },
-    {
-      "path": ".claude/skills/ws-req-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "a4b4db4aa718cdc1911df948a9129b7601eb9407aa4e2e35717092e8bff92767"
-    },
-    {
-      "path": ".claude/skills/ws-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "16b56b78274f594154c70e7b6687363a9f127b6331ab36176503996f602b224b"
-    },
-    {
-      "path": ".claude/skills/ws-rule/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "7921f2e7365f746b9f6d6518d285b96182442d1e2261b0e46d349450f26b9841"
-    },
-    {
-      "path": ".claude/skills/ws-spec-review/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "fca81523088450ef1709330044d93e1cc114c803261a36e0812181acec4a1bc1"
-    },
-    {
-      "path": ".claude/skills/ws-submodule-setup/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "2a63f2bea4460f8df063fd8f8afadaab7287b9161996d152f34dea710fd3d1de"
-    },
-    {
-      "path": ".claude/skills/ws-verify-before-complete/SKILL.md",
-      "mode": "replace_file",
-      "sha256": "987966a6c84bceef39493de3ba99e00facdd3e84cba83aad280549dae2ddd2d1"
+      "sha256": "8b8afe55dd0ecb9c0d84a18b3c0ccca9b93f61eb2bda486eadc3e43153a90199"
     },
     {
       "path": ".githooks/commit-msg",
@@ -897,18 +47,18 @@
     {
       "path": ".githooks/pre-commit",
       "mode": "replace_file",
-      "sha256": "8e7c5d1e52e15aeba977a6f419fdf355b52934077814090a0227277158e8c242"
+      "sha256": "19c192fa0dd8c3fb7683e9d2392df727aa404ef8906cf12845b27f41e290d3c4"
     },
     {
       "path": ".githooks/pre-push",
       "mode": "replace_file",
-      "sha256": "2f502531e7ee4ff1b5419d22400e58e93664550061b68a0ca50a01e77ec54d9a"
+      "sha256": "3f5f93f09c5e0ce88f34ab1bca14d7497f347e958e886a397a8fd4df2a3ca43b"
     },
     {
       "path": ".gitignore",
       "mode": "managed_blocks",
       "blocks": {
-        "gitignore": "0644ed3c13aaa29c4e213189a24781a6032a7ea57f3a6ef979e8694c3cff392a"
+        "gitignore": "93ba694a174cfe9404748c88478525fbf34afbc64eface73233cc8a6ad445b2b"
       }
     },
     {
@@ -1115,6 +265,25 @@
       }
     },
     {
+      "path": ".opencode/command/ws-auto.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-auto": "4319ca820b9511e6acbe89bd5d956f684cfeb5e136af1ad255f18fb69f6acd70"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-autonomy.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-autonomy": "607b8326fd6610dc6c2454abb254145665e5885a4f7340d75c971bedbac5eb0e"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-bugfix.md",
+      "mode": "replace_file",
+      "sha256": "dc6685a7d117887bc9fb43b3e9cf84993eb6746bc62ecca65afb3b1660f48883"
+    },
+    {
       "path": ".opencode/command/ws-bugfix.md",
       "mode": "replace_file",
       "sha256": "dc6685a7d117887bc9fb43b3e9cf84993eb6746bc62ecca65afb3b1660f48883"
@@ -1132,11 +301,6 @@
       "blocks": {
         "opencode:ws-commit": "5420fdabdfc03a4f42fe395c4266cc667cdf3ac83209ad0da5f2f888162f00db"
       }
-    },
-    {
-      "path": ".opencode/command/ws-delegate.md",
-      "mode": "replace_file",
-      "sha256": "b120d919be4612181772e202b2f7fddb2bdfd2dd9a95f34e8f32593b607ab5df"
     },
     {
       "path": ".opencode/command/ws-delegate.md",
@@ -1170,7 +334,19 @@
       "path": ".opencode/command/ws-finish.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-finish": "67e632f34f0f4d94ee647f8a43c38cd2c4013fa4dfd076f644debd1a60e8f1b0"
+        "opencode:ws-finish": "1754c09646ec8ac6870a8adad3955adfee9eb19a77ee0a946833565bb3c833d7"
+      }
+    },
+    {
+      "path": ".opencode/command/ws-goal.md",
+      "mode": "replace_file",
+      "sha256": "49c61d9fbf4f0035a86f0aac338539c50416596989cbf26d75163f616a1d02d3"
+    },
+    {
+      "path": ".opencode/command/ws-goal.md",
+      "mode": "managed_blocks",
+      "blocks": {
+        "opencode:ws-goal": "c2a3bad97cce80e686fa39d022ee9f033261284616f7be7566d8becf102ce9d1"
       }
     },
     {
@@ -1191,6 +367,11 @@
       "blocks": {
         "opencode:ws-intake": "dfb95739fdf3cf9ad5350abe520e63100b924295591823b3c0b21924ca47ae23"
       }
+    },
+    {
+      "path": ".opencode/command/ws-migrate.md",
+      "mode": "replace_file",
+      "sha256": "7603772bf8c973157c8711a60b7b2bf0a8a403f303f5512da41a5c04a5cd158f"
     },
     {
       "path": ".opencode/command/ws-migrate.md",
@@ -1225,10 +406,20 @@
     },
     {
       "path": ".opencode/command/ws-preflight.md",
+      "mode": "replace_file",
+      "sha256": "ff2842e7a57059ec36a7e0dc8dfd0f5e710f9f1f9451b9e1152cdb872dd45ab3"
+    },
+    {
+      "path": ".opencode/command/ws-preflight.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-preflight": "4c9f1c506f6178120acc27c169b4812381e4056624122a3feea8a8b881f4f82e"
+        "opencode:ws-preflight": "b7d8b471943662cb256667caa0aba642f47b3e5d26edcba1a49256e6bef0c193"
       }
+    },
+    {
+      "path": ".opencode/command/ws-pull.md",
+      "mode": "replace_file",
+      "sha256": "7f143720a99e2d6f8b795bd4b702bab3140144783809938ad7118e9aaf7587bc"
     },
     {
       "path": ".opencode/command/ws-pull.md",
@@ -1236,6 +427,11 @@
       "blocks": {
         "opencode:ws-pull": "ae717adb5059a23fceca9818463cbbefc2d7c9c90b3d002185d39deb90823de9"
       }
+    },
+    {
+      "path": ".opencode/command/ws-push.md",
+      "mode": "replace_file",
+      "sha256": "57b19a1d56e9dee1f2c51fb58c4109cf6801f75120441f5066e3d272aeeec43d"
     },
     {
       "path": ".opencode/command/ws-push.md",
@@ -1258,10 +454,20 @@
     },
     {
       "path": ".opencode/command/ws-req-change.md",
+      "mode": "replace_file",
+      "sha256": "8b892e8a43a29801497761309b358537233fdc9e9617897147ddb47ae2082b71"
+    },
+    {
+      "path": ".opencode/command/ws-req-change.md",
       "mode": "managed_blocks",
       "blocks": {
         "opencode:ws-req-change": "b2aefcd88ebae5f8748b586d585b6c0d4d78bb16b8f81b9ea9e9c0e3f4a553ce"
       }
+    },
+    {
+      "path": ".opencode/command/ws-req-contract-sync.md",
+      "mode": "replace_file",
+      "sha256": "dff8f48165393fb065ab33db626ba5ab694f25b8e3d8e720d7cf36d8b03227a6"
     },
     {
       "path": ".opencode/command/ws-req-contract-sync.md",
@@ -1272,10 +478,20 @@
     },
     {
       "path": ".opencode/command/ws-req-contract-validate.md",
+      "mode": "replace_file",
+      "sha256": "44e4a3582bc50aeeedf6b4addc8a19e2162d6eff0cf2e34d8f974f65f8b4a363"
+    },
+    {
+      "path": ".opencode/command/ws-req-contract-validate.md",
       "mode": "managed_blocks",
       "blocks": {
         "opencode:ws-req-contract-validate": "acd3feace99c6cfb2ea8b4ea20346687967d8dda8d4ec604e50dfd4cb3303bec"
       }
+    },
+    {
+      "path": ".opencode/command/ws-req-flow-sync.md",
+      "mode": "replace_file",
+      "sha256": "2839faf5307c5f9da4efce13161949ffb70bbb486614657784837d52e26bc2bd"
     },
     {
       "path": ".opencode/command/ws-req-flow-sync.md",
@@ -1286,17 +502,32 @@
     },
     {
       "path": ".opencode/command/ws-req-review.md",
+      "mode": "replace_file",
+      "sha256": "97a37bd75069372eb21a49b89a918647f35a8bef23ce0507212929fe59b1a18e"
+    },
+    {
+      "path": ".opencode/command/ws-req-review.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-req-review": "1c2c1007d3b5380304446086110dfe252c3b92f5a2c99443361722bf6664a4a8"
+        "opencode:ws-req-review": "15bf3365fdd5e39687d42a5c34ece216d8255437fef026ae45161710cd6fa7af"
       }
+    },
+    {
+      "path": ".opencode/command/ws-review.md",
+      "mode": "replace_file",
+      "sha256": "880906c5095e7500854f0496769e65a863fc095006ca2e61951901c3da47eee5"
     },
     {
       "path": ".opencode/command/ws-review.md",
       "mode": "managed_blocks",
       "blocks": {
-        "opencode:ws-review": "341a8e487e994de8029f7c4103b6e394f910ed930063956ec90d11db6ea70ca2"
+        "opencode:ws-review": "eff74e732468163ed7d3c7f8866a430e66bc0b0a6e9b6dbdc7c7adf58bcf4e65"
       }
+    },
+    {
+      "path": ".opencode/command/ws-rule.md",
+      "mode": "replace_file",
+      "sha256": "b67f5855e059bda6d915e24fe6c8aff93af2e90b3963aabb703dd7ab4f9f1baa"
     },
     {
       "path": ".opencode/command/ws-rule.md",
@@ -1319,6 +550,11 @@
     },
     {
       "path": ".opencode/command/ws-submodule-setup.md",
+      "mode": "replace_file",
+      "sha256": "5da86986f0cfb64feaa76f9c5f0b83ff5319e6b81df3117f89459e3e31873358"
+    },
+    {
+      "path": ".opencode/command/ws-submodule-setup.md",
       "mode": "managed_blocks",
       "blocks": {
         "opencode:ws-submodule-setup": "9dd26045a04f25e40192d6af37badf111573d058487a4207358baeb6cdd0d980"
@@ -1337,334 +573,74 @@
       }
     },
     {
-      "path": ".opencode/commands/p-aiws-change-archive.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-archive": "60872017185d2fbab7a429c21bc4a0ff3bc13e2f2062bb3e8d8467406879640f"
-      }
+      "path": ".opencode/helpers/approval-whitelist-check.sh",
+      "mode": "replace_file",
+      "sha256": "1da99249177ac23f7665346a02caaf38278678f329439b462c076cf29769d23e"
     },
     {
-      "path": ".opencode/commands/p-aiws-change-finish.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-finish": "a81aa59d52a6bee257c1fecc3eac5c74f808ccf02bc4564e7583d2b645c2c344"
-      }
+      "path": ".opencode/helpers/approval-whitelist-run.sh",
+      "mode": "replace_file",
+      "sha256": "fa6bc812343d955f94580c99250eb71366219dd0f8401510a4b28bfa5a83c95f"
     },
     {
-      "path": ".opencode/commands/p-aiws-change-list.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-list": "ffb3828283682defd7ff43db461a04283d64dc380197b27ec1a9db419bdbbaa4"
-      }
+      "path": ".opencode/helpers/approval-whitelist-watchdog.sh",
+      "mode": "replace_file",
+      "sha256": "342f02220b3bf329f12aed92024e22eacfb43553cfd225fff3b06f6a3805f12d"
     },
     {
-      "path": ".opencode/commands/p-aiws-change-new.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-new": "7c7b8cf11f7893135b19450d0ddbb9c7e4f2b041e4889009316af9eb8762b74d"
-      }
+      "path": ".opencode/helpers/tmux-swarm-rescue.sh",
+      "mode": "replace_file",
+      "sha256": "a52513b23ca7f6da93928bdf9cb8d0d37bc64a81747280417ce011104a63dd3d"
     },
     {
-      "path": ".opencode/commands/p-aiws-change-next.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-next": "8b5b375251f0ff18440af479abeb90958393409bf1948f082f17cf7670e3d15d"
-      }
+      "path": ".opencode/helpers/tmux-swarm-scan.sh",
+      "mode": "replace_file",
+      "sha256": "d864d5adf696f201d8b05cc0c1c19be800d332788b627bfad55e997d90447fba"
     },
     {
-      "path": ".opencode/commands/p-aiws-change-start.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-start": "78ea451c5ffb87a3778d467a540b799283de029948456318efa78340f700e755"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-change-status.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-status": "c5bdbc1af71f58fcbf87eef17346deafc1a4cbe574ae0861b9b7e820f08c6847"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-change-sync.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-sync": "20bd1ef134f6615a9501bd1f1c3c4300f9a56fca3830b79e9b9dc9f0cfdebc72"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-change-templates-init.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-templates-init": "8ec2552451c4075a13f3b0d5af7fb0b0b35b4cb678a7ef40ea89e1cd705bca16"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-change-templates-which.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-templates-which": "dd3d8cabfc3894269b6109533d4d73b90fbeeba38f5ec47a743dc3eef5f1540b"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-change-validate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-change-validate": "390716933c445b8ac9a2a4ead8aca0a83f99db9d4832fa911b6796aa9d18f26a"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-hooks-install.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-hooks-install": "fda4edad7660eaf5a8584455abe82cf200d17e4e3d39d527381c30692861005d"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-hooks-status.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-hooks-status": "da7d274a72b75455cc4279ed5289daee8d5afac683e3f8c6c8443a5ae3cf108c"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-init.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-init": "f523ded1826d02b38d6bd19fabda56944970b9a3e64053fd8d314cfe0a13ce27"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-rollback.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-rollback": "b2d41f1d2349069717a004450750d6606aa1a29cf86569eb237af56d8067906b"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-update.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-update": "8ab292bc6b8c2f13e54f61b43e79768e76bafb062198552f0ae3e18374131e24"
-      }
-    },
-    {
-      "path": ".opencode/commands/p-aiws-validate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:aiws-validate": "4ce2d283fa6dd48cc63059bc13c84e055af708767d787d414ff88b1d6a89d65e"
-      }
-    },
-    {
-      "path": ".opencode/commands/using-aiws.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:using-aiws": "c89b397019e4d43b3e49a647a6227c4b7c0b335f9c48c87d24e760f6c27ce736"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-analyze.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-analyze": "50838a5b89c52990e7286875a927ac1331f4527ba5a0fc477936dd2a98fd81e7"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-bugfix.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-bugfix": "ee9385496ad264d3dc1787cb71804a9eacdbcdb63612a2717972efdb17e2244c"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-commit.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-commit": "5420fdabdfc03a4f42fe395c4266cc667cdf3ac83209ad0da5f2f888162f00db"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-delegate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-delegate": "13cc5005159d48bb47a991c057f4f595e0515a62a067c83ac73217fe964ea95e"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-deliver.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-deliver": "b45967192c946d3005b29373ca49fabe424dea015bb05984194f9fc6d3e881ed"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-dev-lite.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-dev-lite": "d053c7480f6b101f1bc0040eace847d07652a8e92ee80f9f68f5f151d1151b52"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-dev.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-dev": "1e98a8d3e20c46b2a23921ef042de950847b999ff5e35821704da6b9eb78dcfd"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-finish.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-finish": "67e632f34f0f4d94ee647f8a43c38cd2c4013fa4dfd076f644debd1a60e8f1b0"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-handoff.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-handoff": "129b4bbc9138f0c68201f6e8fbe691fa24c4dd1b834096fe51e2a0c42f7b662f"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-intake.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-intake": "dfb95739fdf3cf9ad5350abe520e63100b924295591823b3c0b21924ca47ae23"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-migrate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-migrate": "b4727f004de214c22a24383afa8b4bef1f4ea3781e96ce19d934fcb2984b2813"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-plan-verify.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-plan-verify": "7e0ebc5fdb773f42ff857fb15735ee5928f8a792cf2d5e2d410b1723d36e0c88"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-plan.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-plan": "3e6e1ad1855c9959b076d107fa265f955132685554463fba6847315edca3a7fd"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-preflight.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-preflight": "4c9f1c506f6178120acc27c169b4812381e4056624122a3feea8a8b881f4f82e"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-pull.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-pull": "ae717adb5059a23fceca9818463cbbefc2d7c9c90b3d002185d39deb90823de9"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-push.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-push": "6c2487d467b030de12a9255d18cc10fedca86fd50e51245f4e06a50524273c35"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-quality-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-quality-review": "b1a578a5437ddf1502f451b8d5add150eb365f848ec0cf2db19e1ecbab2a2731"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-req-change.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-req-change": "b2aefcd88ebae5f8748b586d585b6c0d4d78bb16b8f81b9ea9e9c0e3f4a553ce"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-req-contract-sync.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-req-contract-sync": "c61bf210cff5dbf29223fe12baf51877c7eeeccf282c0c12f5b9c91bea726360"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-req-contract-validate.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-req-contract-validate": "acd3feace99c6cfb2ea8b4ea20346687967d8dda8d4ec604e50dfd4cb3303bec"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-req-flow-sync.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-req-flow-sync": "913d34f22f5f1895d4f4a4df5b3be3ce63707c3adee3c2081f7507502ef2cc00"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-req-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-req-review": "1c2c1007d3b5380304446086110dfe252c3b92f5a2c99443361722bf6664a4a8"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-review": "341a8e487e994de8029f7c4103b6e394f910ed930063956ec90d11db6ea70ca2"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-rule.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-rule": "b97ffd12dd3c44f4cc1c5ec90ab3ea1b523c5771062f878369c2ba25b01ca91e"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-spec-review.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-spec-review": "0a5639bc91ce2bad449cb02c732b9861d97b5db88fa24f36e8236e01ae9eba03"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-submodule-setup.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-submodule-setup": "9dd26045a04f25e40192d6af37badf111573d058487a4207358baeb6cdd0d980"
-      }
-    },
-    {
-      "path": ".opencode/commands/ws-verify-before-complete.md",
-      "mode": "managed_blocks",
-      "blocks": {
-        "opencode:ws-verify-before-complete": "04a505434dc88f836890044ffbd38a4eccd6744597019818ed849686281b7562"
-      }
+      "path": ".opencode/lib/aiws-context.js",
+      "mode": "replace_file",
+      "sha256": "80dd8ac9169781cc68cef31f0dcf73c258e56d0fb665597ca638bcd6aa061c16"
     },
     {
       "path": ".opencode/oh-my-opencode.json.example",
       "mode": "replace_file",
-      "sha256": "0d90c1605a0b685b02f78b93ad5d6b272d8b0242c60e2268690fc866837b6a78"
+      "sha256": "1e5e834c697f2fa60de9ebf5f1888ce076422ec545113cb3411dd91eacf45aa4"
+    },
+    {
+      "path": ".opencode/plugins/aiws-inject-context.js",
+      "mode": "replace_file",
+      "sha256": "a406e466858d95a1034e3470d8bcb4cbeaad2afec283d23307c8708098502e56"
+    },
+    {
+      "path": ".opencode/plugins/aiws-session-start.js",
+      "mode": "replace_file",
+      "sha256": "0373ebb86d3d7c3a4c3a923322053662e1ac1326588eeeb6d0e0b635174f6ea3"
+    },
+    {
+      "path": ".opencode/plugins/aiws-workflow-state.js",
+      "mode": "replace_file",
+      "sha256": "54cfd17a373996d25b42a3bed0c6c29e99c81d7636a3f8ef9a5237d86957822d"
+    },
+    {
+      "path": ".opencode/scripts/ws-plan-gen-submodule-targets.sh",
+      "mode": "replace_file",
+      "sha256": "fad3d04f8f530f692b393b5c81be6239e4cfe9d80f26813d431438fc336844aa"
+    },
+    {
+      "path": ".opencode/scripts/ws-plan-setup-worktree.sh",
+      "mode": "replace_file",
+      "sha256": "a48de5e8fc5ab82389031a6ecb8a3adcd829f1a84d35ea1859a2706239e1f3d6"
     },
     {
       "path": ".opencode/skills/p-aiws-change-archive/SKILL.md",
       "mode": "replace_file",
-      "sha256": "fff58b97e7b76c5d8ac2ac2326aaf675eea95daf4f0e77c0e3896d17ce903a38"
+      "sha256": "f2c830a0f0367f879f854b43585eb1ddc5da26fb143c5cff2728db4387002bf2"
     },
     {
       "path": ".opencode/skills/p-aiws-change-finish/SKILL.md",
       "mode": "replace_file",
-      "sha256": "97863434e009bf390e116c32dcada042ec5d69e74fb2391fbb1c8df8fc461232"
+      "sha256": "4acf509aee9199bd4db2b59db39da3f7cb1c55a593559922a8b07ede8407ac55"
     },
     {
       "path": ".opencode/skills/p-aiws-change-list/SKILL.md",
@@ -1674,7 +650,7 @@
     {
       "path": ".opencode/skills/p-aiws-change-new/SKILL.md",
       "mode": "replace_file",
-      "sha256": "0a7a3bef8566331916a467f21f0c40b3c94a22c39b245206dec2c5d57fa64aa3"
+      "sha256": "4baa4c73eccc71d3fb482878fb122287c38e5084f6720956f3bb81655e5a2d4e"
     },
     {
       "path": ".opencode/skills/p-aiws-change-next/SKILL.md",
@@ -1684,7 +660,7 @@
     {
       "path": ".opencode/skills/p-aiws-change-start/SKILL.md",
       "mode": "replace_file",
-      "sha256": "945087c68e2f18bcc16a36b3556b211b1a8812a699714bc59a4ba5c664a5467f"
+      "sha256": "9e4d9f22da92bd29e964112c5800e241cbfc7b6768992966ec5103cf6a2526a0"
     },
     {
       "path": ".opencode/skills/p-aiws-change-status/SKILL.md",
@@ -1694,7 +670,7 @@
     {
       "path": ".opencode/skills/p-aiws-change-sync/SKILL.md",
       "mode": "replace_file",
-      "sha256": "6d271ae1a9161014bfbeb831b50cb238d78815687390e06ecd155abb15543fa1"
+      "sha256": "811b1a0dc7da69322108b0f5832f22a22fafab9735b467c9a73d9fa924788a4f"
     },
     {
       "path": ".opencode/skills/p-aiws-change-templates-init/SKILL.md",
@@ -1709,7 +685,7 @@
     {
       "path": ".opencode/skills/p-aiws-change-validate/SKILL.md",
       "mode": "replace_file",
-      "sha256": "6773d53bc69dc19b33afcfb4972e4ab6d920e84c0083a233c4559503e4b9be3a"
+      "sha256": "33a08c975ff32233df69353beb77468d6ea8d3ee0405fb9f8dab89267a6c7115"
     },
     {
       "path": ".opencode/skills/p-aiws-hooks-install/SKILL.md",
@@ -1739,177 +715,192 @@
     {
       "path": ".opencode/skills/p-aiws-validate/SKILL.md",
       "mode": "replace_file",
-      "sha256": "073b6adb44d03468a1b772e9c73bbe233ccf2fd44a60f503f4673a1b98eeca0f"
+      "sha256": "bee807efba40e847ff629e89cb8789fc3c94744e1948e6afec7c17d24f739831"
     },
     {
       "path": ".opencode/skills/p-tasks-plan/SKILL.md",
       "mode": "replace_file",
-      "sha256": "a42e81f1b6e4c2e5432d8d48fa9563aa5371ca79de9aa235c12026afca652f67"
+      "sha256": "25e1e73a87ee1ea990834c732c7bd5d818b320519b9dcf2bfbaaca0be8196528"
     },
     {
       "path": ".opencode/skills/using-aiws/SKILL.md",
       "mode": "replace_file",
-      "sha256": "50ad17fe17ac926ba089fe327c67d5ae34ccf4416fb7864dc846b335750ee3b9"
+      "sha256": "6bfd1f6ed1177d627b608ad21a91853116c5d9a2f7a66cd5c229167393e32d8b"
     },
     {
       "path": ".opencode/skills/ws-analyze/SKILL.md",
       "mode": "replace_file",
-      "sha256": "82609bdaf050725d9f0de3e53469cc5d707e00044c7bb554e532c6ff700aab6b"
+      "sha256": "8ddea471f397efc3996e8aa7b8ab13b418610bea710e9a6074ff9e7a2cbc3e68"
+    },
+    {
+      "path": ".opencode/skills/ws-auto/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "b78e05d3b366477230d023e5dedb935a16fe036eb41a735493e401de275cdc02"
+    },
+    {
+      "path": ".opencode/skills/ws-autonomy/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "176d91a3a435f8c8d97144774846a043cfedd9cba24e99d0bd2d803478897b6c"
     },
     {
       "path": ".opencode/skills/ws-bugfix/SKILL.md",
       "mode": "replace_file",
-      "sha256": "e8e3a09bda5b87ae64a0d49b7b406350820852f5b8590d0f89b34f7684521dab"
+      "sha256": "175933c624406d994b3c605f1f6969498a68591d17885dfbd2fedb9debb74d61"
     },
     {
       "path": ".opencode/skills/ws-commit/SKILL.md",
       "mode": "replace_file",
-      "sha256": "ba66e84eb267d0f951ff29bfd3979272abf33d751b3c550b7a61ceb2c1c2371f"
+      "sha256": "bc07636b18a8dd0ab7180ae0371b6bc29d2364847702624e39861014703b5d99"
     },
     {
       "path": ".opencode/skills/ws-delegate/SKILL.md",
       "mode": "replace_file",
-      "sha256": "becd64d9ddb66315feaaa619e12b63be17718d4b51f505b6680046c551191991"
+      "sha256": "db68de39d92a05c01331ce0d9af162ab48be6a38a215cf145a9498426f27b2a8"
     },
     {
       "path": ".opencode/skills/ws-deliver/SKILL.md",
       "mode": "replace_file",
-      "sha256": "c11cbf08c9e71fe4851309733b3d20f5b5c27638bffa959a3f42aa05bab7b4ad"
+      "sha256": "6cafc4f370296c0e12374daac2c87fc270cdecd3666fda95442aa8966241457d"
     },
     {
       "path": ".opencode/skills/ws-dev-lite/SKILL.md",
       "mode": "replace_file",
-      "sha256": "5a263c7b314cd8c81c641af05c145faa73c46eab2d9c0a1fa25290ff221f49ee"
+      "sha256": "309869e621d3a76e82a230a5f6ded166d50130d6e5e9ea947d8af9882fe7f66e"
     },
     {
       "path": ".opencode/skills/ws-dev/SKILL.md",
       "mode": "replace_file",
-      "sha256": "614359f935e79c5b5151ffdd48a084d67d63fe7ca2aa0301d16c4623b2ae0192"
+      "sha256": "1941b33f49b29f1404abfec104649c854686195f38db6114ce7979e232a27c50"
     },
     {
       "path": ".opencode/skills/ws-finish/SKILL.md",
       "mode": "replace_file",
-      "sha256": "a80007e804c29e1a3883ca27bd070e9eefd75a1b1307f8e9c279f8e70b0da7f1"
+      "sha256": "5429e36d5d65e00ae818fb9267f1650b185562f5fed65b0f5f4094cdbd3950d6"
     },
     {
       "path": ".opencode/skills/ws-frontend-design/SKILL.md",
       "mode": "replace_file",
-      "sha256": "7a4352b9a9c4d27ddfe48e05b55c8618d13d89a5176f9b0781e4f51d9a478833"
+      "sha256": "917b7ddbd1895f76fd9036d553760e9b6a4e14b45abf626c275572a910904cd3"
+    },
+    {
+      "path": ".opencode/skills/ws-goal/SKILL.md",
+      "mode": "replace_file",
+      "sha256": "1966b10a8b18caac8b31ee0e59b976fcf6ee997bcf2ac1d26dfb1bcc73e5d368"
     },
     {
       "path": ".opencode/skills/ws-handoff/SKILL.md",
       "mode": "replace_file",
-      "sha256": "586d41d7c4ee44e6af5dff38821a4384dab15c34fccea8c4c80d72e4287d07f0"
+      "sha256": "dc1b0f7782d93065e16d09c6523b96c194632c8cd6335a953592fa9af8795eed"
     },
     {
       "path": ".opencode/skills/ws-intake/SKILL.md",
       "mode": "replace_file",
-      "sha256": "274a3e306f0428fe3a220dc9a17902df8b6b59d4e27a2a6bb882ebbbdaf076d9"
+      "sha256": "84bc5644ab4f2026cd64a9b8ec3fb9dbdbf6b71e1979740b3aa54a23de77ef01"
     },
     {
       "path": ".opencode/skills/ws-migrate/SKILL.md",
       "mode": "replace_file",
-      "sha256": "b73e457428d2459b0c3588c19417a1eac427011108228564f5b17374a159d148"
+      "sha256": "7ead00649efdcad0f33d925a39ebcfa12a4c766fe4f0cadfcfe094191bd33401"
     },
     {
       "path": ".opencode/skills/ws-plan-verify/SKILL.md",
       "mode": "replace_file",
-      "sha256": "54eb96daaae4ad4bc9cfac05f499cbdfab30337d6de7d54bcf094fb88f8c264a"
+      "sha256": "2073e8ac2c5825f5b10f4c2ea2d3b9cb05e20576c116e407ce8441671d07ebee"
     },
     {
       "path": ".opencode/skills/ws-plan/SKILL.md",
       "mode": "replace_file",
-      "sha256": "d44c3743bb4054411652d84008e312abe8f2adcb0d8522915ba0ef6148f95f2a"
+      "sha256": "b3bdefdee1102f56c3562210ab45323a90f44862eb57b7add1c61ec02f8b608c"
     },
     {
       "path": ".opencode/skills/ws-preflight/SKILL.md",
       "mode": "replace_file",
-      "sha256": "93e7d0b541891c73b94b9bf769ca37faacba73cb42e0419a34ec9ecbe653e84c"
+      "sha256": "a59dac2afb2c83c6ac47a6b9aec82d2ad7515a8eef63e00f7aaa4b0eaa77fe07"
     },
     {
       "path": ".opencode/skills/ws-pull/SKILL.md",
       "mode": "replace_file",
-      "sha256": "8b5b63b39db8c8a3947708fcd047b6a69943357dab538b374a7e6c9b55a64de7"
+      "sha256": "858862458712dc7fbe32ecb5162fff51955f423aacddd32a220d291c5ad84a88"
     },
     {
       "path": ".opencode/skills/ws-push/SKILL.md",
       "mode": "replace_file",
-      "sha256": "abd1894f699be549d83220fe7e22bfb2f2b6d38975d0249845766529d2849159"
+      "sha256": "f587dee4d64866b4d40217b6ec16f4c3feeeb4250774f151210e94859f2a314b"
     },
     {
       "path": ".opencode/skills/ws-quality-review/SKILL.md",
       "mode": "replace_file",
-      "sha256": "226693121bb8a89af3298bc3488b57d51f527303eef922dfcaf9a795db21dc3f"
+      "sha256": "2803fe7482cdd3c5cfb15eceec75598538a8016f339a16b89da2d2d89b72c17b"
     },
     {
       "path": ".opencode/skills/ws-req-change/SKILL.md",
       "mode": "replace_file",
-      "sha256": "90c8ed17d99d1005adeba328670ece50fa2c4593d5a3ef79d195a6cfdd4eb387"
+      "sha256": "8ae2b175196ddb9446cf3cf0bd958ebcb26031003c6ee0a56ad287debf3a9c41"
     },
     {
       "path": ".opencode/skills/ws-req-contract-sync/SKILL.md",
       "mode": "replace_file",
-      "sha256": "78cdb980f9c8a20593afcee6d5135356ae97f16939fb256e460f00f51462dedc"
+      "sha256": "8aba68419b0b03b8b8bbd688d4f346724a39bac805aba2d6f9410bb1357d0f57"
     },
     {
       "path": ".opencode/skills/ws-req-contract-validate/SKILL.md",
       "mode": "replace_file",
-      "sha256": "2caa6116d2a11c4f6b64028a09546531b61d618d03f13ce0f9e51acaf006879d"
+      "sha256": "f1f9ad7f3f9a9b1ef2ea3db90cdde10bfda460054c34e17a2a52d3b2cf2d6d5f"
     },
     {
       "path": ".opencode/skills/ws-req-flow-sync/SKILL.md",
       "mode": "replace_file",
-      "sha256": "e7e7fa6f376c3bcc274f708837a8f36bf4cb6e9e6ce37033bd1bcbf30dde6a87"
+      "sha256": "371ff769846d43350ffbe79a602d16cb88fa79d088b9d9bb9609b17c2784cc1f"
     },
     {
       "path": ".opencode/skills/ws-req-review/SKILL.md",
       "mode": "replace_file",
-      "sha256": "a4b4db4aa718cdc1911df948a9129b7601eb9407aa4e2e35717092e8bff92767"
+      "sha256": "3c3516d9bc98ad20698154630b9d1fca5c56d0f982f66434d1e3f331ab68be06"
     },
     {
       "path": ".opencode/skills/ws-review/SKILL.md",
       "mode": "replace_file",
-      "sha256": "535a6292e219e5a2c1d5fe841eabc410bbb564e3dd7bcb2f4a2d5e7b16ea6e54"
+      "sha256": "2c02699c2705be09cf2b637bfd2a58207a2e93775ab71c7552a5c4fd16f6e1d2"
     },
     {
       "path": ".opencode/skills/ws-rule/SKILL.md",
       "mode": "replace_file",
-      "sha256": "7921f2e7365f746b9f6d6518d285b96182442d1e2261b0e46d349450f26b9841"
+      "sha256": "9907e62de383c1b8c52653934b66736a9e562f830fc17d149e0c80fed735c81b"
     },
     {
       "path": ".opencode/skills/ws-spec-review/SKILL.md",
       "mode": "replace_file",
-      "sha256": "f5ac37d7c4c9e84a030274a2193723f80998cb2bebd71013111907620a7c218d"
+      "sha256": "efea898fe99b7b85ed1059d3482876abfbe2d1f0cf59cea9ef037e989bda76a3"
     },
     {
       "path": ".opencode/skills/ws-submodule-setup/SKILL.md",
       "mode": "replace_file",
-      "sha256": "2a63f2bea4460f8df063fd8f8afadaab7287b9161996d152f34dea710fd3d1de"
+      "sha256": "1479b4966a3b9b34abf896c1333ce7d0926b230197fdd84c88700d14cdb7a82f"
     },
     {
       "path": ".opencode/skills/ws-verify-before-complete/SKILL.md",
       "mode": "replace_file",
-      "sha256": "987966a6c84bceef39493de3ba99e00facdd3e84cba83aad280549dae2ddd2d1"
+      "sha256": "fa242a313a97a1b30b5286a8f7447e1786bc2a77b252dc80e41c081a644c6839"
     },
     {
       "path": "AGENTS.md",
       "mode": "managed_blocks",
       "blocks": {
-        "agents": "a9039df03fc6cfd83467fc2dc9203e25e8ed480dc1110b7e05dec830e35c43bd"
+        "agents": "2635ae07920733cc6b802c11061b81ba425a968eac380451ff2aa04bcc293d39"
       }
     },
     {
       "path": "AI_PROJECT.md",
       "mode": "managed_blocks",
       "blocks": {
-        "ai-project:core": "4ece11b01493dbf9e96cf9aa7fb30ae6d3ca7aafafe2e4894bfdb89ad953bf20"
+        "ai-project:core": "aa518ce2c30363b4fd433586b9aa1a17d337bd59dc1fdfabeb822276664c6bcf"
       }
     },
     {
       "path": "AI_WORKSPACE.md",
       "mode": "managed_blocks",
       "blocks": {
-        "ai-workspace:core": "483630628a9d76e156a1c96f7da1364a4251cd488a9a956afdc57bfa4ed7556a"
+        "ai-workspace:core": "bd2e72d2663a02569f1260020fe18ada065f47deb51aa7aff66a6d8efd62d2b3"
       }
     },
     {
@@ -1918,26 +909,6 @@
       "blocks": {
         "requirements:contract": "323d6b9878fcd459e6bfcba4db1ada60e5d029c93fd1e48ca28b353114101a0d"
       }
-    },
-    {
-      "path": "tools/requirements_contract.py",
-      "mode": "replace_file",
-      "sha256": "779dbb443ff35f374b5f700d71e2f0f526d750720f0562388f465cbdf49eb322"
-    },
-    {
-      "path": "tools/ws_change_check.py",
-      "mode": "replace_file",
-      "sha256": "3818f76b8afdac8b8f1cf88cc6ad0ee591ac6626ae873d1a21f5cfdfff3f2fc0"
-    },
-    {
-      "path": "tools/ws_resolve_sub_target.sh",
-      "mode": "replace_file",
-      "sha256": "4a0648c5decefbb78078af793b7c848164a8ed86ebcc23e6e49c5dc1e0be88d1"
-    },
-    {
-      "path": "tools/ws_tasks_plan.py",
-      "mode": "replace_file",
-      "sha256": "690affaa29e0959426279986f01a51b19804cd37845af7265e5f2e18d0e61c11"
     }
   ]
 }
