@@ -44,3 +44,4 @@ data/
 # Packaging output
 dist/
 cli/*.tgz
+.mcp.json

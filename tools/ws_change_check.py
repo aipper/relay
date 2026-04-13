@@ -16,6 +16,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 CHANGE_BRANCH_RE = re.compile(r"^(change|changes|ws|ws-change)/([a-z0-9]+(?:-[a-z0-9]+)*)$")
 CHANGE_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PIN_BRANCH_RE = re.compile(r"^aiws/pin/.+$")
+FINISH_DONE_COMPLETED_CLEANUPS = {
+    "removed",
+    "pruned-missing",
+    "skipped:no_separate_change_worktree",
+    "skipped:current_worktree",
+}
 
 
 def eprint(msg: str) -> None:
@@ -93,6 +100,53 @@ def parse_submodule_targets(path: Path) -> Tuple[Dict[str, Tuple[str, str]], Lis
     return parsed, perr
 
 
+def git_text(root: Path, args: List[str]) -> Tuple[int, str, str]:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return (res.returncode, (res.stdout or "").strip(), (res.stderr or "").strip())
+    except Exception as exc:
+        return (1, "", str(exc))
+
+
+def resolve_change_gitlink_commit(root: Path, change_id: str, sub_path: str) -> str:
+    for spec in (f"change/{change_id}:{sub_path}", f"HEAD:{sub_path}"):
+        code, out, _ = git_text(root, ["rev-parse", spec])
+        if code == 0 and out:
+            return out
+    return ""
+
+
+def git_ref_exists(root: Path, ref: str) -> bool:
+    code, _, _ = git_text(root, ["show-ref", "--verify", "--quiet", ref])
+    return code == 0
+
+
+def git_revision_exists(root: Path, rev: str) -> bool:
+    code, _, _ = git_text(root, ["cat-file", "-e", f"{rev}^{{commit}}"])
+    return code == 0
+
+
+def git_is_ancestor(root: Path, older: str, newer: str) -> bool:
+    code, _, _ = git_text(root, ["merge-base", "--is-ancestor", older, newer])
+    return code == 0
+
+
+def resolve_branch_ref(repo_root: Path, remote: str, branch: str) -> str:
+    remote_ref = f"refs/remotes/{remote}/{branch}"
+    if git_ref_exists(repo_root, remote_ref):
+        return remote_ref
+    local_ref = f"refs/heads/{branch}"
+    if git_ref_exists(repo_root, local_ref):
+        return local_ref
+    return ""
+
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -128,6 +182,17 @@ def current_branch(root: Path) -> Optional[str]:
         return None
 
 
+def is_submodule_repo(root: Path) -> bool:
+    try:
+        parent = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "--show-superproject-working-tree"],
+            text=True,
+        ).strip()
+        return bool(parent)
+    except Exception:
+        return False
+
+
 def infer_change_id_from_branch(branch: Optional[str]) -> Optional[str]:
     if not branch:
         return None
@@ -135,6 +200,103 @@ def infer_change_id_from_branch(branch: Optional[str]) -> Optional[str]:
     if not m:
         return None
     return m.group(2)
+
+
+def parse_archived_change_dir_name(entry_name: str) -> Optional[Tuple[str, str, str]]:
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})-(.+?)(?:-(\d{8}-\d{6}Z))?$", entry_name or "")
+    if not m:
+        return None
+    change_id = (m.group(2) or "").strip()
+    if not CHANGE_ID_RE.match(change_id):
+        return None
+    return (m.group(1) or "", change_id, m.group(3) or "")
+
+
+def find_archived_change(root: Path, change_id: str) -> Optional[Path]:
+    archive_root = root / "changes" / "archive"
+    if not archive_root.exists():
+        return None
+    matches: List[Path] = []
+    for entry in archive_root.iterdir():
+        if not entry.is_dir():
+            continue
+        parsed = parse_archived_change_dir_name(entry.name)
+        if parsed and parsed[1] == change_id:
+            matches.append(entry)
+    if not matches:
+        return None
+    return sorted(matches, key=lambda item: item.name)[-1]
+
+
+def classify_finish_lifecycle_event(ev: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    event_type = str((ev or {}).get("type") or "").strip()
+    if not event_type:
+        return None
+    if event_type == "finish_local":
+        return ("local", "")
+    if event_type == "finish_failed":
+        return ("failed", str((ev or {}).get("payload", {}).get("error") or ""))
+    if event_type == "finish_cleanup_pending":
+        payload = (ev or {}).get("payload") or {}
+        return ("cleanup_pending", str(payload.get("reason") or payload.get("cleanup") or ""))
+    if event_type == "finish":
+        return ("done", "")
+    if event_type != "finish_done":
+        return None
+    payload = (ev or {}).get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    push_present = "push" in payload
+    push_completed = payload.get("push") is True if push_present else None
+    cleanup = str(payload.get("cleanup") or "").strip()
+    if push_completed is False or cleanup == "not_requested":
+        return ("local", "")
+    if not cleanup or cleanup in FINISH_DONE_COMPLETED_CLEANUPS:
+        return ("done", "")
+    reason = cleanup[len("skipped:") :] if cleanup.startswith("skipped:") else cleanup
+    return ("cleanup_pending", reason)
+
+
+def summarize_finish_state(change_dir: Path) -> str:
+    metrics_path = change_dir / "metrics.json"
+    if not metrics_path.exists():
+        return ""
+    try:
+        metrics = json.loads(read_text(metrics_path))
+    except Exception:
+        return ""
+    events = metrics.get("events")
+    if not isinstance(events, list):
+        return ""
+    finish_state = ""
+    for ev in events:
+        event_type = str((ev or {}).get("type") or "").strip()
+        if not event_type:
+            continue
+        if finish_state == "done" and event_type not in ("finish_done", "finish"):
+            continue
+        classified = classify_finish_lifecycle_event(ev)
+        if not classified:
+            continue
+        finish_state = classified[0]
+    return finish_state
+
+
+def terminated_change_message(root: Path, change_id: str) -> Optional[str]:
+    change_dir = root / "changes" / change_id
+    if change_dir.exists() and summarize_finish_state(change_dir) == "done":
+        return (
+            f"change/{change_id} already reached finish, but archive/push closeout is still pending; "
+            f"rerun `aiws change finish {change_id} --push` instead of continuing development on this branch"
+        )
+    archived = find_archived_change(root, change_id)
+    if archived:
+        handoff = archived / "handoff.md"
+        details = f"change/{change_id} is already archived at {archived.relative_to(root)}"
+        if handoff.exists():
+            details += f" (handoff: {handoff.relative_to(root)})"
+        return details + "; create a new follow-up change instead of reusing this branch"
+    return None
 
 
 def has_truth_files(root: Path) -> Tuple[bool, List[str]]:
@@ -204,6 +366,7 @@ def find_markdown_section(text: str, aliases: List[str]) -> str:
         return ""
 
     start = -1
+    start_level = 0
     for i, line in enumerate(lines):
         m = re.match(r"^\s{0,3}(#{2,6})\s+(.+?)\s*$", line)
         if not m:
@@ -211,6 +374,7 @@ def find_markdown_section(text: str, aliases: List[str]) -> str:
         heading_norm = normalize_heading_token(m.group(2))
         if any(alias in heading_norm for alias in alias_tokens):
             start = i + 1
+            start_level = len(m.group(1))
             break
 
     if start < 0:
@@ -218,7 +382,8 @@ def find_markdown_section(text: str, aliases: List[str]) -> str:
 
     end = len(lines)
     for j in range(start, len(lines)):
-        if re.match(r"^\s{0,3}#{1,6}\s+.+$", lines[j]):
+        m = re.match(r"^\s{0,3}(#{1,6})\s+.+$", lines[j])
+        if m and len(m.group(1)) <= start_level:
             end = j
             break
 
@@ -484,6 +649,45 @@ def validate_change(
                 else:
                     warnings.append(msg)
 
+        if subs:
+            targets_path = change_dir / "submodules.targets"
+            if targets_path.exists() and targets_path.stat().st_size > 0:
+                targets, _ = parse_submodule_targets(targets_path)
+                base_branch = str(meta.get("base_branch") or "").strip() or "main"
+                for _, sub_path in subs:
+                    target = targets.get(sub_path)
+                    if not target:
+                        continue
+                    target_branch = target[0] if target[0] != "." else base_branch
+                    remote = target[1] or "origin"
+                    gitlink_sha = resolve_change_gitlink_commit(root, change_id, sub_path)
+                    if not gitlink_sha:
+                        warnings.append(f"unable to resolve gitlink commit for submodule path: {sub_path}")
+                        continue
+                    sub_root = root / sub_path
+                    if not sub_root.exists():
+                        warnings.append(f"submodule path not initialized locally (skip target consistency check): {sub_path}")
+                        continue
+                    if not git_revision_exists(sub_root, gitlink_sha):
+                        warnings.append(
+                            f"{sub_path}: gitlink commit {gitlink_sha} is not available in local submodule clone; run `git submodule update --init --recursive`"
+                        )
+                        continue
+                    branch_ref = resolve_branch_ref(sub_root, remote, target_branch)
+                    if not branch_ref:
+                        warnings.append(
+                            f"{sub_path}: cannot verify target branch history locally (missing {remote}/{target_branch} and local branch {target_branch})"
+                        )
+                        continue
+                    if git_is_ancestor(sub_root, gitlink_sha, branch_ref):
+                        continue
+                    errors.append(
+                        f"{sub_path}: gitlink commit {gitlink_sha} is not contained in declared target branch {remote}/{target_branch}"
+                    )
+                    errors.append(
+                        f"hint: fix `.gitmodules` / `changes/{change_id}/submodules.targets`, or move the submodule gitlink onto a commit reachable from {remote}/{target_branch}"
+                    )
+
     def placeholder_scan(rel: str, text: str) -> None:
         if "{{CHANGE_ID}}" in text or "{{TITLE}}" in text or "{{CREATED_AT}}" in text:
             errors.append(f"unrendered template placeholders in {rel}")
@@ -495,23 +699,42 @@ def validate_change(
         return p2.startswith(f"changes/{change_id}/evidence/") or p2.startswith(f"changes/{change_id}/review/")
 
     def parse_scope_patterns_from_plan(plan_text: str) -> List[str]:
-        # Extract bullet list items under "## Scope" (until next heading).
+        # Extract allow-list bullet items from a plan's scope section.
+        # Supports either:
+        # - direct bullets under "## Scope"
+        # - nested "### In Scope" / "### Out of Scope" sections
         lines = (plan_text or "").splitlines()
         patterns: List[str] = []
         in_scope = False
+        has_scope_subsections = False
+        scope_subsection = ""
         for raw in lines:
             line = raw.rstrip("\n")
             if line.startswith("## "):
                 in_scope = line.strip() in ("## Scope", "## 影响范围（Scope）", "## 影响范围 (Scope)")
+                has_scope_subsections = False
+                scope_subsection = ""
                 continue
             if not in_scope:
                 continue
             if line.startswith("## "):
                 break
+            if line.startswith("### "):
+                has_scope_subsections = True
+                heading = line.strip().lower()
+                if "in scope" in heading or "本次改动范围" in line:
+                    scope_subsection = "in"
+                elif "out of scope" in heading or "明确不改动" in line:
+                    scope_subsection = "out"
+                else:
+                    scope_subsection = "other"
+                continue
             s = line.strip()
             if not s:
                 continue
             if s.startswith("- "):
+                if has_scope_subsections and scope_subsection != "in":
+                    continue
                 v = s[2:].strip()
                 if v.startswith("`") and v.endswith("`") and len(v) >= 2:
                     v = v[1:-1].strip()
@@ -583,7 +806,7 @@ def validate_change(
         patterns = [normalize_scope_pattern(p) for p in parse_scope_patterns_from_plan(plan_text)]
         patterns = [p for p in patterns if p]
         if not patterns:
-            (errors if strict else warnings).append(f"{plan_rel} scope check enabled but no patterns found under '## Scope'")
+            (errors if strict else warnings).append(f"{plan_rel} scope check enabled but no patterns found under '## Scope' / '### In Scope'")
             return
 
         meta_path = change_dir / ".ws-change.json"
@@ -895,7 +1118,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--check-scope",
         action="store_true",
-        help="Scope gate: compare git diff vs base_branch with plan '## Scope' patterns and warn/error on out-of-scope files.",
+        help="Scope gate: compare git diff vs base_branch with plan '## Scope' / '### In Scope' patterns and warn/error on out-of-scope files.",
     )
     parser.add_argument(
         "--allow-branches",
@@ -920,6 +1143,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     branch_arg = (args.branch or "").strip()
     branch = branch_arg or current_branch(root)
+    inferred_from_branch = False
+    submodule_repo = is_submodule_repo(root)
     if not change_id:
         # Detached HEAD during rebase/merge; do not block unless CI passes --branch.
         if not branch:
@@ -928,26 +1153,40 @@ def main(argv: Optional[List[str]] = None) -> int:
         allow = {b.strip() for b in (args.allow_branches or "").split(",") if b.strip()}
         if branch in allow:
             return 0
+        if submodule_repo and PIN_BRANCH_RE.match(branch):
+            return 0
         inferred = infer_change_id_from_branch(branch)
         if not inferred:
             eprint(f"error: branch must be change/<change-id> (current: {branch})")
             eprint("hint: switch/create: git switch -c change/<change-id>")
             return 2
         change_id = inferred
+        inferred_from_branch = True
     else:
         # If CI provides --branch, cross-check branch naming even when --change-id is provided.
         if branch_arg:
             allow = {b.strip() for b in (args.allow_branches or "").split(",") if b.strip()}
             if branch_arg not in allow:
-                inferred = infer_change_id_from_branch(branch_arg)
-                if not inferred:
-                    eprint(f"error: branch must be change/<change-id> (current: {branch_arg})")
-                    return 2
-                if inferred != change_id:
-                    eprint(f"error: change-id does not match branch (branch={branch_arg}, change_id={change_id})")
-                    return 2
+                if submodule_repo and PIN_BRANCH_RE.match(branch_arg):
+                    branch_arg = ""
+                else:
+                    inferred = infer_change_id_from_branch(branch_arg)
+                    if not inferred:
+                        eprint(f"error: branch must be change/<change-id> (current: {branch_arg})")
+                        return 2
+                    if inferred != change_id:
+                        eprint(f"error: change-id does not match branch (branch={branch_arg}, change_id={change_id})")
+                        return 2
 
     change_dir = root / "changes" / change_id
+    terminated = terminated_change_message(root, change_id) if (inferred_from_branch or bool(branch_arg)) else None
+    if terminated:
+        eprint(f"error: {terminated}")
+        eprint(
+            f"hint: stop using change/{change_id} for new work; rerun `aiws change finish {change_id} --push` "
+            "or archive manually only for local recovery"
+        )
+        return 2
     if not change_dir.exists():
         eprint(f"error: missing change dir: {change_dir}")
         eprint(f"hint: create: aiws change new {change_id} --no-design")

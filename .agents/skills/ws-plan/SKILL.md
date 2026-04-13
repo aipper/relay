@@ -18,11 +18,40 @@ description: 规划（生成可落盘 plan/ 工件；供 ws-dev 执行）
 - 未运行不声称已运行；验证命令要写清“预期结果”
 - 若存在 `changes/<change-id>/proposal.md`，计划与 proposal 的绑定字段必须保持一致（不一致时先修正再继续）
 
+阶段定位：
+- planning 阶段；负责把用户目标收敛为 change 绑定、计划文件和验证入口。
+
+必需输入：
+- 当前任务描述
+- 真值文件：`AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`
+- 若已存在：最新 `plan/*.intake.md`
+- 若已存在：`changes/<change-id>/proposal.md`
+- 若已有计划：当前 `plan/...` 文件
+
+必需输出：
+- `Plan file:` 实际写入的 `plan/...`
+- `Change context:` 当前生效的 `change/<change-id>` 分支或 worktree
+- `Bindings:` `Change_ID` / `Req_ID|Problem_ID` / `Contract_Row` / `Plan_File` / `Evidence_Path`
+- `Verify:` 可复现验证命令与预期
+- `Next:` 先 `$ws-plan-verify`，通过后再 `$ws-dev`
+
+阻断条件：
+- 任务目标或归因绑定不清晰
+- 当前工作区 dirty 且尚未进入可复用的 change 上下文
+- 无法把计划实际写盘
+
+完成判定：
+- 计划已落盘、绑定已同步、验证入口明确，后续实现可以直接按计划推进。
+
 执行步骤（建议）：
 1) 先运行 `$ws-preflight`（读取真值文件并输出约束摘要）。
-2) 若用户任务描述不清：先问 1-3 个关键澄清问题（不要猜）。
-3) 判断复杂度：`simple / medium / complex`（给出一句理由），并估算步骤数。
-4) 识别或建立主索引 / change 上下文：
+2) 若存在最新 `plan/*.intake.md`：
+   - 优先读取其中的 `Open Questions` / `Resolved Questions` / `Frozen Decisions` / `Draft Scope` / `Draft Verify`
+   - 若 `Ready for ws-plan: yes`，把它作为本次计划输入
+   - 若仍有未冻结问题，或明确写着 `Ready for ws-plan: no`：停止，并回退到 `$ws-intake`
+3) 若用户任务描述不清，且也没有可消费的 intake 草案：先问 1-3 个关键澄清问题（不要猜）；若问题较多则回退到 `$ws-intake`
+4) 判断复杂度：`simple / medium / complex`（给出一句理由），并估算步骤数。
+5) 识别或建立主索引 / change 上下文：
    - 若存在 `changes/<change-id>/proposal.md`：读取其中 `Change_ID` / `Req_ID` / `Problem_ID` / `Contract_Row` / `Evidence_Path`
    - 若缺失关键绑定：先补齐 proposal（至少 `Change_ID`、`Req_ID|Problem_ID`、`Contract_Row`）再继续生成计划
    - 若当前不在 `change/<change-id>` 分支 / worktree，且本次任务需要新建 change：先调用 `aiws change start` 建立上下文，再继续写 plan
@@ -57,25 +86,26 @@ else
 fi
 ```
    - 若上一步创建了 worktree：后续所有读取/写入都必须切到 `aiws change start` 输出的 `worktree:` 路径中进行；不要把 `plan/...` 写回原工作区
-5) 生成计划文件：
+6) 生成计划文件：
    - 文件名：`plan/YYYY-MM-DD_HH-MM-SS-<slug>.md`（`<slug>` 用 kebab-case；同一任务调整计划时尽量复用同一文件）
    - 若 `plan/` 不存在先创建
    - 必须实际写入到磁盘（不要只在对话里输出）；如因权限/策略无法写盘，必须明确说明原因并输出可复制的完整内容
    - 计划必须写在当前 active change 上下文内：若当前已进入 `change/<change-id>` worktree，则 `plan/...`、`proposal.md`、`tasks.md` 都应写在该 worktree 中
-6) 计划内容至少包含（不要留空）：
+7) 计划内容至少包含（不要留空）：
    - `Bindings`：`Change_ID` / `Req_ID` / `Problem_ID` / `Contract_Row` / `Plan_File` / `Evidence_Path`
    - `Goal`：要达成什么
    - `Non-goals`：明确不做什么（避免 scope creep）
-   - `Scope`：将改动的文件/目录清单（不确定就写 `TBD` 并说明如何确定）
+   - `Intake Decisions`（若消费了 intake 草案）：列出本次从 intake 继承的已冻结结论；不要重新打开除非明确发现冲突
+   - `Scope`：默认写成 `## Scope` 或 `## 影响范围（Scope）`，并包含 `### In Scope` / `### Out of Scope`；`In Scope` 下列出允许修改的文件/目录清单（支持 glob，不确定就写 `TBD` 并说明如何确定）
    - `Plan`：分步执行（每步尽量落到具体文件/命令；必要时拆 Phase）
    - `Submodules`（当存在 `.gitmodules` 且声明了 submodule 条目时，强制）：声明“本次 change 的 submodule 目标分支真值”（用于同一 superproject 分支内的多渠道交付；也避免仅靠 `.gitmodules` 默认分支导致交付推送到错误分支）
    - `Verify`：可复现命令 + 期望结果（优先引用 `AI_WORKSPACE.md` 的入口；必要时补充 e2e）
    - `Risks & Rollback`：风险点 + 回滚方案（例如 git 回滚、`aiws rollback`、恢复备份等）
    - `Evidence`：计划文件路径；若创建了变更工件则附 `changes/<change-id>/...`
-7) 若存在 change proposal：回填并对齐 `proposal.md` 的 `Plan_File`（必要时同步 `Contract_Row` / `Evidence_Path`），保证 plan/proposal 一致。
-8) 运行 `$ws-plan-verify` 作为执行前质量门（计划不过长、不跑偏、验证可复现）。
-9) 若计划涉及“需求/验收”变更：先用 `$ws-req-review` 评审 → 用户确认后再 `$ws-req-change` 落盘（避免需求漂移）。
-10) 多步任务（≥2 步）：后续进入实现时，使用 `update_plan` 工具跟踪 `pending → in_progress → completed`。
+8) 若存在 change proposal：回填并对齐 `proposal.md` 的 `Plan_File`（必要时同步 `Contract_Row` / `Evidence_Path`），保证 plan/proposal 一致。
+9) 运行 `$ws-plan-verify` 作为执行前质量门（计划不过长、不跑偏、验证可复现）。
+10) 若计划涉及“需求/验收”变更：先用 `$ws-req-review` 评审 → 用户确认后再 `$ws-req-change` 落盘（避免需求漂移）。
+11) 多步任务（≥2 步）：后续进入实现时，使用 `update_plan` 工具跟踪 `pending → in_progress → completed`。
 
 补充：submodule 目标分支真值（强约束；同一 superproject 分支内可多渠道）
 - 背景：`.gitmodules submodule.<name>.branch` 适合作为“团队默认分支真值”，但当同一 superproject 分支需要在不同交付中选择不同 submodule 目标分支（多渠道）时，仅靠 `.gitmodules` 不足。

@@ -12,8 +12,8 @@
    - 是否有可复现验证命令与证据
    - 是否维护了 `changes/<change-id>/` 或相关 `issues/*.csv`
 3) 将审计落盘到（目录不存在则创建）：
-   - 默认：`changes/<change-id>/review/claude-review.md`
-   - 回退：`.agentdocs/tmp/review/claude-review.md`（仅在无法确定 `change-id` 时使用）
+   - 默认：`changes/<change-id>/review/codex-review.md`
+   - 回退：`.agentdocs/tmp/review/codex-review.md`（仅在无法确定 `change-id` 时使用）
 4) 回复中输出：
    - `证据（Evidence）:` 证据文件路径
    - `主要风险（Top risks）:` 3–8 条（高→低）

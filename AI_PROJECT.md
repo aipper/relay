@@ -3,7 +3,7 @@
 <!-- AIWS_MANAGED_BEGIN:ai-project:core -->
 <!-- AI_PROJECT_VERSION: 2 -->
 
-本文件用于在**具体项目/工作区**内统一 Codex / Claude / OpenCode / iFlow 的执行约束与协作方式，避免多套规则各写一份导致漂移。
+本文件用于在**具体项目/工作区**内统一 Codex / Claude / OpenCode 的执行约束与协作方式，避免多套规则各写一份导致漂移。
 
 定位：
 - `REQUIREMENTS.md`：定义“要做什么/验收是什么”（需求真值）

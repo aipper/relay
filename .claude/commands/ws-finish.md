@@ -9,7 +9,9 @@
 前置（必须）：
 - 工作区干净：`git status --porcelain` 无输出（否则先 commit 或 stash）
 - change 分支存在（`change/<change-id>`；也支持 `changes/`、`ws/`、`ws-change/`）
- - 若存在 `.gitmodules`：必须为每个 submodule 配置 `submodule.<name>.branch`（否则先运行 `/ws-submodule-setup` 并提交 `.gitmodules`）
+- 普通 finish 的 `validate/evidence/state` 应先在 `change/<change-id>` worktree 完成；真正执行 `aiws change finish` 时再切到目标分支所在 worktree
+- 若 `aiws change status <change-id>` 输出 `governance_rule: finish_resume_required`：说明 merge 已发生，只需继续 push / archive / cleanup closeout；直接在提示的 worktree 运行 `aiws change finish <change-id> --push`
+- 若存在 `.gitmodules`：必须为每个 submodule 配置 `submodule.<name>.branch`（否则先运行 `/ws-submodule-setup` 并提交 `.gitmodules`）
 
 步骤（建议）：
 0) 若存在 `.gitmodules`，先检查 submodule branch 配置是否齐全（缺失则停止并提示 setup）：
@@ -31,9 +33,11 @@ if [[ -f .gitmodules ]]; then
 fi
 ```
 1) 先运行 `/ws-preflight`（确保真值文件齐全）。
-2) （推荐）门禁校验并落盘证据：`aiws validate . --stamp`（未安装全局 aiws 时可用 `npx @aipper/aiws validate . --stamp`）。
-2.1) （强烈建议）收敛持久证据并回填 `Evidence_Path`：`aiws change evidence <change-id>`（未安装全局 aiws 时可用 `npx @aipper/aiws change evidence <change-id>`）。
-2.2) （可选）生成状态快照（建议）：`aiws change state <change-id> --write`。
+2) 先运行 `aiws change status <change-id>`，优先看稳定字段 `governance_rule:`。
+   - 若为 `finish_resume_required`：直接跳到步骤 3 执行 `aiws change finish <change-id> --push`
+   - 若不是该值：按普通 finish 继续；不要依赖自然语言提示句做分支判断
+2.1) 普通 finish 时，`aiws validate . --stamp` / `aiws change evidence <change-id>` / `aiws change state <change-id> --write` 应在 `change/<change-id>` worktree 完成。
+   - 如果已经在目标分支 worktree，且 `governance_rule` 不是 `finish_resume_required`，不要在这里跑 `aiws validate . --stamp`；先回 `change/<change-id>` worktree，或先跑 `/ws-verify-before-complete`
 3) 若不存在 `.gitmodules`，或 submodules 已按顺序处理完成，优先直接执行最小收尾闭环：
    - `aiws change finish <change-id> --push`
    - 若当前就在 `change/<change-id>` 分支上，也可省略 `<change-id>`
@@ -58,7 +62,7 @@ fi
 6) 任一 submodule 不满足 fast-forward 条件时立即停止（不要继续 push 主仓库）。
 7) submodules 全部成功后，再回到主仓库执行：
    - `aiws change finish <change-id> --push`
-8) （可选）交付完成后归档变更工件：`aiws change archive <change-id>`。
+8) `aiws change finish --push` 成功后会自动归档并生成 handoff；只有历史/异常场景才需要手工运行 `aiws change archive <change-id>`。
 
 安全：
 - push 前先输出状态并说明远端/分支。

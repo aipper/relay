@@ -1,8 +1,10 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { VitePWA } from "vite-plugin-pwa";
+import { e2eMockPlugin } from "./vite-plugin-e2e-mock";
 
 const disablePwa = process.env.RELAY_DISABLE_PWA === "1";
+const useMock = process.env.RELAY_E2E_MOCK === "1";
 
 export default defineConfig({
   build: {
@@ -15,6 +17,7 @@ export default defineConfig({
   },
   plugins: [
     svelte(),
+    useMock ? e2eMockPlugin() : null,
     VitePWA({
       disable: disablePwa,
       registerType: "autoUpdate",

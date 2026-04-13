@@ -13,6 +13,16 @@ policy="${AIWS_COMMIT_MSG_POLICY:-}"
 if [[ -z "${policy:-}" ]]; then
   policy="$(git config --get aiws.commitMessagePolicy 2>/dev/null || true)"
 fi
+if [[ -z "${policy:-}" ]]; then
+  superproject_root="$(git rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+  if [[ -n "${superproject_root:-}" ]]; then
+    policy="warn"
+  elif [[ -f ".gitmodules" ]]; then
+    policy="off"
+  else
+    policy="warn"
+  fi
+fi
 policy="${policy:-warn}"
 
 case "$policy" in

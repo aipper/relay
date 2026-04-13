@@ -1,0 +1,17 @@
+{
+  "agents": {
+    "planner-sisyphus": {
+      "enabled": true,
+      "replace_plan": false
+    },
+    "librarian": {
+      "enabled": true
+    },
+    "explore": {
+      "enabled": true
+    },
+    "oracle": {
+      "enabled": true
+    }
+  }
+}
