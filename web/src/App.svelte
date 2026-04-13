@@ -3069,7 +3069,7 @@
 
         setToast("当前需要先确认（Proceed?），请在置顶卡片点“同意/拒绝”或输入 y/n");
         // Surface the approval modal on desktop to reduce confusion.
-        if (!isMobile) approvalModalOpen = true;
+        approvalModalOpen = true;
         return;
       }
 
@@ -3235,7 +3235,7 @@
 
   $: {
     const a = selectedAwaiting;
-    if (selectedRunId && a && awaitingIsApproval(a) && !approvalModalOpen && !isMobile) {
+    if (selectedRunId && a && awaitingIsApproval(a) && !approvalModalOpen) {
       const key = (a.request_id ?? a.op_tool ?? "").trim();
       if (key && lastSeenApprovalRequest[selectedRunId] !== key) {
         lastSeenApprovalRequest = { ...lastSeenApprovalRequest, [selectedRunId]: key };
@@ -3247,7 +3247,7 @@
 
   $: {
     const a = selectedAwaiting;
-    if (selectedRunId && a && awaitingIsPrompt(a) && !inputModalOpen && !isMobile) {
+    if (selectedRunId && a && awaitingIsPrompt(a) && !inputModalOpen) {
       const key = (a.request_id ?? "").trim();
       if (key && lastSeenPromptRequest[selectedRunId] !== key) {
         lastSeenPromptRequest = { ...lastSeenPromptRequest, [selectedRunId]: key };

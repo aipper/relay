@@ -1,0 +1,22 @@
+{
+  "ws_change_version": 1,
+  "id": "mobile-pwa-fix",
+  "title": "mobile-pwa-fix",
+  "created_at": "2026-04-13T14:20:30Z",
+  "base_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1776090030,
+      "sha256": "8565ec612be3e6e598d33543e48f43206022428d325d51401fa80db96d33c436"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1776090030,
+      "sha256": "fa3467b1394bbd74608a11cda0a69ac8518d710ecd92c9b428ad0ed15cb82809"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1776090030,
+      "sha256": "fad124ca76f25aae0f1268333f5df6ae799c9f6cf0363e2fd3d713d7a6a46b9a"
+    }
+  },
+  "base_branch": "main",
+  "base_branch_set_at": "2026-04-13T14:20:30Z"
+}

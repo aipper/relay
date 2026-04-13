@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "change_id": "mobile-pwa-fix",
+  "events": [
+    {
+      "type": "change_new",
+      "timestamp": "2026-04-13T14:20:30Z",
+      "payload": {
+        "title": "mobile-pwa-fix",
+        "created_at": "2026-04-13T14:20:30Z",
+        "base_branch": "main",
+        "templates": "/home/ab/code/relay-mobile-pwa-fix/changes/templates",
+        "no_design": false
+      }
+    },
+    {
+      "type": "change_start",
+      "timestamp": "2026-04-13T14:20:30Z",
+      "payload": {
+        "mode": "worktree",
+        "worktree": "/home/ab/code/relay-mobile-pwa-fix",
+        "branch": "change/mobile-pwa-fix",
+        "from_branch": "main",
+        "submodules": true,
+        "hooks": true
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-04-13T14:23:45Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 10,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-04-13T14:27:00Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 13,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-04-13T14:28:26Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 11,
+        "warnings": 1,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-04-13T14:29:37Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 8,
+        "warnings": 1,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-04-13T14:30:19Z",
+      "payload": {
+        "ok": true,
+        "strict": false,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 9,
+        "exit_code": 0
+      }
+    }
+  ],
+  "updated_at": "2026-04-13T14:30:19Z"
+}
