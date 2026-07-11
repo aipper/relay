@@ -1,0 +1,398 @@
+:root {
+  --bg-canvas: #0f172a;
+  --bg: #0f172a;
+  --bg-2: #1e293b;
+  --bg-surface: #1e293b;
+  --bg-input: #1e293b;
+  --surface: #1e293b;
+  --surface-2: #0f172a;
+  --surface-muted: #1e293b;
+  --text: #e2e8f0;
+  --text-strong: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #0891b2;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(8, 145, 178, 0.4);
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 20px 48px rgba(0, 0, 0, 0.4);
+  --primary: #0891b2;
+  --primary-2: #06b6d4;
+  --success: #22c55e;
+  --warning: #f97316;
+  --danger: #ef4444;
+  --radius-lg: 18px;
+  --radius-md: 13px;
+  --radius-sm: 10px;
+}
+
+:root body {
+  margin: 0;
+  font-family: "Inter", "SF Pro Text", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Segoe UI, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+:root h1, :root h2, :root h3, :root h4, :root h5, :root h6 {
+  font-family: "Hanken Grotesk", "SF Pro Display", Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+:root code {
+  font-family: "Geist", "JetBrains Mono", "Fira Code", "Noto Sans Mono CJK SC", "Noto Sans SC", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+:root input, :root textarea, :root select, :root button {
+  font-family: inherit;
+}
+
+:root a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+:root a:hover {
+  color: var(--primary-2);
+}
+
+:root input, :root textarea, :root select {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+  box-sizing: border-box;
+}
+
+:root input:focus, :root textarea:focus, :root select:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.15);
+}
+
+:root input::placeholder, :root textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+:root button {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 160ms ease, opacity 160ms ease, transform 120ms ease;
+}
+:root button:active {
+  transform: scale(0.97);
+}
+:root button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+:root button.secondary {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+:root button.secondary:hover {
+  background: var(--surface);
+  border-color: var(--border-strong);
+}
+
+:root button.danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+:root button.danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+:root select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+
+:root label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+:root label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+:root label.checkbox input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+:root .subtle {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+:root .subtle-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+:root pre {
+  font-family: "Geist", "JetBrains Mono", "Fira Code", "Noto Sans Mono CJK SC", "Noto Sans SC", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  background: #0a0f1a;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  overflow: auto;
+  color: #e2e8f0;
+  line-height: 1.5;
+}
+
+:root h2 {
+  font-size: 18px;
+  margin: 0 0 12px 0;
+}
+
+.subtle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.subtle-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.secondary {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.session-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  flex: 0 0 auto;
+}
+
+.session-status[data-kind="running"] {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.28);
+  color: #4ade80;
+}
+
+.session-status[data-kind="warning"] {
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.28);
+  color: #fb923c;
+}
+
+.session-status[data-kind="error"] {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+
+.session-status[data-kind="done"] {
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.18);
+  color: #94a3b8;
+}
+
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.6);
+  flex: 0 0 auto;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.6);
+  flex: 0 0 auto;
+}
+
+.dot[data-online="1"] {
+  background: var(--success);
+}
+
+.chat-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+}
+.chat-row[data-role="assistant"] {
+  align-items: flex-start;
+}
+.chat-row[data-role="user"] {
+  align-items: flex-end;
+}
+.chat-row[data-role="system"] {
+  align-items: center;
+  text-align: center;
+}
+
+.chat-bubble {
+  max-width: 70%;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.chat-bubble[data-role="assistant"] {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+.chat-bubble[data-role="user"] {
+  background: rgba(8, 145, 178, 0.15);
+  border-color: rgba(8, 145, 178, 0.3);
+}
+
+.chat-system {
+  max-width: 70%;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.chat-ts {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tool-card {
+  width: 100%;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+.tool-card summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  list-style: none;
+}
+.tool-card summary::-webkit-details-marker {
+  display: none;
+}
+.tool-card-body {
+  margin-top: 8px;
+  text-align: left;
+}
+.tool-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.tool-card-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.tool-json {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: #0a0f1a;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  max-height: 240px;
+}
+
+.out-mark {
+  background: rgba(245, 158, 11, 0.35);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 1px;
+}
+.out-mark.current {
+  background: rgba(245, 158, 11, 0.7);
+}
+
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.meta-k {
+  color: var(--muted);
+  font-weight: 900;
+}
+.meta-v {
+  color: var(--text-strong);
+  font-weight: 900;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  :root .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
