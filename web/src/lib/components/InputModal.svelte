@@ -64,11 +64,11 @@
     max-width: 520px;
     border-radius: 18px;
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.98);
+    background: var(--bg-surface);
     padding: 14px;
     box-shadow:
-      0 2px 12px rgba(0, 0, 0, 0.16),
-      0 18px 50px rgba(0, 0, 0, 0.22);
+      0 2px 12px rgba(0, 0, 0, 0.4),
+      0 18px 50px rgba(0, 0, 0, 0.5);
   }
 
   .modal-head {
@@ -94,7 +94,7 @@
     padding: 10px 12px;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.9);
+    background: var(--bg-input);
     font: inherit;
     font-size: 13px;
     color: var(--text-strong);
@@ -118,6 +118,6 @@
   }
 
   .modal-actions .secondary {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 246, 255, 0.86));
+    background: var(--bg-surface);
   }
 </style>

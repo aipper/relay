@@ -97,11 +97,11 @@
     max-width: 520px;
     border-radius: 18px;
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.98);
+    background: var(--bg-surface);
     padding: 14px;
     box-shadow:
-      0 2px 12px rgba(0, 0, 0, 0.16),
-      0 18px 50px rgba(0, 0, 0, 0.22);
+      0 2px 12px rgba(0, 0, 0, 0.4),
+      0 18px 50px rgba(0, 0, 0, 0.5);
   }
 
   .modal-head {
@@ -141,27 +141,27 @@
   }
 
   .risk-pill[data-kind="read"] {
-    background: rgba(37, 99, 235, 0.12);
-    border-color: rgba(37, 99, 235, 0.22);
-    color: #1d4ed8;
+    background: color-mix(in srgb, #38bdf8 12%, transparent);
+    border-color: color-mix(in srgb, #38bdf8 25%, transparent);
+    color: #38bdf8;
   }
 
   .risk-pill[data-kind="write"] {
-    background: rgba(249, 115, 22, 0.12);
-    border-color: rgba(249, 115, 22, 0.28);
-    color: #92400e;
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 25%, transparent);
+    color: var(--warning);
   }
 
   .risk-pill[data-kind="exec"] {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.22);
-    color: #991b1b;
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 25%, transparent);
+    color: var(--danger);
   }
 
   .risk-pill[data-kind="other"] {
-    background: rgba(107, 114, 128, 0.12);
-    border-color: rgba(107, 114, 128, 0.22);
-    color: #374151;
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+    border-color: color-mix(in srgb, var(--muted) 25%, transparent);
+    color: var(--text-secondary);
   }
 
   .approval-summary {
@@ -192,7 +192,7 @@
   .approval-details summary {
     cursor: pointer;
     font-weight: 900;
-    color: #374151;
+    color: var(--text-secondary);
   }
 
   .modal-actions {
@@ -231,7 +231,7 @@
 
   .approval-questions-title {
     font-size: 12px;
-    color: #9a3412;
+    color: var(--warning);
     font-weight: 800;
     margin-bottom: 6px;
   }
@@ -241,7 +241,7 @@
     padding: 10px 12px;
     border-radius: var(--radius-lg);
     border: 1px solid rgba(249, 115, 22, 0.25);
-    background: rgba(255, 255, 255, 0.86);
+    background: var(--bg-canvas);
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-word;
@@ -253,7 +253,7 @@
     display: block;
     margin-top: 10px;
     font-size: 12px;
-    color: #9a3412;
+    color: var(--warning);
     font-weight: 800;
   }
 
@@ -264,6 +264,6 @@
   }
 
   .modal-actions .secondary {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 246, 255, 0.86));
+    background: var(--bg-surface);
   }
 </style>

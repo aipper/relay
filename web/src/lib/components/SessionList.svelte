@@ -123,14 +123,14 @@
     padding: 8px 10px;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border);
-    background: linear-gradient(150deg, rgba(255, 255, 255, 0.86), rgba(239, 246, 255, 0.88));
+    background: var(--bg-surface);
     text-align: left;
     box-shadow: var(--shadow-sm);
   }
 
   .host-group-header:hover {
     border-color: var(--border-strong);
-    background: linear-gradient(150deg, rgba(255, 255, 255, 0.95), rgba(224, 242, 254, 0.9));
+    background: color-mix(in srgb, var(--bg-surface) 96%, var(--accent));
   }
 
   .chevron {
@@ -177,7 +177,7 @@
     padding: 10px 12px;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border);
-    background: linear-gradient(150deg, rgba(255, 255, 255, 0.94), rgba(240, 249, 255, 0.88));
+    background: var(--bg-surface);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -194,8 +194,8 @@
   }
 
   .session-item.selected {
-    border-color: rgba(14, 165, 233, 0.45);
-    background: linear-gradient(150deg, rgba(224, 242, 254, 0.9), rgba(186, 230, 253, 0.45));
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+    background: color-mix(in srgb, var(--bg-surface) 90%, var(--accent));
   }
 
   .session-item.selected::before {
@@ -206,7 +206,7 @@
     bottom: 10px;
     width: 3px;
     border-radius: 999px;
-    background: linear-gradient(180deg, #0ea5e9, #22d3ee);
+    background: var(--accent);
   }
 
   .session-item-top {
@@ -234,7 +234,7 @@
     flex-wrap: wrap;
     align-items: center;
     font-size: 12px;
-    color: #355271;
+    color: var(--text-secondary);
   }
 
   .session-tool {
@@ -246,8 +246,8 @@
   .session-op-args {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 12px;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(14, 165, 233, 0.2);
+    background: var(--bg-canvas);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     padding: 2px 6px;
     border-radius: 8px;
   }

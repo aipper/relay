@@ -75,7 +75,7 @@
   .approval-card-prompt {
     margin-top: 8px;
     font-size: 12px;
-    color: #9a3412;
+    color: var(--warning);
     word-break: break-word;
     white-space: pre-wrap;
   }
@@ -97,7 +97,7 @@
 
   .approval-questions-title {
     font-size: 12px;
-    color: #9a3412;
+    color: var(--warning);
     font-weight: 800;
     margin-bottom: 6px;
   }
@@ -107,7 +107,7 @@
     padding: 10px 12px;
     border-radius: var(--radius-lg);
     border: 1px solid rgba(249, 115, 22, 0.25);
-    background: rgba(255, 255, 255, 0.86);
+    background: var(--bg-canvas);
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-word;
@@ -119,7 +119,7 @@
     display: block;
     margin-top: 10px;
     font-size: 12px;
-    color: #9a3412;
+    color: var(--warning);
     font-weight: 800;
   }
 
@@ -133,13 +133,13 @@
   .session-op-args {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 12px;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(14, 165, 233, 0.2);
+    background: var(--bg-canvas);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     padding: 2px 6px;
     border-radius: 8px;
   }
 
   .approval-card-actions .secondary {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 246, 255, 0.86));
+    background: var(--bg-surface);
   }
 </style>
