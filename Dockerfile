@@ -17,7 +17,7 @@ RUN cargo build --release -p relay-server
 
 FROM oven/bun:1 AS web-builder
 WORKDIR /web
-COPY web/package.json web/bun.lock web/index.html web/tsconfig.json web/vite.config.ts ./
+COPY web/package.json web/bun.lock web/index.html web/tsconfig.json web/vite.config.ts web/vite-plugin-e2e-mock.ts ./
 COPY web/src ./src
 RUN bun install --frozen-lockfile
 RUN bun run build

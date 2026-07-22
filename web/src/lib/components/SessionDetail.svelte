@@ -27,13 +27,11 @@
   export let awaitingWantsYesNo: (a: any) => boolean = () => false;
 
   // Chat state
-  export let chatInputText: string = "";
-  export let chatInputEl: any = null;
   export let uiBlocks: any[] = [];
   export let renderMarkdownBasic: (src: string) => string = () => "";
   export let formatAbsTime: (ts: string) => string = () => "";
   export let copyText: (text: string) => void | Promise<void> = () => {};
-  export let selectedOutputMode: string = "";
+
   export let selectedOutput: string = "";
   export let tailLines: (text: string, n: number) => string = () => "";
   export let selectedRunReady: boolean = false;
@@ -43,14 +41,11 @@
   export let outputSearchText: string = "";
   export let outputSearchMatches: any[] = [];
   export let outputSearchCursor: number = 0;
-  export let outputSearchActive: string = "";
+  export let outputSearchActive: boolean = false;
   export let outputHtml: string = "";
   export let outputDisplayText: string = "";
   export let outputIsAtBottom: boolean = false;
-  export let xtermRef: any = null;
-  export let xtermRunId: string = "";
 
-  // Callbacks - Session actions
   export let onBack: () => void = () => {};
   export let onOpenApprovalModal: () => void = () => {};
   export let onOpenStopConfirm: () => void = () => {};
@@ -63,9 +58,8 @@
   export let onFocusOutputSearch: () => void = () => {};
 
   // Callbacks - Chat
-  export let onSendChatInput: () => void = () => {};
+  export let onSendChatInput: (text: string) => void = () => {};
   export let onOpenInputModal: (text: string) => void = () => {};
-  export let onHandleChatInputKeydown: (e: KeyboardEvent) => void = () => {};
 
   // Callbacks - Decision
   export let onSendDecision: (decision: string) => void = () => {};
@@ -82,12 +76,8 @@
   export let onJumpToLatest: () => void = () => {};
   export let onResumeOutputAutoScroll: () => void = () => {};
   export let onOutputScroll: () => void = () => {};
-  export let onXtermReady: (e: CustomEvent) => void = () => {};
-  export let onXtermData: (e: CustomEvent) => void = () => {};
-  export let onXtermResize: (e: CustomEvent) => void = () => {};
   export let onSearchKeydown: (e: KeyboardEvent) => void = () => {};
 
-  // Callbacks - Offline
   export let onResumeFromStoredToken: () => void = () => {};
   export let onRefreshSelectedSession: () => void = () => {};
 </script>
@@ -153,13 +143,11 @@
   {/if}
 
   <div class="detail-tabs" role="tablist" aria-label="session detail tabs">
-    <button class:active={sessionDetailTab === "output"} role="tab" on:click={onSwitchToOutputTabAction}>终端</button>
-    <button class:active={sessionDetailTab === "messages"} role="tab" on:click={onSwitchToMessagesTab}>事件</button>
+    <button class="active" role="tab">事件</button>
     <button on:click={onRefreshMessages} disabled={!selectedRunId || !token} style="margin-left:auto">刷新</button>
   </div>
 
-  {#if sessionDetailTab === "messages"}
-    {#if selectedAwaiting}
+  {#if selectedAwaiting}
       <div class="pinned-actions">
         {#if awaitingIsApproval(selectedAwaiting)}
           <ApprovalCard
@@ -188,57 +176,21 @@
       {formatAbsTime}
       {copyText}
       {selectedRunId}
-      {selectedOutputMode}
       {selectedOutput}
       {tailLines}
+      onSendMessage={onSendChatInput}
       onSwitchToOutputTab={onSwitchToOutputTabAction}
     />
     <ChatInput
       {selectedRunId}
       {status}
       {selectedRunReady}
-      bind:chatInputText
-      bind:chatInputEl
       {selectedAwaiting}
       {awaitingIsApproval}
       {awaitingWantsYesNo}
       onSendChatInput={onSendChatInput}
       onOpenInputModal={onOpenInputModal}
-      onKeydown={onHandleChatInputKeydown}
     />
-  {:else}
-    <OutputView
-      {selectedOutputMode}
-      {outputAutoScroll}
-      {selectedRunId}
-      {status}
-      bind:outputSearchText
-      {outputSearchMatches}
-      {outputSearchCursor}
-      {outputSearchActive}
-      {outputHtml}
-      {outputDisplayText}
-      {outputIsAtBottom}
-      bind:xtermRef
-      {xtermRunId}
-      {onToggleOutputAutoScroll}
-      {onQueueStdin}
-      {onRunOutputSearch}
-      {onPrevOutputMatch}
-      {onNextOutputMatch}
-      {onClearOutputSearch}
-      {onCopyOutput}
-      {onJumpToLatest}
-      {onResumeOutputAutoScroll}
-      {onOpenInputModal}
-      {onFocusOutputSearch}
-      {onOutputScroll}
-      {onXtermReady}
-      {onXtermData}
-      {onXtermResize}
-      {onSearchKeydown}
-    />
-  {/if}
 {/if}
 
 <style>
@@ -338,15 +290,15 @@
     margin-top: 10px;
     padding: 10px 12px;
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(239, 68, 68, 0.18);
-    background: rgba(239, 68, 68, 0.06);
+    border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
     align-items: center;
     font-size: 12px;
     font-weight: 900;
-    color: #991b1b;
+    color: var(--danger);
   }
 
   .detail-tabs {
@@ -370,9 +322,9 @@
   }
 
   .detail-tabs button.active {
-    background: linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(224, 242, 254, 0.86));
+    background: color-mix(in srgb, var(--bg-surface) 80%, var(--accent));
     box-shadow: var(--shadow-sm);
-    border: 1px solid rgba(14, 165, 233, 0.24);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   }
 
   .pinned-actions {

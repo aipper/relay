@@ -56,18 +56,18 @@
   {/if}
   {#if hostInfo}
     <h3>info</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid #e5e7eb;padding:12px">{hostInfo}</pre>
+    <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid var(--border);padding:12px">{hostInfo}</pre>
   {/if}
   {#if hostDoctor}
     <h3>doctor</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid #e5e7eb;padding:12px">{hostDoctor}</pre>
+    <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid var(--border);padding:12px">{hostDoctor}</pre>
   {/if}
   {#if hostCapabilities}
     <h3>capabilities</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid #e5e7eb;padding:12px">{hostCapabilities}</pre>
+    <pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;border:1px solid var(--border);padding:12px">{hostCapabilities}</pre>
   {/if}
   {#if hostLogs}
     <h3>logs.tail</h3>
-    <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">{hostLogs}</pre>
+    <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid var(--border);padding:12px">{hostLogs}</pre>
   {/if}
 </section>

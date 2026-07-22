@@ -779,21 +779,11 @@ async fn opencode_submit_prompt(
             env.seq = Some(run_for_watchdog.next_seq());
             let _ = events.send(env);
 
+            // Use SIGKILL directly (skip SIGTERM) since opencode may ignore SIGTERM.
             #[cfg(unix)]
             {
                 use nix::sys::signal::Signal;
-
-                let _ = signal_opencode_process_group(pid, Signal::SIGTERM);
-                std::thread::sleep(Duration::from_secs(2));
-                let still_same_pid = run_for_watchdog
-                    .opencode_active_pid
-                    .lock()
-                    .ok()
-                    .and_then(|active| *active)
-                    == Some(pid);
-                if still_same_pid {
-                    let _ = signal_opencode_process_group(pid, Signal::SIGKILL);
-                }
+                let _ = signal_opencode_process_group(pid, Signal::SIGKILL);
             }
         });
     }

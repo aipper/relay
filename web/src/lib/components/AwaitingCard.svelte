@@ -60,7 +60,7 @@
 
   .awaiting-card-prompt {
     font-size: 12px;
-    color: #9a3412;
+    color: var(--warning);
     word-break: break-word;
     white-space: pre-wrap;
   }
@@ -86,6 +86,6 @@
   }
 
   .awaiting-card-actions .secondary {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 246, 255, 0.86));
+    background: var(--bg-surface);
   }
 </style>

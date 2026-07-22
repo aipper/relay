@@ -29,7 +29,7 @@
 </div>
 
 {#if todoSuggestions.length > 0}
-  <div style="margin:8px 0;padding:8px;border:1px solid #e5e7eb;background:#f8fafc">
+  <div style="margin:8px 0;padding:8px;border:1px solid var(--border);background:var(--bg-canvas)">
     <strong>建议（来自输出）</strong>
     <ul>
       {#each todoSuggestions as s (s)}

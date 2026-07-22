@@ -29,8 +29,7 @@
   {#if fileError}
     <div style="color:#b91c1c">{fileError}</div>
   {/if}
-  <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{fileContent || "(empty)"}</pre>
+  <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid var(--border);padding:12px">{fileContent || "(empty)"}</pre>
 
   <h2>搜索（run cwd）</h2>
   <label>
@@ -69,9 +68,8 @@
     <div style="color:#b91c1c">{gitError}</div>
   {/if}
   <h3>status</h3>
-  <pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
+  <pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;border:1px solid var(--border);padding:12px">
 {gitStatus || "(empty)"}</pre>
   <h3>diff</h3>
-  <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid #e5e7eb;padding:12px">
-{gitDiff || "(empty)"}</pre>
+  <pre style="white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto;border:1px solid var(--border);padding:12px">{gitDiff || "(empty)"}</pre>
 </section>
