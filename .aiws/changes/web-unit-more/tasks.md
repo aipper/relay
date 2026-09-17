@@ -1,0 +1,11 @@
+# tasks: web-unit-more
+- [x] 0.1 真值已读（AI_PROJECT/AI_WORKSPACE/REQUIREMENTS）
+- [x] 1.1 CSV 追加 WEB-UNIT-003
+- [x] 1.2 proposal 落盘
+- [x] 2.1 新增 `web/src/lib/stores/utils-extra.test.ts` 并全绿
+- [x] 2.2 `bun run build` exit 0
+- [x] 3.1 证据落盘 evidence/
+- [x] 3.2 review 落盘
+- [ ] 4.1 提交并 finish
+- [ ] 4.2 归档 archive
+- [ ] 4.3 push
