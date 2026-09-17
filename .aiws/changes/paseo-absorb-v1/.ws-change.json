@@ -19,5 +19,34 @@
     }
   },
   "base_branch": "main",
-  "base_branch_set_at": "2026-09-17T03:14:30Z"
+  "base_branch_set_at": "2026-09-17T03:14:30Z",
+  "synced_at": "2026-09-17T08:35:29Z",
+  "synced_truth_files": {
+    "AI_PROJECT.md": {
+      "mtime": 1785393132,
+      "sha256": "394d09dd6af812711bddd7219d4eb25954d4fde452ff9e3ca978d760c21f9af6"
+    },
+    "AI_WORKSPACE.md": {
+      "mtime": 1789633079,
+      "sha256": "d27fb1bca53205ea6ab8cff4af4e7dfbc1d91a612b2f0d5995732faf367bfb4e"
+    },
+    "REQUIREMENTS.md": {
+      "mtime": 1773917350,
+      "sha256": "fad124ca76f25aae0f1268333f5df6ae799c9f6cf0363e2fd3d713d7a6a46b9a"
+    }
+  },
+  "sync_events": [
+    {
+      "synced_at": "2026-09-17T08:35:29Z",
+      "baseline_from": "creation",
+      "baseline_at": "2026-09-17T03:14:30Z",
+      "changed": [
+        {
+          "file": "AI_WORKSPACE.md",
+          "from": "9f368aaec4e1fe03869db96ad3ec144ddfcceca51c63deb13dc36a86446a14fb",
+          "to": "d27fb1bca53205ea6ab8cff4af4e7dfbc1d91a612b2f0d5995732faf367bfb4e"
+        }
+      ]
+    }
+  ]
 }

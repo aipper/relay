@@ -55,3 +55,6 @@
 - [ ] 二选一闭环归因：补最小 `requirements/requirements-issues.csv` 行（H3/M2/M3/M5）或在 proposal 记录 `ws-req-change` 豁免理由；勾 tasks 1.x/4.x 或明确推迟项
 - [ ] 确认 messages 是否含 `permission_decided`（一 curl 即可）：`GET /runs/:id/messages?limit=200` 看已决 run 是否含 decided；若无，hydrate 加 decided 检查或记录为已知限制
 - [ ] 最小验证：`cargo fmt --check && cargo clippy --all-targets --all-features && cargo test --workspace`（expect 全 0 / 20 passed）；`cd web && bun run build`（expect exit 0）
+
+## Resolution 2026-09-17 (close-out triage)
+- [Critical][QUALITY] coalescer.rs untracked → RESOLVED: commit 2ef2d06 显式加入 server/src/coalescer.rs；此后 cargo fmt/clippy/test 全绿，无新检出编译问题。

@@ -18,6 +18,11 @@
 - health_path: "/health"
 - log_path: ".agentdocs/tmp/server-test/app.log"
 
+- web_dir: ./web
+- start_cmd: bash scripts/dev-up.sh --port 8790 --no-build --keep-tmp
+- health_check: curl --noproxy=* http://127.0.0.1:8790/health
+- playwright_test_cmd: cd web && ./node_modules/.bin/playwright test
+
 - environment: "test"
 - base_url_allowlist:
   - "http://127.0.0.1"
