@@ -59,4 +59,9 @@
 - 证据落盘（`.agentdocs/tmp/...`）：evidence/blocks-unit.md
 
 ## Bindings
-Change_ID: web-unit-blocks / Req_ID: WEB-UNIT-002 / Problem_ID: PWA-UNIT-002 / Contract_Row: WEB-UNIT-002 / Plan_File: .aiws/plan/2026-09-17_19-10-00-web-unit-blocks.md / Evidence_Path: .aiws/changes/web-unit-blocks/evidence/
+Change_ID: web-unit-blocks
+Req_ID: WEB-UNIT-002
+Problem_ID: PWA-UNIT-002
+Contract_Row: Req_ID=WEB-UNIT-002, Problem_ID=PWA-UNIT-002
+Plan_File: .aiws/plan/2026-09-17_19-10-00-web-unit-blocks.md
+Evidence_Path: .aiws/changes/web-unit-blocks/evidence/
