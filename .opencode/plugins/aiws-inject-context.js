@@ -176,8 +176,20 @@ export default async ({ directory }) => {
           return
         }
 
-        const contextBlock = ctx.buildContextBlock(entries)
-        debugLog("inject", `Injected context for role "${role}", entries: ${entries.length}`)
+        const counts = { inline: 0, truncated: 0, index: 0 }
+        for (const e of entries) {
+          const m = e.mode || "inline"
+          if (m in counts) counts[m] += 1
+          else counts.inline += 1
+        }
+        const metaHeader =
+          `<aiws-context-meta>\n` +
+          `role: ${role}\n` +
+          `change: ${changeId}\n` +
+          `files: ${entries.length} (inline=${counts.inline}, truncated=${counts.truncated}, index=${counts.index})\n` +
+          `</aiws-context-meta>`
+        const contextBlock = `${metaHeader}\n\n${ctx.buildContextBlock(entries)}`
+        debugLog("inject", `Injected context for role "${role}", entries: ${entries.length}`, counts)
 
         // Record delegation event to journal
         const sessionKey = ctx.getSessionKey({ sessionID: input?.session_id || "" })

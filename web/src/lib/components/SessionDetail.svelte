@@ -80,6 +80,7 @@
 
   export let onResumeFromStoredToken: () => void = () => {};
   export let onRefreshSelectedSession: () => void = () => {};
+  export let onContinueSession: (run: any) => void = () => {};
 </script>
 
 {#if !selectedRun}
@@ -119,6 +120,11 @@
           <span class="meta-v"><code>{selectedRun.cwd}</code></span>
         </span>
       </div>
+      <div class="ctx-bar" data-kind={uiBlocks.length < 80 ? "ok" : uiBlocks.length < 150 ? "warn" : "high"} title="当前上下文消息数（估算，非 token 精确值）">
+        <span class="ctx-label">上下文</span>
+        <span class="ctx-track"><span class="ctx-fill" style="width:{Math.min(uiBlocks.length / 200, 1) * 100}%"></span></span>
+        <span class="ctx-count">{uiBlocks.length}</span>
+      </div>
     </div>
     <div class="detail-actions">
       {#if isMobile}
@@ -130,6 +136,7 @@
       {/if}
       <button class="secondary" on:click={() => onSendStop("int")} disabled={!selectedRunId || status !== "connected"} type="button" title="Ctrl+C">中断</button>
       <button on:click={onOpenStopConfirm} disabled={!selectedRunId || status !== "connected"}>停止</button>
+      <button class="secondary" on:click={() => onContinueSession(selectedRun)} type="button">继续此会话</button>
     </div>
   </div>
 
@@ -169,19 +176,28 @@
       </div>
     {/if}
 
-    <ChatFeed
-      {uiBlocks}
-      {selectedRun}
-      {renderMarkdownBasic}
-      {formatAbsTime}
-      {copyText}
-      {selectedRunId}
-      {selectedOutput}
-      {tailLines}
-      onSendMessage={onSendChatInput}
-      onSwitchToOutputTab={onSwitchToOutputTabAction}
-    />
-    <ChatInput
+     <ChatFeed
+       {uiBlocks}
+       {selectedRun}
+       {renderMarkdownBasic}
+       {formatAbsTime}
+       {copyText}
+       {selectedRunId}
+       {selectedOutput}
+       {tailLines}
+       onSendMessage={onSendChatInput}
+       onSwitchToOutputTab={onSwitchToOutputTabAction}
+     />
+     {#if isMobile}
+       <div class="mobile-action-bar">
+         {#if selectedAwaiting && awaitingIsApproval(selectedAwaiting)}
+           <button on:click={onOpenApprovalModal} disabled={!selectedRunId} type="button">审批</button>
+         {/if}
+         <button class="secondary" on:click={() => onSendStop("int")} disabled={!selectedRunId || status !== "connected"} type="button" title="Ctrl+C">中断</button>
+         <button on:click={onOpenStopConfirm} disabled={!selectedRunId || status !== "connected"} type="button">停止</button>
+       </div>
+     {/if}
+     <ChatInput
       {selectedRunId}
       {status}
       {selectedRunReady}
@@ -266,6 +282,49 @@
     flex: 1 1 360px;
   }
 
+  .ctx-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    max-width: 360px;
+  }
+
+  .ctx-label {
+    font-weight: 800;
+    flex: 0 0 auto;
+  }
+
+  .ctx-track {
+    flex: 1 1 auto;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--bg-canvas);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .ctx-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--success);
+    transition: width 0.3s ease, background 0.3s ease;
+  }
+
+  .ctx-bar[data-kind="warn"] .ctx-fill { background: var(--warning); }
+  .ctx-bar[data-kind="high"] .ctx-fill { background: var(--danger); }
+  .ctx-bar[data-kind="warn"] .ctx-count { color: var(--warning); }
+  .ctx-bar[data-kind="high"] .ctx-count { color: var(--danger); }
+
+  .ctx-count {
+    font-family: "Geist Mono", monospace;
+    font-weight: 700;
+    color: var(--text);
+    flex: 0 0 auto;
+  }
+
   .detail-actions {
     display: flex;
     gap: 8px;
@@ -332,5 +391,21 @@
     flex-direction: column;
     gap: 10px;
     margin: 10px 0 12px;
+  }
+
+  .mobile-action-bar {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 8px 0;
+    position: sticky;
+    bottom: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+
+  .mobile-action-bar button {
+    flex: 1;
+    max-width: 120px;
   }
 </style>

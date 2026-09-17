@@ -24,6 +24,48 @@
     hostGroupCollapsed = hostGroupCollapsed;
   }
 
+  let projectCollapsed: Record<string, boolean> = {};
+
+  function toggleProject(id: string) {
+    projectCollapsed[id] = !projectCollapsed[id];
+    projectCollapsed = projectCollapsed;
+  }
+
+  function projectLabel(cwd: string): string {
+    if (!cwd) return "未指定项目";
+    const parts = cwd.replace(/\/+$/, "").split("/").filter(Boolean);
+    return parts[parts.length - 1] || cwd;
+  }
+
+  function tsDesc(a: any, b: any): number {
+    const ta = (a.last_active_at ?? a.started_at ?? "") + "";
+    const tb = (b.last_active_at ?? b.started_at ?? "") + "";
+    return tb.localeCompare(ta);
+  }
+
+  function groupByProject(sessions: any[]) {
+    const map = new Map<
+      string,
+      { key: string; label: string; cwd: string; sessions: any[]; latest: string }
+    >();
+    for (const r of sessions) {
+      const cwd = (r.cwd ?? "") + "";
+      const key = cwd || "__none__";
+      let grp = map.get(key);
+      if (!grp) {
+        grp = { key, label: projectLabel(cwd), cwd, sessions: [], latest: "" };
+        map.set(key, grp);
+      }
+      grp.sessions.push(r);
+      const ts = (r.last_active_at ?? r.started_at ?? "") + "";
+      if (ts > grp.latest) grp.latest = ts;
+    }
+    const arr = Array.from(map.values());
+    arr.sort((a, b) => (b.latest > a.latest ? 1 : b.latest < a.latest ? -1 : 0));
+    for (const g of arr) g.sessions.sort(tsDesc);
+    return arr;
+  }
+
   $: hostGroups = runGroups;
 </script>
 
@@ -53,7 +95,35 @@
   />
 {/if}
 
+{#snippet sessionCard(r)}
+  {@const st = statusLabel(r)}
+  {@const title = sessionTitle(r)}
+  {@const summary = sessionSummary(r)}
+  <button class="session-item" class:selected={selectedRunId === r.id} on:click={() => onSelectSession(r.id)}>
+    <div class="session-item-top">
+      {#if title}
+        <div class="session-title">{title}</div>
+      {/if}
+      <span class="session-status" data-kind={st.kind}>{st.label}</span>
+    </div>
+    {#if r.status === "awaiting_approval"}
+      <div class="session-meta">
+        <span class="session-tool">{r.tool}</span>
+        {#if r.pending_op_tool}<span class="session-op">{r.pending_op_tool}</span>{/if}
+        {#if r.pending_op_args_summary}<span class="session-op-args">{r.pending_op_args_summary}</span>{/if}
+      </div>
+    {:else}
+      {#if summary}
+        <div class="session-summary">{summary}</div>
+      {/if}
+    {/if}
+    <div class="session-time">{formatRelativeTime(r.last_active_at ?? r.started_at)}</div>
+  </button>
+{/snippet}
+
 {#each runGroups as g (g.host_id)}
+  {@const projects = groupByProject(g.sessions)}
+  {@const useProjectLayer = projects.length >= 2}
   <div class="host-group">
     <button class="host-group-header" on:click={() => toggleHostGroup(g.host_id)} aria-expanded={!hostGroupCollapsed[g.host_id]}>
       <span class="chevron">{hostGroupCollapsed[g.host_id] ? "▸" : "▾"}</span>
@@ -63,31 +133,29 @@
     </button>
     {#if !hostGroupCollapsed[g.host_id]}
       <div class="session-items">
-        {#each g.sessions as r (r.id)}
-          {@const st = statusLabel(r)}
-          {@const title = sessionTitle(r)}
-          {@const summary = sessionSummary(r)}
-          <button class="session-item" class:selected={selectedRunId === r.id} on:click={() => onSelectSession(r.id)}>
-            <div class="session-item-top">
-              {#if title}
-                <div class="session-title">{title}</div>
+        {#if useProjectLayer}
+          {#each projects as p (p.key)}
+            {@const pid = `${g.host_id}|${p.key}`}
+            <div class="project-group">
+              <button class="project-header" on:click={() => toggleProject(pid)} aria-expanded={!projectCollapsed[pid]} title={p.cwd || "未指定项目"}>
+                <span class="chevron">{projectCollapsed[pid] ? "▸" : "▾"}</span>
+                <span class="project-name">{p.label}</span>
+                <span class="project-count">{p.sessions.length}</span>
+              </button>
+              {#if !projectCollapsed[pid]}
+                <div class="project-sessions">
+                  {#each p.sessions as r (r.id)}
+                    {@render sessionCard(r)}
+                  {/each}
+                </div>
               {/if}
-              <span class="session-status" data-kind={st.kind}>{st.label}</span>
             </div>
-            {#if r.status === "awaiting_approval"}
-              <div class="session-meta">
-                <span class="session-tool">{r.tool}</span>
-                {#if r.pending_op_tool}<span class="session-op">{r.pending_op_tool}</span>{/if}
-                {#if r.pending_op_args_summary}<span class="session-op-args">{r.pending_op_args_summary}</span>{/if}
-              </div>
-            {:else}
-              {#if summary}
-                <div class="session-summary">{summary}</div>
-              {/if}
-            {/if}
-            <div class="session-time">{formatRelativeTime(r.last_active_at ?? r.started_at)}</div>
-          </button>
-        {/each}
+          {/each}
+        {:else}
+          {#each projects[0]?.sessions ?? [] as r (r.id)}
+            {@render sessionCard(r)}
+          {/each}
+        {/if}
       </div>
     {/if}
   </div>
@@ -168,6 +236,60 @@
     flex-direction: column;
     gap: 8px;
     margin-top: 8px;
+  }
+
+  .project-group {
+    margin: 6px 0;
+    margin-left: 12px;
+    padding-left: 10px;
+    border-left: 1px solid var(--border);
+  }
+
+  .project-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .project-header:hover {
+    color: var(--text-strong);
+    background: var(--bg-canvas);
+  }
+
+  .project-header .chevron {
+    width: 12px;
+    color: var(--muted);
+  }
+
+  .project-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .project-count {
+    font-size: 11px;
+    color: var(--muted);
+    flex: 0 0 auto;
+  }
+
+  .project-sessions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
   }
 
   .session-item {

@@ -22,9 +22,9 @@ fi
 
 if [[ "${has_commits}" -eq 1 ]]; then
   if [[ "${has_submodules}" -eq 1 ]]; then
-    aiws change start "${change_id}" --hooks --worktree --submodules
+    aiws change start "${change_id}" --hooks --switch
   else
-    aiws change start "${change_id}" --hooks --worktree
+    aiws change start "${change_id}" --hooks --switch
   fi
 else
   aiws change start "${change_id}" --hooks --no-switch

@@ -1,0 +1,123 @@
+memories:
+  rule://ai-project:
+    title: AI_PROJECT.md（项目规则 / 约束真值）
+    domain: rule
+    path: rule/ai-project.md
+    created: '2026-07-30T06:32:19.840Z'
+    updated: '2026-07-30T06:32:19.841Z'
+    tags:
+      - seed:ai-project
+    summary: '<!-- AIWSMANAGEDBEGIN:ai-project:core --> <!-- AIPROJECTVERSION: 2 -->'
+  project://requirement:
+    title: relay — REQUIREMENTS
+    domain: project
+    path: project/requirement.md
+    created: '2026-07-30T06:32:19.851Z'
+    updated: '2026-07-30T06:32:19.852Z'
+    tags:
+      - seed:requirement
+    summary: <!-- AIWSMANAGEDBEGIN:requirements:contract --> 本文件是工作区需求的唯一真值来源。AI 在制定计划与执行测试时必须以此为准。
+  project://ai-workspace:
+    title: AI_WORKSPACE.md（工作区说明）
+    domain: project
+    path: project/ai-workspace.md
+    created: '2026-07-30T06:32:19.859Z'
+    updated: '2026-07-30T06:32:19.859Z'
+    tags:
+      - seed:ai-workspace
+    summary: 本段由用户维护； 不会改动本段（建议把“可变参数”都放在这里）。
+  rule://agents:
+    title: Repository Guidelines
+    domain: rule
+    path: rule/agents.md
+    created: '2026-07-30T06:32:19.864Z'
+    updated: '2026-07-30T06:32:19.864Z'
+    tags:
+      - seed:agents
+    summary: <!-- AIWSMANAGEDBEGIN:agents --> 本仓库启用 AIWS（AI Workspace）约定。真值文件（按优先读取）： 1) （规则/边界）→ 2) （需求与验收真值）→ 3) （运行/测试入口真值）
+  change://2026-03-14-17-36-28-golutra-analysis:
+    title: 'Plan: Golutra 优点分析与 Relay 优化借鉴'
+    domain: change
+    path: change/2026-03-14-17-36-28-golutra-analysis.md
+    created: '2026-07-30T06:32:19.869Z'
+    updated: '2026-07-30T06:32:19.869Z'
+    tags:
+      - seed:plan
+    summary: >-
+      | 字段 | 值 | |------|-----| | Change ID | golutra-analysis | | Plan File | | | Contract Row | N/A (分析类工作，非需求交付) | |
+      Evidence Path | 本文档 + 对比分析 |
+  change://2026-03-14-18-00-00-terminal-injection:
+    title: 'Plan: 终端注入 (Terminal Injection) 功能实现'
+    domain: change
+    path: change/2026-03-14-18-00-00-terminal-injection.md
+    created: '2026-07-30T06:32:19.874Z'
+    updated: '2026-07-30T06:32:19.875Z'
+    tags:
+      - seed:plan
+    summary: >-
+      - ChangeID: terminal-injection - ReqID: FEATURE-001 - ProblemID: N/A - ContractRow: ReqID=FEATURE-001,
+      ProblemID=N/A - PlanFile: plan/2026-03-1418-00-00-terminal-injection.md - EvidencePath(s): .ag...
+  change://2026-03-14-19-37-46-pwa-interaction-v1:
+    title: 'Plan: PWA 交互体验优化（对齐 hapi）v1'
+    domain: change
+    path: change/2026-03-14-19-37-46-pwa-interaction-v1.md
+    created: '2026-07-30T06:32:19.879Z'
+    updated: '2026-07-30T06:32:19.879Z'
+    tags:
+      - seed:plan
+    summary: >-
+      - ChangeID: pwa-interaction-v1 - ReqID: WEB-070 - ContractRow: ReqID=WEB-070 - AdditionalReqIDs: WEB-071, WEB-072,
+      HST-021 - PlanFile: plan/2026-03-1419-37-46-pwa-interaction-v1.md - EvidencePath(s...
+  change://2026-03-19-11-02-10-opencode-pwa-focus:
+    title: 'Plan: OpenCode-first PWA focus'
+    domain: change
+    path: change/2026-03-19-11-02-10-opencode-pwa-focus.md
+    created: '2026-07-30T06:32:19.883Z'
+    updated: '2026-07-30T06:32:19.883Z'
+    tags:
+      - seed:plan
+    summary: >-
+      - ChangeID: opencode-pwa-focus - ReqID: WEB-073 - AdditionalReqIDs: WEB-074, WEB-075, HST-022 - ContractRow:
+      ReqID=WEB-073, ReqID=WEB-074, ReqID=WEB-075, ReqID=HST-022 - PlanFile: plan/2026-03-1911...
+  change://2026-04-13-pwa-session-ops:
+    title: 'Plan: PWA Session Operations'
+    domain: change
+    path: change/2026-04-13-pwa-session-ops.md
+    created: '2026-07-30T06:32:19.887Z'
+    updated: '2026-07-30T06:32:19.887Z'
+    tags:
+      - seed:plan
+    summary: >-
+      - ChangeID = pwa-session-ops - ReqID = WEB-073 - ContractRow = WEB-073 - PlanFile =
+      plan/2026-04-13-pwa-session-ops.md - Evidence_Path = .agentdocs/tmp/playwright-session-
+  change://2026-04-13-14-30-00-mobile-pwa-interaction-fix:
+    title: 'Plan: mobile-pwa-fix'
+    domain: change
+    path: change/2026-04-13-14-30-00-mobile-pwa-interaction-fix.md
+    created: '2026-07-30T06:32:19.891Z'
+    updated: '2026-07-30T06:32:19.891Z'
+    tags:
+      - seed:plan
+    summary: >-
+      - ChangeID: mobile-pwa-fix - PlanFile: plan/2026-04-1314-30-00-mobile-pwa-interaction-fix.md - EvidencePath:
+      changes/mobile-pwa-fix/ - ContractRow: N/A - ReqID: N/A - Problem_ID: N/A
+  change://20260413-pwa-playwright-intake-intake:
+    title: 'Intake: Playwright Testing & PWA Capability Assessment'
+    domain: change
+    path: change/20260413-pwa-playwright-intake-intake.md
+    created: '2026-07-30T06:32:19.895Z'
+    updated: '2026-07-30T06:32:19.895Z'
+    tags:
+      - seed:plan
+    summary: User wants to use Playwright to test PWA, and evaluate whether PWA can properly manage OpenCode servers.
+  change://hapi-actionable-cards:
+    title: 'Plan: hapi-actionable-cards'
+    domain: change
+    path: change/hapi-actionable-cards.md
+    created: '2026-07-30T06:32:19.899Z'
+    updated: '2026-07-30T06:32:19.899Z'
+    tags:
+      - seed:plan
+    summary: >-
+      - ChangeID: hapi-actionable-cards - ReqID: WEB-062 - ContractRow(s): ReqID=WEB-062, ReqID=WEB-063, ReqID=WEB-064,
+      ReqID=SRV-020, ReqID=HST-020 - PlanFile: plan/hapi-actionable-cards.md - EvidencePa...

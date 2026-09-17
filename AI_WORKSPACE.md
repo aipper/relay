@@ -94,9 +94,9 @@
 请在上方 `0) 项目配置` 覆盖：
 - `base_url` / `health_path` / `log_path`
 
-## 3.2) web/app 的测试命令（可选但推荐）
+## 3.2) web/app 的单元测试命令（推荐必填）
 
-为了让“需求→实现→测试→提交”闭环在多子项目工作区中可自动执行，建议在上方 `0) 项目配置` 写死：
+为了让"需求→实现→测试→提交"闭环在多子项目工作区中可自动执行，**推荐必填**，在上方 `0) 项目配置` 写死：
 - `web_test_cmd` / `web_build_cmd`
 - `app_test_cmd` / `app_build_cmd`
 
@@ -104,7 +104,21 @@
 - `{web_dir}`：web 目录的绝对路径
 - `{app_dir}`：app 目录的绝对路径
 
-## 3.3) 工具链与版本（强烈建议）
+## 3.3) web 的 Playwright E2E 测试（条件必填）
+
+当项目存在前端代码且改动涉及非 pure-ui 的前端逻辑时，Playwright E2E 测试是**强制门禁**。
+
+请在上方 `0) 项目配置` 填写（推荐必填）：
+- `playwright_test_cmd`：Playwright 测试执行命令（完整命令，含 `cd {web_dir}`）
+- `start_cmd`：启动后端服务的命令（用于 E2E 测试前启动依赖）
+- `health_check`：后端健康检查命令（用于确认后端就绪后再跑 E2E）
+
+规则：
+1. 非 pure-ui 的前端代码改动（frontend-logic / full-stack）必须经过 Playwright 浏览器级验证才允许完成
+2. 验证必须启动真实后端（通过 `start_cmd`）+ 真实 Playwright 测试（通过 `playwright_test_cmd`）
+3. 纯 UI 视觉调整（pure-ui）或纯后端改动（backend-api）不受此门禁影响
+
+## 3.4) 工具链与版本（强烈建议）
 
 为减少“在新机器上验证半天”的情况，建议在上方 `0) 项目配置` 显式声明语言工具链版本与切换方式：
 - `node_version` / `node_use_cmd`

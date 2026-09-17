@@ -19,7 +19,8 @@ description: 使用时机：需要分析问题、定位根因、收集上下文�
    - 风险与回滚（3–8 条）
    - 最小验证命令（可复现）
 3) 将分析落盘到：`.aiws/tmp/analyze/codex-analysis.md`（目录不存在则创建）。
-4) 回复中必须包含：`Evidence:` 证据文件路径。
+4) 运行 `aiws memory write decision://analysis/<topic>` 写入分析结论（根因、推荐方案、影响评估）。
+5) 回复中必须包含：`Evidence:` 证据文件路径。
 
 安全：
 - 不打印 secrets（尤其 `secrets/test-accounts.json`）。

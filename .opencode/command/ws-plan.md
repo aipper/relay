@@ -14,7 +14,7 @@ description: 规划：生成可落盘 plan 工件
    - 若检测到 `.opencode/oh-my-opencode.json` 或当前会话明确可用 `planner-sisyphus` / `explore` / `librarian`：优先按 `packages/spec/docs/opencode-omo-adapter.md` 借用这些 agent。
    - 计划主框架优先 `planner-sisyphus`；结构探索优先 `@explore`；规范/文档查证优先 `@librarian`。
 2) 若当前不在 `change/<change-id>` 分支 / worktree，先调用 `aiws change start <change-id>` 建立上下文：
-   - 仓库已有提交：优先 `aiws change start <change-id> --hooks --worktree`；若声明了 submodules，加 `--submodules`
+   - 仓库已有提交：优先 `aiws change start <change-id> --hooks --switch`
    - 仓库尚无提交 / 不满足 worktree 前置条件：回退 `aiws change start <change-id> --hooks --no-switch`
 3) 若上一步创建了 worktree：切到输出的 `worktree:` 路径，后续所有计划文件都写在该 worktree 中。
 4) 生成或更新计划文件：`plan/YYYY-MM-DD_HH-MM-SS-<slug>.md`。

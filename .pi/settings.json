@@ -1,0 +1,17 @@
+{
+  "skills": [
+    "ws-goal",
+    "subagent",
+    "ws-plan",
+    "ws-dev",
+    "ws-review",
+    "ws-finish",
+    "grill-me"
+  ],
+  "prompts": [
+    "aiws-context"
+  ],
+  "extensions": [
+    "aiws"
+  ]
+}

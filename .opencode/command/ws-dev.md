@@ -14,11 +14,11 @@ description: 开发：在 AIWS 约束下完成小步交付
 2) 建立变更归因（推荐）：
    - ⚠️ 若准备切分支/创建 worktree，先看 `git status --porcelain`；否则切换上下文后，未提交改动可能“看起来丢了”。
    - 若当前目录已经是 `change/<change-id>` worktree（例如由 `/ws-plan` 创建）：直接在这里继续，不要再创建第二个 worktree，也不要回原工作区写代码。
-   - 若非空仅因为 `/ws-plan` 生成了 `plan/...` 或 `changes/<change-id>/...`，这是预期行为；此时优先 `aiws change start <change-id> --hooks --no-switch`，若仍要 `--switch/--worktree`，先提交这些规划工件。
+   - 若非空仅因为 `/ws-plan` 生成了 `plan/...` 或 `changes/<change-id>/...`，这是预期行为；此时优先 `aiws change start <change-id> --hooks --no-switch`，若仍要 `--switch`，先提交这些规划工件。
    - 推荐更安全（默认）：`aiws change start <change-id> --hooks --no-switch`（只创建分支/工件 + 启用 hooks；不切分支）
    - 准备进入实现时：若当前已在 `change/<change-id>` 直接继续；若需切换到该分支，先确认除规划工件外无额外未提交改动，再执行：`git switch change/<change-id>`
    - 若你明确要“一键切分支”（不推荐，且 dirty 会被拦截）：`aiws change start <change-id> --hooks --switch`
-   - superproject + submodule（推荐）：`aiws change start <change-id> --hooks --worktree --submodules`
+   - superproject + submodule（推荐）：`aiws change start <change-id> --hooks --switch`
    - 若后续需要在 detached submodule 内提交：先挂到 `aiws/pin/<target-branch>`；不要直接切 `change/<change-id>` / `main` / `master`
    - 或手工：`git switch -c change/<change-id>`，并创建 `changes/<change-id>/proposal.md` 与 `changes/<change-id>/tasks.md`（参考 `changes/README.md`）
 3) 如涉及需求调整：先 `/ws-req-review` → 用户确认后再 `/ws-req-change`（避免需求漂移）。

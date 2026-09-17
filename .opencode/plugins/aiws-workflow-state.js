@@ -8,7 +8,10 @@
  * Reference: trellis/packages/cli/src/templates/opencode/plugins/inject-workflow-state.js
  */
 
-import { AiwsContext, AiwsSessionJournal, debugLog } from "../lib/aiws-context.js"
+import { AiwsContext, AiwsSessionJournal, debugLog, promptHasSkipKeyword, resolveWorkflowSkipKeyword } from "../lib/aiws-context.js"
+
+// Re-export for tests (TOOLING-003A / #427)
+export { promptHasSkipKeyword, resolveWorkflowSkipKeyword }
 
 /**
  * Build the workflow-state breadcrumb block.
@@ -76,6 +79,18 @@ export default async ({ directory }) => {
         }
 
         if (process.env.OPENCODE_NON_INTERACTIVE === "1") {
+          return
+        }
+
+        // Escape hatch (trellis #427): skip keyword in user prompt (default no-aiws)
+        const partsProbe = output?.parts || []
+        const originalText = partsProbe
+          .filter(p => p && p.type === "text" && typeof p.text === "string")
+          .map(p => p.text)
+          .join("\n")
+        const skipKeyword = resolveWorkflowSkipKeyword()
+        if (promptHasSkipKeyword(originalText, skipKeyword)) {
+          debugLog("workflow-state", "Skipping turn: skip keyword present in prompt", skipKeyword)
           return
         }
 

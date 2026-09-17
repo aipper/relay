@@ -20,6 +20,21 @@
     <span class="brand">Relay</span>
   </div>
   <div class="topbar-right">
+    <button class="sidebar-toggle" onclick={() => relay.toggleSidebarSide()} title={relay.sidebarSide === "left" ? "侧栏在左，点击移到右侧" : "侧栏在右，点击移到左侧"} aria-label="切换侧栏位置" type="button">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        {#if relay.sidebarSide === "left"}
+          <rect x="3" y="4" width="6" height="16" rx="1"/>
+          <line x1="13" y1="8" x2="20" y2="8"/>
+          <line x1="13" y1="12" x2="20" y2="12"/>
+          <line x1="13" y1="16" x2="20" y2="16"/>
+        {:else}
+          <rect x="15" y="4" width="6" height="16" rx="1"/>
+          <line x1="4" y1="8" x2="11" y2="8"/>
+          <line x1="4" y1="12" x2="11" y2="12"/>
+          <line x1="4" y1="16" x2="11" y2="16"/>
+        {/if}
+      </svg>
+    </button>
     <span class="conn-badge" data-status={relay.status === "connected" ? "connected" : "disconnected"}>
       <span class="conn-dot" aria-hidden="true"></span>
       {relay.status === "connected" ? "已连接" : "未连接"}
@@ -99,6 +114,26 @@
   .topbar-right {
     display: flex;
     align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 150ms ease, color 150ms ease;
+  }
+
+  .sidebar-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .conn-badge {

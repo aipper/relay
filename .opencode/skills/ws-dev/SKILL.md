@@ -3,125 +3,149 @@ name: ws-dev
 description: 使用时机：需要修改代码、配置、测试时。触发词：实现、修复、开发、编码、写代码、改bug。注意：需求未冻结先用 ws-intake；极简修复可走 ws-dev-lite。
 ---
 
-用中文输出（命令/路径/代码标识符保持原样不翻译）。
-
-目标：在 AIWS 约束下完成一个可回放、可验证的小步交付。
-
-阶段定位：implementation 阶段。
+目标：在 AIWS 约束下完成可回放、可验证的小步交付。阶段：implementation。
 
 ## 必需输入
 
-- 真值文件：`AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`
-- 当前任务的归因目标（`Req_ID` 或 `Problem_ID`）
-- 若为 medium/complex：已通过 `$ws-plan` / `$ws-plan-verify` 的计划
-- 当前 `change/<change-id>` 上下文或等价变更归因
+- 真值：`AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`
+- 归因：`Req_ID` 或 `Problem_ID`；`change/<change-id>` 上下文
+- medium/complex：已通过 `$ws-plan` / `$ws-plan-verify` 的计划
 
 ## 必需输出
 
-- `变更文件（Changed）:` 实际改动清单
-- `验证（Verify）:` 实际运行的命令与结果说明
-- `证据（Evidence）:` `plan/...`、`.aiws/changes/<change-id>/...`、`.aiws/tmp/...` 等证据路径
-- `Next:` 若准备提交，建议 `$ws-review` 或 `$ws-commit`
+- `变更文件（Changed）:` / `验证（Verify）:` / `证据（Evidence）:` 路径
+- `Next:` 准备提交时建议 `$ws-review` 或 `$ws-commit`
 
 ## 前置条件（硬阻断 — 必须最先检查）
 
-在开始任何代码改动之前，必须完成以下检查：
+1. **Design Gate**：若 `proposal.md` 不存在 → 立即停止，输出 `BLOCKED: 缺少 proposal。请先执行 $ws-plan`
+2. **Task Gate**：若 `tasks.md` 不存在 → 立即停止，输出 `BLOCKED: 缺少 tasks。请先执行 $ws-plan`
+3. **Granularity Gate**：对每个 task 估算原子操作数（read/edit/write/run）。若任一 task 需 >3 原子操作 → 立即停止，返回 `$ws-plan` 拆细后再进入。
 
-1. **Design Gate**：若 `.aiws/changes/<change-id>/proposal.md` 不存在：
-   - 立即停止，不要写代码
-   - 输出：`BLOCKED: 缺少 proposal。请先执行 $ws-plan 创建变更计划与任务分解。`
-2. **Task Gate**：若 `.aiws/changes/<change-id>/tasks.md` 不存在：
-   - 立即停止，不要写代码
-   - 输出：`BLOCKED: 缺少 tasks。请先执行 $ws-plan 创建任务分解。`
+> 例外：`ws-dev-lite` 可豁免 Design Gate，仅限单文件/typo/config/bugfix 场景。
 
-> 例外：`ws-dev-lite` 是轻量入口，可豁免 Design Gate，但仅限单文件/typo/config/bugfix 场景。
+## Change Type Gate（改动类型门禁 — 硬阻断）
+
+进入实现前，必须先判定本次改动的类型，确定对应的验证要求。
+
+### 改动类型判定规则
+
+根据 `git diff --stat HEAD` 的文件路径自动判定（第一条匹配即生效）：
+
+1. **只看文档/配置文件**（`.md`、`.json`、`.yaml`、`.yml`、`.toml`、`.env*`、`/.github/`、`/scripts/` 等）→ `config-docs`
+2. **只改后端文件**（`server_dirs` 内的目录、`.java`、`.py`、`.go`、`.rs`、`pom.xml`、`build.gradle` 等）→ `backend-api`
+3. **只改前端文件**（`web_dirs` / `app_dirs` 内的目录、`.vue`、`.tsx`、`.jsx`、`.css`、`.scss` 等）→ 进一步判断：
+   - 仅含 `.css`、`.scss`、`.less`、`.vue` `<style>` 区域 → `pure-ui`
+   - 含 `.ts`、`.js`、`.tsx`、`.jsx`（非 `.test.` / `.spec.`）中的逻辑代码 → `frontend-logic`
+4. **同时改前后端** → `full-stack`
+5. **以上均不匹配** → `config-docs`（兜底）
+
+若 `proposal.md` 已显式声明 `Change_Type:`，以声明为准，跳过自动判定。
+
+### 按类型的要求
+
+| 类型 | 最低验证要求 | Playwright 门禁 |
+|------|-------------|----------------|
+| `pure-ui` | lint + 构建/类型检查 | 不要求 |
+| `frontend-logic` | lint + 构建 + **Playwright E2E** | **强制**（必须配置 `AI_WORKSPACE.md` 的 `playwright_test_cmd`/`start_cmd`/`health_check`） |
+| `backend-api` | 后端单元测试 + 接口测试 | 不要求 |
+| `full-stack` | 前端 Playwright + 后端测试 | **强制** |
+| `config-docs` | lint（如有） | 不要求 |
+
+### 执行门禁
+
+- 若类型为 `frontend-logic` 或 `full-stack`：
+  - `AI_WORKSPACE.md` 的 0 配置段必须包含 `playwright_test_cmd` / `start_cmd` / `health_check`
+  - 若缺失 → `BLOCKED: 缺少 playwright_test_cmd/start_cmd/health_check。请先补全 AI_WORKSPACE.md 配置`
+- 类型声明必须写入输出中的 `Change type:` 字段
 
 ## TDD 约束（强制）
 
-对于所有需要编写新代码或修改业务逻辑的任务，必须遵守 RED-GREEN-REFACTOR 流程：
-
-1. **RED**：先编写测试用例，运行并确认测试失败（或确认现有测试覆盖缺口）
-2. **GREEN**：编写最小实现代码使测试通过
-3. **REFACTOR**：重构代码，保持测试通过
-
-禁止：
-- 先写实现代码再补测试
-- 跳过测试步骤直接提交
-
-自我检查顺序（每次修改后）：`lint → typecheck → test`。若项目无对应脚本则跳过该项。
+新代码/业务逻辑改动必须走 TDD 循环。详见 `tdd` skill。
 
 ## 完成判定
 
-改动已落盘、验证已执行或明确未执行原因、证据路径可回放，并可进入 review/commit 阶段。
+改动已落盘、验证已执行或已说明未执行原因、证据可回放 → 可进 review/commit。
 
 ## 建议流程
 
 ### 1. Preflight
 
-定位项目根目录，读取 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`，输出约束摘要。
-
-- 中大型任务：建议先用 `$ws-plan` 生成 `plan/` 工件。
-- 中大型任务默认执行 [3.1 自我修正循环](#31-自我修正循环evaluate-optimize)——这是必经步骤，不是可选项：实现后先自审修正（最多 2 轮），再进入 review
-- 已有计划：先 `$ws-plan-verify`，通过后进入实现。
-- `$ws-plan` 已创建 worktree：直接在该 worktree 中继续。
+定位项目根，读真值，输出约束摘要。中大型先 `$ws-plan`（默认走 3.1）；已有计划先 `$ws-plan-verify`；已有 worktree 则直接继续。
 
 ### 1.5 Spec Refresh（进入实现前必做）
 
-在开始任何代码改动前，强制重读并输出摘要：
-- `AI_PROJECT.md` 安全边界（哪些目录不能动、哪些约束必须遵守）
-- `REQUIREMENTS.md` 中与本次 `Req_ID` 相关的条目（摘要 2-3 段即可）
-
-目的：避免落地时遗忘约束或需求边界。仅需 2-3 段摘要，不需要全文复读。
+重读 `AI_PROJECT.md` 安全边界与 `REQUIREMENTS.md` 相关条目，输出 2-3 段摘要。
 
 ### 2. 建立变更归因
 
-- 若 `git status --porcelain` 仅有计划/工件文件，属于预期行为，继续即可。
-- 若需创建新 change：`aiws change start <change-id> --hooks --no-switch`
-- 若需切换分支：先确认无额外未提交改动，再 `git switch change/<change-id>`
-- 若存在 submodule（`.gitmodules`）：进入编码前必须准备好 `.aiws/changes/<change-id>/submodules.targets`。`aiws change start` 的 `--submodules` 标志会自动处理。参考 `changes/README.md` 和 `.aiws/changes/<change-id>/submodules.targets` 格式。
+- `git status --porcelain` 仅有计划/工件 → 继续
+- 新建：`aiws change start <change-id> --hooks --no-switch`；切换前确认无未提交改动再 `git switch change/<change-id>`
+- submodule：准备 `submodules.targets`（`aiws change start` 自动检测 `.gitmodules`）
+
+### 2.5 Submodule Branch Setup（当存在 `.gitmodules` 时 — 硬阻断）
+
+> submodule 处于 detached HEAD 时必须先挂到明确的分支，否则后续 commit 无归属，`change finish` 的 pin 机制也无法正确推导目标分支。
+
+对每个 submodule path（按 `submodules.targets` 自上而下）：
+
+1. **进入 submodule 目录**，检查 `git symbolic-ref HEAD` 是否非空
+   - 非 detached（已在一个分支上）→ 跳过 ✅
+   - **detached HEAD** → 继续以下步骤 ⛔
+2. **获取 target branch**：
+   - 优先从 `submodules.targets` 读取目标分支（如 `main`）
+   - 不存在则退回到 `.gitmodules` 的 `submodule.<name>.branch`
+   - 两者都没有 → 提示用户输入
+3. **构造 pin branch**：`aiws/pin/<target>`（如 `aiws/pin/main`）
+4. **自动附着（按优先级）**：
+   - 远程存在 `aiws/pin/<target>` → `git checkout aiws/pin/<target>` ✅
+   - 远程不存在 pin branch，但存在 `<target>` → `git checkout <target>` ✅ 并提示"注意：远程无 pin 分支，已降级到 bare branch"
+   - 两者都不存在 → 询问用户：
+     - `创建并切换到 aiws/pin/<target>（推荐）`
+     - `切换到 <target>`
+     - `保持游离（detached HEAD）`
+5. **验证**：确认 `git symbolic-ref HEAD` 指向目标分支，输出 submodule branch 状态摘要
+
+> `.gitmodules` 的 `branch` 字段应写裸分支名（如 `main`）。`aiws/pin/` 前缀由 `change finish` 自动拼接，不写入 `submodules.targets`。
 
 ### 3. 实现策略：默认 dispatch aiws-worker（Subagent-First）
 
-详细执行循环见 `packages/spec/docs/opencode-subagent-first.md`。
-
-- 主 session **默认不直接写实现代码**；通过 `$ws-delegate` 派发 `aiws-worker`
-- `task()` 调用中指定 `role: worker`，让 `aiws-inject-context` 插件自动注入 JSONL 上下文
-- worker 返回后，派发 `aiws-reviewer` 做独立审查
-- 根据 review 结果决定 fix 或收敛 evidence
-- **Inline escape hatch**：如果用户明确说"你直接改"或"do it inline"，主 session 可直接写代码，但必须落盘 evidence 记录理由
-
-**验证先行推荐**：对于非 trivial 改动，建议先确认验证入口再开始实现：
-1. 先确认 `AI_WORKSPACE.md` 中对应的验证命令
-2. 若验证命令不明确：先补验证入口，再开始实现
-3. 可选模式（不强求 TDD）：先写最小验证 → 实现 → 补完整验证
+详见 `packages/spec/docs/opencode-subagent-first.md`。
+- 主 session **默认不直接写代码**；`$ws-delegate` 派发 `aiws-worker`（`task()` 加 `role: worker`）
+- worker 返回后派发 `aiws-reviewer` 独立审查，再 fix 或收敛 evidence
+- **Inline escape hatch**：用户说"直接改"/`do it inline` 时可直写，须落盘记录理由
+- 验证先行：确认 `AI_WORKSPACE.md` 验证命令；不明确则先补入口再实现
 
 ### 3.1 自我修正循环（evaluate-optimize）——必经步骤
 
-在 dispatch subagent 前，主 session 必须执行最多 **2 轮** 自审+修正循环：
+dispatch 前最多 **2 轮**：产出 → 主 session 检查（lint/typecheck/模式）→ 有问题则修正；2 轮后仍有问题升级 `$ws-review`。适用非 trivial；不替代 `$ws-review` 正式 gate。
 
-1. **实现** → subagent 产出代码
-2. **自审** → 主 session 检查：lint/type-check 是否通过？是否符合现有代码模式？是否有明显 bug？
-3. **修正** → 如果发现问题，要求 subagent 修正后重新提交
-4. **2 轮上限** → 如果 2 轮后仍有问题，升级到 `$ws-review` 做正式审查
+### 4. 验证
 
-**适用场景**：所有非 trivial 改动（单文件修复、配置调整、小步实现、中大型任务均适用）。不适合跨模块架构变更——此类变更直接走 $ws-review。
+- 验证跑 `AI_WORKSPACE.md` 命令（未运行不声称已运行）；多步用 `update_plan`
 
-**注意**：这不是替代 `$ws-review` 的门禁；自审通过后仍需走正式 review gate。
+### 5. Requirement Sync Gate（硬阻断 — 新增）
 
-### 4. 其他规则
+*放在验证后、输出前：*
 
-- 需求调整：先 `$ws-req-review` → 确认后 `$ws-req-change`
-- 最小改动：每处改动必须归因到 `REQUIREMENTS.md` 或 `issues/problem-issues.csv`
-- 验证：运行 `AI_WORKSPACE.md` 声明的命令；未运行不声称已运行
-- 多步任务：使用 `update_plan` 工具跟踪状态
-- 提交前门禁：
-  ```bash
-  aiws validate .
-  ```
-- 交付收尾：`$ws-finish`
+1. 对比本次改动与 `REQUIREMENTS.md` 当前描述的 API/接口/行为/验收标准的一致性
+2. 若有变更但 `REQUIREMENTS.md` 未反映 → **BLOCKED**（先运行 `$ws-req-change` 更新需求）
+3. 输出 `REQ_SYNC:` 状态：
+   - `SYNCED` — 已同步（REQUIREMENTS.md 已更新）
+   - `NOT_NEEDED` — 本次改动不影响现有需求描述
+   - `BLOCKED` — 有影响但未更新，阻断提交
+4. 提交前必须通过此门禁
+
+### 6. 提交与收尾
+
+- 提交前 `aiws validate .`；收尾 `$ws-finish`
+- 运行 `aiws memory write decision://<change-id>/dev` 写入实现决策记录（改动范围、关键选择、影响评估）
 
 ## 输出要求
 
+- `Change type:` 改动类型（pure-ui / frontend-logic / backend-api / full-stack / config-docs）
 - `变更文件（Changed）:` 文件清单
 - `验证（Verify）:` 实际运行的命令 + 期望结果
 - `证据（Evidence）:` 证据路径
+
+> 运行时行为约束：`packages/spec/docs/run-behavior-guidelines.md`

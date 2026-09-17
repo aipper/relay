@@ -9,6 +9,8 @@
   function handleConnect() {
     if (showCustomUrl && customUrl.trim()) {
       relay.setCustomBaseUrl(customUrl.trim());
+    } else {
+      relay.clearCustomBaseUrl();
     }
     relay.setCredentials(loginUsername, loginPassword);
     relay.connect();

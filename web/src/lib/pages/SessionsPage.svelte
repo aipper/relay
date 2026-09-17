@@ -1,6 +1,7 @@
 <script lang="ts">
   import { relay } from "../stores/relay-store.svelte";
   import SessionList from "../components/SessionList.svelte";
+  import TaskBoard from "../components/TaskBoard.svelte";
   import SessionDetail from "../components/SessionDetail.svelte";
   import TodoPanel from "../components/TodoPanel.svelte";
   import ToolsPanel from "../components/ToolsPanel.svelte";
@@ -8,9 +9,15 @@
 
   let showTools = $state(false);
   let showHostDiag = $state(false);
+  let showTaskBoard = $state(false);
 
   const isDetailOpen = $derived(Boolean(relay.selectedRunId));
   const mobileDetailOpen = $derived(Boolean(relay.isMobile && relay.selectedRunId));
+
+  const activeRunCount = $derived(relay.runs.filter((r) => r.status === "running").length);
+  const totalRunCount = $derived(relay.runs.length);
+  const onlineHostCount = $derived(relay.hosts.filter((h) => h.online).length);
+  const totalHostCount = $derived(relay.hosts.length);
 
   function handleSessionSelect(e: CustomEvent<string>) {
     relay.selectSession(e.detail);
@@ -24,6 +31,23 @@
     Promise.all([relay.refreshHosts(), relay.refreshRuns()]);
   }
 </script>
+
+<div class="stats-strip" role="status" aria-label="会话统计">
+  <span class="stat">
+    <span class="stat-num" data-kind="active">{activeRunCount}</span>
+    <span class="stat-label">活跃</span>
+  </span>
+  <span class="stat-sep" aria-hidden="true"></span>
+  <span class="stat">
+    <span class="stat-num">{totalRunCount}</span>
+    <span class="stat-label">总会话</span>
+  </span>
+  <span class="stat-sep" aria-hidden="true"></span>
+  <span class="stat">
+    <span class="stat-num" data-kind={onlineHostCount > 0 ? "online" : "offline"}>{onlineHostCount}</span>
+    <span class="stat-label">在线 / {totalHostCount} 主机</span>
+  </span>
+</div>
 
 <div class="tools-bar">
   <button class="icon-btn" class:active={showTools} onclick={() => showTools = !showTools}>
@@ -40,6 +64,29 @@
     </svg>
     主机诊断
   </button>
+  <button class="icon-btn" class:active={showTaskBoard} onclick={() => showTaskBoard = !showTaskBoard} title="切换看板/列表视图">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1"/>
+      <rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/>
+      <rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+    看板
+  </button>
+  <div class="search-box">
+    <svg class="search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7"/>
+      <line x1="21" y1="21" x2="16.5" y2="16.5"/>
+    </svg>
+    <input
+      class="search-input"
+      type="search"
+      placeholder="搜索会话（标题/项目/host）"
+      bind:value={relay.sessionSearch}
+      onkeydown={(e) => e.key === "Escape" ? (relay.sessionSearch = "") : null}
+      aria-label="搜索会话"
+    />
+  </div>
 </div>
 
 {#if showTools}
@@ -89,9 +136,22 @@
   class="sessions-layout"
   class:mobile-detail-open={mobileDetailOpen}
   class:detail-open={isDetailOpen}
+  class:sidebar-right={relay.sidebarSide === "right"}
 >
   <div class="sessions-sidebar" class:hidden={mobileDetailOpen}>
-    <SessionList
+    {#if showTaskBoard}
+      <TaskBoard
+        selectedRunId={relay.selectedRunId}
+        runGroups={relay.runGroups}
+        {token}
+        apiBaseUrl={relay.apiBaseUrl}
+        formatRelativeTime={relay.formatRelativeTime}
+        statusLabel={relay.statusLabel}
+        sessionTitle={relay.sessionTitle}
+        onSelectSession={(id) => relay.selectSession(id)}
+      />
+    {:else}
+      <SessionList
       token={relay.token}
       selectedRunId={relay.selectedRunId}
       sessionSearch={relay.sessionSearch}
@@ -105,6 +165,7 @@
       onRefresh={refreshAll}
       onSessionSelect={handleSessionSelect}
     />
+    {/if}
   </div>
 
   <div class="sessions-main" class:hidden={!isDetailOpen && relay.isMobile}>
@@ -178,6 +239,12 @@
         onSearchKeydown={(e: KeyboardEvent) => relay.handleOutputSearchKeydown(e)}
         onResumeFromStoredToken={() => relay.resumeFromStoredToken()}
         onRefreshSelectedSession={() => relay.refreshSelectedSession()}
+        onContinueSession={(run) => {
+          relay.startHostId = run.host_id;
+          relay.startTool = run.tool;
+          relay.startOpencodeSessionId = run.opencode_session_id || "";
+          relay.navigate("start");
+        }}
       />
       <TodoPanel
         todos={relay.todos}
@@ -203,12 +270,90 @@
 </div>
 
 <style>
+  .stats-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  .stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+  }
+
+  .stat-num {
+    font-family: "Hanken Grotesk", sans-serif;
+    font-weight: 800;
+    font-size: 15px;
+    color: var(--text-strong);
+    line-height: 1;
+  }
+
+  .stat-num[data-kind="active"] { color: var(--accent); }
+  .stat-num[data-kind="online"] { color: var(--success); }
+  .stat-num[data-kind="offline"] { color: var(--muted); }
+
+  .stat-label {
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .stat-sep {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+    flex: 0 0 auto;
+  }
+
   .tools-bar {
     display: flex;
     gap: 8px;
     padding: 8px 0;
     flex-wrap: wrap;
+    align-items: center;
   }
+
+  .search-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 200px;
+    min-width: 160px;
+    padding: 0 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+  }
+
+  .search-box:focus-within {
+    border-color: var(--accent);
+  }
+
+  .search-icon {
+    color: var(--muted);
+    flex: 0 0 auto;
+  }
+
+  .search-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 0;
+    outline: none;
+  }
+
+  .search-input::placeholder { color: var(--muted); }
+  .search-input::-webkit-search-cancel-button { display: none; }
 
   .icon-btn {
     display: inline-flex;
@@ -241,6 +386,15 @@
   @media (min-width: 768px) {
     .sessions-layout.detail-open {
       grid-template-columns: clamp(280px, 34vw, 340px) 1fr;
+    }
+    .sessions-layout.detail-open.sidebar-right {
+      grid-template-columns: 1fr clamp(280px, 34vw, 340px);
+    }
+    .sessions-layout.detail-open.sidebar-right .sessions-sidebar {
+      order: 2;
+    }
+    .sessions-layout.detail-open.sidebar-right .sessions-main {
+      order: 1;
     }
   }
 

@@ -3,8 +3,6 @@ name: ws-dev-lite
 description: 使用时机：单文件/小范围快速修复时。触发词：轻量修复、小改动、单点修复、简单配置。注意：复杂度升高请退回 ws-dev。
 ---
 
-用中文输出（命令/路径/代码标识符保持原样不翻译）。
-
 目标：在不引入完整重流程的前提下，完成一次 simple/local 小问题修复，并保持可验证、可追溯。
 
 定位：
@@ -24,6 +22,7 @@ description: 使用时机：单文件/小范围快速修复时。触发词：轻
 - 无法明确归因、verify、change 上下文
 - 需要新建复杂 change/worktree 或处理 submodule 目标分支真值
 - 修复过程中出现连锁改动、需要补系统性测试或需求调整
+- **Change Type Check**：根据 diff 路径判定，若为 `frontend-logic` 或 `full-stack` 类型 → 立即升级到 `$ws-dev`（lite 不支持 Playwright E2E 门禁）
 
 默认约束：
 - 先做 `$ws-preflight`
@@ -52,6 +51,10 @@ description: 使用时机：单文件/小范围快速修复时。触发词：轻
 5) 运行最小可复现验证：
    - 优先使用 `AI_WORKSPACE.md` 已声明的命令
    - 若只需局部回归，允许运行更窄的验证，但要说明为什么足够
+5.5) Requirement Impact Check（硬阻断）：
+   - 检查本次修复是否改变了：公开接口行为、API 响应字段、错误信息格式、或 `REQUIREMENTS.md` 中文档化的业务规则
+   - 如果是 → **这不是 lite 修复**，立即升级到 `$ws-dev`，并输出 `ESCALATED: 需要补 $ws-req-change`
+   - 如果不是 → 输出 `REQ_SYNC: NOT_NEEDED`，继续
 6) 留下至少一个可追溯证据：
    - 实际改动文件
    - 或 `.aiws/tmp/...`
@@ -72,3 +75,5 @@ Workflow State Suffix（会话门禁约定）：
 - `gate` 后缀保留给 `ws-dev` / `ws-plan-verify` 的完整计划门禁；不要在本 skill 中使用 `gate` 后缀。
 - 若需要与 `ws-dev` 共享状态：先通过 `$ws-dev` 建立 `gate` 后缀记录，再回到 lite 修复。
 - 详细参见 `ws-dev` 的 Workflow State Suffix 约定。
+
+> 运行时行为约束：`packages/spec/docs/run-behavior-guidelines.md`

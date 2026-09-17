@@ -28,6 +28,7 @@ OpenCode + oMo 优先策略：
 - `证据（Evidence）:` `.aiws/changes/<change-id>/review/spec-review.md` 或回退 `.aiws/tmp/review/spec-review.md`
 - `阻断项（Blockers）:` requirements 归因 / gate / evidence 缺口
 - `下一步（Next）:` 修复项与最小验证命令
+- 证据分级规则：BLOCKER/HIGH 发现需要展开证据（代码引用/日志/上下文）；PASS/LOW 发现一行结论即可
 
 阻断条件：
 - 无法定位项目根或真值文件
@@ -40,19 +41,23 @@ OpenCode + oMo 优先策略：
 步骤（建议）：
 1) 先运行 `$ws-preflight`。
    - 若检测到 oMo：优先让 `@oracle` 做 spec review 草稿；需要补规范上下文时再调用 `@librarian`。
-2) 对照 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md` 检查：
+2) **Change Scope Assessment**：在深入审查前，先获取变更上下文。
+   - 执行 `git diff --stat HEAD` 查看变更文件及行数
+   - 执行 `git log --oneline -3` 查看最近提交
+   - 使用此上下文将审查聚焦在变更区域，各 reviewer agent 无需独立发现变更范围
+3) 对照 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md` 检查：
    - 当前改动能否归因到 `Req_ID` / `Problem_ID`
    - `plan/...`、`proposal.md`、`tasks.md`、`evidence/` 是否与改动保持一致
    - 是否存在越界目录改动、危险操作、未声明的非目标扩张
    - 是否已经准备好可复现验证入口
-3) 把结论落盘到：
+4) 把结论落盘到：
    - 默认：`.aiws/changes/<change-id>/review/spec-review.md`
    - 回退：`.aiws/tmp/review/spec-review.md`
-4) 输出：
-   - `证据（Evidence）:`
-   - `阻断项（Blockers）:`
+5) 输出：
+   - `证据（Evidence）:` — 按严重级别处理：**BLOCKER/HIGH** 附完整证据链（归因/路径引用）；**WARNING** 仅给 1 行结论；**通过项** 不输出或仅 "✓ 通过"
+   - `阻断项（Blockers）:` requirements 归因 / gate / evidence 缺口
    - `警告（Warnings）:`
-   - `下一步（Next）:`
+   - `下一步（Next）:` 修复项与最小验证命令
 
 重点：
 - 这是 spec / gate review，不是代码质量 review。
@@ -62,3 +67,5 @@ OpenCode + oMo 优先策略：
 - 不打印 secrets。
 - 不执行破坏性命令。
 - 若 oMo agent 不可用，回退为当前 agent 本地 spec review。
+
+> 运行时行为约束：`packages/spec/docs/run-behavior-guidelines.md`

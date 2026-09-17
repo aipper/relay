@@ -70,6 +70,133 @@ function parseSections(entry) {
   }).filter(Boolean)
 }
 
+
+// ============================================================
+// Context injection limits (trellis #441 / TOOLING-003A)
+// Defaults mirror trellis: 32KiB / 64KiB / 128KiB; 0 = unlimited
+// Env: AIWS_CONTEXT_MAX_FILE_BYTES | AIWS_CONTEXT_MAX_ARTIFACT_BYTES | AIWS_CONTEXT_MAX_TOTAL_BYTES
+// ============================================================
+
+export const DEFAULT_CONTEXT_INJECTION_LIMITS = Object.freeze({
+  max_file_bytes: 32768,
+  max_artifact_bytes: 65536,
+  max_total_bytes: 131072,
+})
+
+/**
+ * Parse a non-negative integer env override; invalid/missing → default.
+ * Note: empty string is invalid → default (use "0" for unlimited).
+ */
+function parseLimitEnv(name, defaultValue) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === null || raw === "") return defaultValue
+  const n = Number.parseInt(String(raw), 10)
+  if (!Number.isFinite(n) || n < 0) return defaultValue
+  return n
+}
+
+/** Resolve context injection byte limits from env (or defaults). */
+export function getContextInjectionLimits() {
+  return {
+    max_file_bytes: parseLimitEnv("AIWS_CONTEXT_MAX_FILE_BYTES", DEFAULT_CONTEXT_INJECTION_LIMITS.max_file_bytes),
+    max_artifact_bytes: parseLimitEnv("AIWS_CONTEXT_MAX_ARTIFACT_BYTES", DEFAULT_CONTEXT_INJECTION_LIMITS.max_artifact_bytes),
+    max_total_bytes: parseLimitEnv("AIWS_CONTEXT_MAX_TOTAL_BYTES", DEFAULT_CONTEXT_INJECTION_LIMITS.max_total_bytes),
+  }
+}
+
+/**
+ * Truncate raw bytes to at most `cap` without splitting a UTF-8 multi-byte sequence.
+ * `cap <= 0` means unlimited — returns data unchanged.
+ * @param {Buffer} data
+ * @param {number} cap
+ * @returns {Buffer}
+ */
+export function truncateUtf8(data, cap) {
+  if (!Buffer.isBuffer(data)) {
+    data = Buffer.from(data ?? "", "utf8")
+  }
+  if (cap <= 0 || data.length <= cap) return data
+
+  let truncated = data.subarray(0, cap)
+  let i = truncated.length
+  // Back off over continuation bytes (10xxxxxx)
+  while (i > 0 && (truncated[i - 1] & 0xc0) === 0x80) {
+    i -= 1
+  }
+  if (i === 0) return Buffer.alloc(0)
+
+  const lead = truncated[i - 1]
+  if (lead & 0x80) {
+    let seqLen = 1
+    if ((lead & 0xe0) === 0xc0) seqLen = 2
+    else if ((lead & 0xf0) === 0xe0) seqLen = 3
+    else if ((lead & 0xf8) === 0xf0) seqLen = 4
+    // Drop the lead byte too if its full sequence didn't fit
+    if (i - 1 + seqLen > truncated.length) {
+      i -= 1
+    }
+  }
+  return truncated.subarray(0, i)
+}
+
+function truncateNotice(path, cap) {
+  return `\n[AIWS: truncated at ${cap} bytes — read ${path} for the full content]`
+}
+
+function indexNotice(path, size, reason) {
+  return (
+    `[AIWS: not inlined (total context limit reached) — ` +
+    `${path} (${size} bytes): ${reason || "budget"}]`
+  )
+}
+
+class ContextBudget {
+  constructor(maxTotalBytes) {
+    this.maxTotalBytes = maxTotalBytes
+    this.used = 0
+  }
+  hasRoom(size) {
+    if (this.maxTotalBytes <= 0) return true
+    return this.used + size <= this.maxTotalBytes
+  }
+  add(size) {
+    this.used += size
+  }
+}
+
+// ============================================================
+// Workflow skip keyword (trellis #427 / TOOLING-003A)
+// Default: no-aiws; env AIWS_WORKFLOW_SKIP_KEYWORD ("" disables)
+// ============================================================
+
+export const DEFAULT_WORKFLOW_SKIP_KEYWORD = "no-aiws"
+
+/**
+ * Resolve per-turn workflow-state skip keyword.
+ * - unset → "no-aiws"
+ * - "" → disabled (never matches)
+ * - any other string → custom keyword
+ */
+export function resolveWorkflowSkipKeyword() {
+  if (!Object.prototype.hasOwnProperty.call(process.env, "AIWS_WORKFLOW_SKIP_KEYWORD")) {
+    return DEFAULT_WORKFLOW_SKIP_KEYWORD
+  }
+  return String(process.env.AIWS_WORKFLOW_SKIP_KEYWORD)
+}
+
+/**
+ * Case-insensitive, word-boundary match of `keyword` in `text`.
+ * Hyphen counts as a word char so "no-aiwsx" / "foo-no-aiws" don't match.
+ * Empty keyword never matches.
+ */
+export function promptHasSkipKeyword(text, keyword) {
+  if (!keyword || typeof text !== "string") return false
+  const escaped = String(keyword).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const pattern = new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, "i")
+  return pattern.test(text)
+}
+
+
 // ============================================================
 // AiwsContext
 // ============================================================
@@ -145,11 +272,28 @@ export class AiwsContext {
    * Returns array of { path, content, priority, kind, reason }
    * Sorted by priority: high → medium → low
    */
-  readJsonlWithFiles(jsonlPath) {
+  /**
+   * Read a JSONL file and load referenced file contents with byte caps (#441).
+   *
+   * Supports aiws 5-field format:
+   *   {"file"|"glob": "...", "sections": [[25,50]], "priority": "high", "kind": "truth", "reason": "why"}
+   *
+   * Pipeline per entry (after priority sort of *candidates*):
+   *   1. read file bytes
+   *   2. optional section filter (line-based on UTF-8 text)
+   *   3. per-file truncateUtf8 (max_file_bytes; 0 = unlimited)
+   *   4. total budget: if full block won't fit → mode "index" notice only
+   *
+   * Returns array of:
+   *   { path, content, priority, kind, reason, mode: "inline"|"truncated"|"index", byteSize?, originalByteSize? }
+   * Sorted by priority: high → medium → low (stable relative to JSONL order within tier).
+   */
+  readJsonlWithFiles(jsonlPath, limits = null) {
     const content = this.readFile(jsonlPath)
     if (!content) return []
 
-    const entries = []
+    const lim = limits || getContextInjectionLimits()
+    const candidates = []
 
     for (const rawLine of content.split(/\r?\n/)) {
       const line = rawLine.trim()
@@ -157,7 +301,6 @@ export class AiwsContext {
       try {
         const item = JSON.parse(line)
 
-        // Resolve glob to actual file
         const globPattern = item.glob || item.file
         if (!globPattern) continue
 
@@ -166,32 +309,98 @@ export class AiwsContext {
         const reason = item.reason || ""
         const sections = parseSections(item)
 
-        // Read the file
         const fullPath = resolvePath(this.directory, globPattern)
-        let fileContent = this.readFile(fullPath)
-        if (!fileContent) continue
+        let rawBytes
+        try {
+          if (!existsSync(fullPath)) continue
+          rawBytes = readFileSync(fullPath)
+        } catch {
+          continue
+        }
+        if (!rawBytes || rawBytes.length === 0) {
+          // empty file still allowed as empty content
+          rawBytes = Buffer.alloc(0)
+        }
 
-        // Apply section filtering if specified
+        let text = rawBytes.toString("utf8")
+        const originalByteSize = Buffer.byteLength(text, "utf8")
+
+        // Apply section filtering if specified (before byte caps)
         if (sections) {
-          const lines = fileContent.split("\n")
+          const lines = text.split("\n")
           const filtered = []
           for (const [start, end] of sections) {
             const from = Math.max(0, start - 1)
             const to = Math.min(lines.length, end)
             filtered.push(...lines.slice(from, to))
           }
-          fileContent = filtered.join("\n")
+          text = filtered.join("\n")
         }
 
-        entries.push({ path: globPattern, content: fileContent, priority, kind, reason })
+        candidates.push({
+          path: globPattern,
+          text,
+          priority,
+          kind,
+          reason,
+          originalByteSize,
+        })
       } catch {
         // Skip malformed lines
       }
     }
 
-    // Sort: high → medium → low
+    // Sort: high → medium → low (preserve relative order within tier via stable sort)
     const order = { high: 0, medium: 1, low: 2 }
-    entries.sort((a, b) => (order[a.priority] ?? 2) - (order[b.priority] ?? 2))
+    candidates.sort((a, b) => (order[a.priority] ?? 2) - (order[b.priority] ?? 2))
+
+    const budget = new ContextBudget(lim.max_total_bytes)
+    const entries = []
+
+    for (const c of candidates) {
+      const sectionBytes = Buffer.from(c.text, "utf8")
+      const fileCap = lim.max_file_bytes
+      const truncatedBytes = truncateUtf8(sectionBytes, fileCap)
+      let body = truncatedBytes.toString("utf8")
+      let mode = "inline"
+      if (truncatedBytes.length < sectionBytes.length) {
+        mode = "truncated"
+        body += truncateNotice(c.path, fileCap)
+      }
+
+      // Budget the emitted block the same shape as buildContextFromEntries header+content
+      const header = `=== ${c.path} ===${c.reason ? ` (${c.reason})` : ""}`
+      const block = `${header}\n${body}`
+      const blockBytes = Buffer.byteLength(block, "utf8")
+
+      if (!budget.hasRoom(blockBytes)) {
+        const notice = indexNotice(c.path, c.originalByteSize, c.reason)
+        budget.add(Buffer.byteLength(notice, "utf8"))
+        entries.push({
+          path: c.path,
+          content: notice,
+          priority: c.priority,
+          kind: c.kind,
+          reason: c.reason,
+          mode: "index",
+          byteSize: Buffer.byteLength(notice, "utf8"),
+          originalByteSize: c.originalByteSize,
+        })
+        continue
+      }
+
+      budget.add(blockBytes)
+      entries.push({
+        path: c.path,
+        content: body,
+        priority: c.priority,
+        kind: c.kind,
+        reason: c.reason,
+        mode,
+        byteSize: Buffer.byteLength(body, "utf8"),
+        originalByteSize: c.originalByteSize,
+      })
+    }
 
     return entries
   }
@@ -206,7 +415,10 @@ export class AiwsContext {
     if (!entries || entries.length === 0) return ""
     return entries
       .map(e => {
-        const header = `=== ${e.path} ===${e.reason ? ` (${e.reason})` : ""}`
+        // index mode content is already a self-describing notice (no === header)
+        if (e.mode === "index") return e.content
+        const modeTag = e.mode && e.mode !== "inline" ? ` [mode=${e.mode}]` : ""
+        const header = `=== ${e.path} ===${e.reason ? ` (${e.reason})` : ""}${modeTag}`
         return `${header}\n${e.content}`
       })
       .join("\n\n")
@@ -384,6 +596,209 @@ export class AiwsContext {
       `Patches: ${detail.patchesCount}\n` +
       `Handoff: ${detail.hasHandoff ? "yes" : "no"}`
     )
+  }
+
+  // -- Goal FSM (TOOLING-003D L1 inject) -------------------------------
+
+  /**
+   * Scan `.aiws/goals/*.state.json` for active/paused goals.
+   * Preference: status=active first, then paused.
+   * Within a status tier, most recently updated wins (updated_at ISO or file mtime).
+   *
+   * Returns array of goal summary objects (may be empty). Never throws.
+   * Each entry:
+   *   { goal_id, status, current_phase, checkpoint_summary, md_path, state_path,
+   *     next_action, updated_at, mtime_ms, others_note? }
+   */
+  getActiveGoals() {
+    const goalsDir = join(this.directory, ".aiws", "goals")
+    if (!existsSync(goalsDir)) return []
+
+    let files
+    try {
+      files = readdirSync(goalsDir).filter(f => f.endsWith(".state.json"))
+    } catch {
+      return []
+    }
+
+    const active = []
+    const paused = []
+
+    for (const file of files) {
+      const statePath = join(goalsDir, file)
+      let raw
+      try {
+        raw = readFileSync(statePath, "utf-8")
+      } catch {
+        continue
+      }
+
+      let state
+      try {
+        state = JSON.parse(raw)
+      } catch {
+        // malformed JSON — skip without crashing
+        continue
+      }
+      if (!state || typeof state !== "object") continue
+
+      const status = str(state.status)
+      if (status !== "active" && status !== "paused") continue
+
+      const goalId =
+        str(state.goal_id) ||
+        str(state.goalId) ||
+        file.replace(/\.state\.json$/, "")
+
+      let mtimeMs = 0
+      try {
+        mtimeMs = statSync(statePath).mtimeMs
+      } catch {
+        mtimeMs = 0
+      }
+
+      const updatedAt = str(state.updated_at) || str(state.updatedAt) || null
+      let sortKey = mtimeMs
+      if (updatedAt) {
+        const t = Date.parse(updatedAt)
+        if (!Number.isNaN(t)) sortKey = t
+      }
+
+      const currentPhase =
+        state.current_phase == null
+          ? null
+          : (str(state.current_phase) || String(state.current_phase))
+
+      const checkpointSummary = this._summarizeGoalCheckpoints(state.checkpoints)
+      const mdPath = join(".aiws", "goals", `${goalId}.md`)
+      const nextAction = this._suggestGoalNextAction({
+        goal_id: goalId,
+        status,
+        current_phase: currentPhase,
+        checkpoints: state.checkpoints,
+      })
+
+      const entry = {
+        goal_id: goalId,
+        status,
+        current_phase: currentPhase,
+        checkpoint_summary: checkpointSummary,
+        md_path: mdPath,
+        state_path: join(".aiws", "goals", file),
+        next_action: nextAction,
+        updated_at: updatedAt,
+        mtime_ms: mtimeMs,
+        _sort: sortKey,
+      }
+
+      if (status === "active") active.push(entry)
+      else paused.push(entry)
+    }
+
+    const byRecency = (a, b) => b._sort - a._sort
+    active.sort(byRecency)
+    paused.sort(byRecency)
+
+    const ordered = [...active, ...paused]
+    return ordered.map(({ _sort, ...rest }) => rest)
+  }
+
+  /**
+   * Primary goal for session inject: first of getActiveGoals() (active preferred).
+   * When multiple actives exist, the most recently updated is primary; callers can
+   * list others via getActiveGoals().
+   */
+  getActiveGoal() {
+    const goals = this.getActiveGoals()
+    return goals.length > 0 ? goals[0] : null
+  }
+
+  _summarizeGoalCheckpoints(checkpoints) {
+    if (!checkpoints || typeof checkpoints !== "object") return "(no checkpoints)"
+    const pending = []
+    const complete = []
+    for (const [name, cp] of Object.entries(checkpoints)) {
+      const st =
+        cp && typeof cp === "object"
+          ? str(cp.status) || "unknown"
+          : "unknown"
+      if (st === "complete" || st === "done") complete.push(name)
+      else pending.push(`${name}:${st}`)
+    }
+    const parts = []
+    if (pending.length) parts.push(`pending=[${pending.join(", ")}]`)
+    if (complete.length) parts.push(`complete=${complete.length}`)
+    return parts.join(" ") || "(empty checkpoints)"
+  }
+
+  /**
+   * Suggest next_action text for L1 inject (READ-ONLY; no skill execution).
+   * Frozen Q3=A: plugins only inject text; model/user runs /ws-goal.
+   */
+  _suggestGoalNextAction({ goal_id, status, current_phase, checkpoints }) {
+    const id = goal_id || "?"
+    if (status === "paused") {
+      return `/ws-goal resume ${id}`
+    }
+    // active
+    if (!current_phase || current_phase === "null") {
+      return `/ws-goal continue ${id} (establish current_phase via advance if needed)`
+    }
+    // Find first incomplete checkpoint name if useful
+    let nextCp = null
+    if (checkpoints && typeof checkpoints === "object") {
+      for (const [name, cp] of Object.entries(checkpoints)) {
+        const st =
+          cp && typeof cp === "object" ? str(cp.status) : null
+        if (st && st !== "complete" && st !== "done") {
+          nextCp = name
+          break
+        }
+      }
+    }
+    if (nextCp && nextCp !== current_phase) {
+      return `/ws-goal continue ${id} — phase=${current_phase}, next checkpoint=${nextCp}`
+    }
+    return `/ws-goal continue ${id} — phase=${current_phase}`
+  }
+
+  /**
+   * Compact <goal-context> block for session-start inject.
+   * Empty string when no active/paused goal.
+   */
+  buildGoalContextBlock() {
+    const goals = this.getActiveGoals()
+    if (!goals.length) return ""
+
+    const primary = goals[0]
+    const others = goals.slice(1)
+    const lines = [
+      "<goal-context>",
+      "## Active / Paused Goal (FSM L1 inject — advisory routing only)",
+      `goal_id: ${primary.goal_id}`,
+      `status: ${primary.status}`,
+      `current_phase: ${primary.current_phase ?? "null"}`,
+      `checkpoints: ${primary.checkpoint_summary}`,
+      `goal_md: ${primary.md_path}`,
+      `state: ${primary.state_path}`,
+      `next_action: ${primary.next_action}`,
+    ]
+    if (others.length) {
+      const brief = others
+        .map(g => `${g.goal_id}(${g.status}, phase=${g.current_phase ?? "null"})`)
+        .join("; ")
+      lines.push(`other_goals: ${brief}`)
+      lines.push(
+        "note: multiple active/paused — primary is most recently updated; " +
+          "resolve conflict before parallel goal work"
+      )
+    }
+    lines.push(
+      "authority: phase writes via `aiws goal advance` only; " +
+        "this block does not execute skills (L1 text inject)."
+    )
+    lines.push("</goal-context>")
+    return lines.join("\n")
   }
 
   // -- Spec index ------------------------------------------------
@@ -823,6 +1238,14 @@ export function buildSessionContext(ctx, platformInput = null) {
 You are starting a new session in an aiws-managed project.
 Read and follow the context below.
 </aiws-context>`)
+
+  // TOOLING-003D L1: active/paused goal FSM inject (READ-ONLY text)
+  try {
+    const goalBlock = ctx.buildGoalContextBlock()
+    if (goalBlock) parts.push(goalBlock)
+  } catch {
+    // Non-blocking: goal inject must never crash session-start
+  }
 
   const specIndex = ctx.getSpecIndex()
   if (specIndex) {

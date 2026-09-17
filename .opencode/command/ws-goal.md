@@ -23,17 +23,55 @@ ws-goal 只做三件事，不做更多：
 
 1) 先运行 `/ws-preflight`（对齐 `AI_PROJECT.md` / `REQUIREMENTS.md` / `AI_WORKSPACE.md`）。
 
+
+## Phase Boundary Authority (TOOLING-003D / contract §10)
+
+**Sole writer**: `aiws goal advance` is the **only** allowed writer for phase-boundary fields in `.aiws/goals/<goal-id>.state.json` (`status`, `current_phase`, checkpoint transitions).
+
+**MUST after each phase verifies complete**:
+```bash
+aiws goal advance --goal-id <goal-id> [--json]
+aiws goal advance --goal-id <goal-id> --phase <next>   # explicit (prereqs required)
+aiws goal advance --goal-id <goal-id> --heal           # dirty / §7.6 migrate missing state
+aiws goal advance --goal-id <goal-id> --dry-run
+```
+
+**FORBIDDEN**: hand-edit `state.json` to mark complete / start next phase. Dirty → `validate-state --heal` or `advance --heal`, then continue with advance.
+
+**Continuation (WP4)**: After each successful advance, refresh Ralph mirror (primary) and optional Boulder todos (secondary). Ralph/Boulder never write state.json. DONE only when FSM complete + audit. See `opencode-omo-adapter.md` Goal FSM 与续跑边界.
+
+**Allowed**: create initial pending state when defining a goal; read state; write Progress Notes in `.md` (not FSM fields).
+
+
 ## 执行流程
 
-0) 检查 `.aiws/goals/` 目录：
+0) 检查 `.aiws/goals/` 目录（先扫描 `.state.json`，再扫描 `.md`）：
    a) 若用户仅查询状态（无明确目标），列出所有 goal 文件及其 status 字段，然后结束。
-   b) 若存在 status=active 或 status=paused 的 goal 文件，优先读取并恢复执行，不再新建 goal。
+   b) 扫描 `.aiws/goals/*.state.json`：
+      - 若发现 status=active 或 status=paused 的 state.json，输出恢复选项（从失败的 phase 继续 / 跳过 / handoff）
+      - 用户选择后设置 current_phase 到对应 phase 并继续执行
+   c) 若未找到 state.json 但有 status=active 或 status=paused 的 .md 文件（旧格式迁移），按 §7.6 自动生成 state.json 后全量重跑
+   d) 若发现 status=complete 的 state.json 但 checkpoints 中仍有未完成项（status != complete）：
+      - 读取对应 `.aiws/goals/<goal-id>.md` 文件，输出 goal 摘要
+      - 列出所有未完成的 checkpoints（status=in_progress/pending/failed 的项）
+      - 输出续跑选项：
+        - （a）跳过 PHASE 0，从依赖链预检（step 4）恢复执行
+            自动跳过 step 1-3（真值读取/目标输入/文件生成），使用已有 goal 文件
+        - （b）查看 goal 详情
+        - （c）忽略，按新目标处理
+      - 若用户选择 a）：
+        - 设置 state.json：status=active，current_phase 到最近一个未完成 checkpoint 对应 phase
+        - 输出"跳过 PHASE 0，从 step 4 依赖链预检恢复"
+        - 直接进入 step 4 继续执行
+      - 若用户选择 b）：输出完整 goal 详情后回到选项
+      - 若用户选择 c）：作为新目标正常走 step 0→1→2 完整流程
 
 1) 读取真值文件（`AI_PROJECT.md`、`REQUIREMENTS.md`、`AI_WORKSPACE.md`），确认项目规则与边界。
 
 2) 接受用户输入的 goal objective，明确目标范围与验收标准。
 
 3) 按 ws-goal-contract.md 的目标模板生成目标文件，写入 `.aiws/goals/<goal-id>.md`。
+   并同时创建 `.aiws/goals/<goal-id>.state.json`（§7.2 格式），初始状态 `status=active`、`current_phase=intake`、所有 checkpoints pending。
    a) 生成时填入 `Target Base Branch` 字段：
       - `target_base_branch`：从当前分支追踪或用户声明确定。默认 `main`
       - `base_branch_mismatch_action`：默认 `block`
@@ -76,45 +114,19 @@ ws-goal 只做三件事，不做更多：
        - 若用户未放行：设置 goal status=paused 并结束
 
 4.5) **Workspace State Analysis**：依赖链预检通过后、delegation 前，分析工作区状态并输出报告。
-     必须用户确认后才能进入 step 5。
-     a) 检查 dirty 状态：
-        - staged changes（`git diff --cached --stat`）
-        - unstaged changes（`git diff --stat`）
-        - untracked files（`git status --porcelain` 中 `??` 开头项）
-     b) 检查 submodule 状态：
-        - 每个 submodule 的 dirty 状态（`git submodule status`）
-        - detached HEAD（`git -C <path> symbolic-ref HEAD` 失败）
-        - unpushed 提交（`git -C <path> log @{u}..HEAD --oneline`）
-     c) 检查 change artifacts：
-        - 存在哪些 change 分支（`git branch --list 'change/*'`）
-        - 是否有未完成的 change（proposal/tasks 仍含 WS:TODO）
-        - 是否与当前 goal 冲突（同名、同域）
-     d) 检查 git 状态：
-        - 是否有 unpushed 提交（`git log @{u}..HEAD --oneline`）
-        - 是否有 stash（`git stash list`）
-     e) 评估影响：逐项判断与当前 goal 的关联度：
-        - HIGH：阻碍 goal 执行，必须处理
-        - MED：可能干扰或产生误报
-        - LOW：无影响，仅提示
-        - NONE：完全无关，忽略
-     f) 输出结构化分析报告：
-        用格式化的文本块输出，每行标注影响等级：
-        ```
-        ═══ 工作区状态报告 ═══
-        [HIGH] 子模块 web/ dirty（7 文件）— 与 goal 同一目录，可能干扰
-        [MED]  旧 change contract-ai-rag 残留 — 可能干扰依赖链判断
-        [LOW]  .aiws/journal/ 日志文件 — 无影响
-        ════════════════════════
-        ```
-     g) 展示报告后要求用户选择：
-        - **继续** → 进入 step 5
-        - **暂停** → goal status=paused，报告写入 Audit Trail，结束
-        - **先清理** → goal status=paused，输出清理建议步骤，结束
-     用户未确认前，不得进入 step 5。
+     策略 SSOT：`ws-goal-contract.md` §2.5.4 — **HIGH → 自动解决，默认不阻断**。
+     a) 检查 dirty / submodule / change artifacts / git 状态（同 skill 扫描项）
+     b) 评估影响等级 NONE/LOW/MED/HIGH
+     c) 输出结构化报告到 Audit Trail
+     d) 按 §2.5.4 自动处理 HIGH（stash / submodule update / 警告后继续等）；仅自动化失败时提示
+     e) 通过后：`aiws goal advance --goal-id <goal-id>`（完成 ws_analysis），进入 step 5
+     f) 可选：用户主动要求暂停 → status=paused（非 HIGH 默认门禁）
+     **禁止**再要求「用户确认 HIGH 后才能进 step 5」作为默认路径。
 
 5) **Phase-Level Pipeline Delegation**：依赖链预检 + workspace 分析通过后，将 goal 拆分为 PLAN→DEV→REVIEW→FINISH 四个 phase 顺序执行，每个 phase 委托给独立轻量子 agent，主 session 验证每个 phase 产出后决定继续/重试/暂停。
-    前置条件：step 4 必须通过（ALL HEALTHY 或 UNHEALTHY 已显式放行）。若 step 4 阻断，不允许 delegation。
-    前置条件 2：不存在 status=active 的 change 分支。若有，让用户选择「使用已有 change 继续」或「暂停」。
+     前置条件：step 4 必须通过（ALL HEALTHY 或 UNHEALTHY 已显式放行）。若 step 4 阻断，不允许 delegation。
+     前置条件 2：不存在 status=active 的 change 分支。若有，让用户选择「使用已有 change 继续」或「暂停」。
+     前置条件 3：每个 pipeline phase 验证通过后 **必须** `aiws goal advance --goal-id <goal-id>`（sole writer）；禁止手改 state.json。
 
 5a) **Check for Groups**：读取 goal 文件，检查是否定义了 `Groups` 区域。
     - 若 goal **不含** groups → 走单组 phase-level pipeline（step 5b-5g）
@@ -141,8 +153,8 @@ ws-goal 只做三件事，不做更多：
         - proposal.md 文件存在
         - plan 文件存在
         - plan-verify 通过
-    4. 验证通过 → 进入 PHASE 2
-    5. 验证失败 → 可重试最多 2 次 → 仍失败则 goal state=paused，记录 blocker
+    4. 验证通过 → `aiws goal advance --goal-id <goal-id>` → 进入 PHASE 2
+    5. 验证失败 → 可重试最多 2 次 → 仍失败则暂停并记录 blocker（勿手改 JSON）
 
 5d) **PHASE 2 - DEV**（委托子 agent 做 dev）：
     1. 委托子 agent 执行 DEV phase：
@@ -159,8 +171,8 @@ ws-goal 只做三件事，不做更多：
     2. 主 session 验证产出：
         - diagnostics 干净（`lsp_diagnostics` 检查改动文件）
         - 改动范围与 plan 一致
-    3. 验证通过 → 进入 PHASE 3
-    4. 验证失败 → goal state=paused，记录 blocker
+    3. 验证通过 → `aiws goal advance --goal-id <goal-id>` → 进入 PHASE 3
+    4. 验证失败 → 暂停并记录 blocker（勿手改 JSON）
 
 5e) **PHASE 3 - REVIEW**（委托子 agent 做 review）：
     1. 委托子 agent 执行 REVIEW phase：
@@ -178,8 +190,8 @@ ws-goal 只做三件事，不做更多：
     2. 主 session 验证产出：
         - review 证据文件存在
         - 无未解决的 HIGH blocker
-    3. 验证通过 → 进入 PHASE 4
-    4. 验证失败 → goal state=paused，记录 blocker
+    3. 验证通过 → `aiws goal advance --goal-id <goal-id>` → 进入 PHASE 4
+    4. 验证失败 → 暂停并记录 blocker（勿手改 JSON）
 
 5f) **PHASE 4 - FINISH**（委托子 agent 做 commit + finish）：
     1. 委托子 agent 执行 FINISH phase：
@@ -196,8 +208,8 @@ ws-goal 只做三件事，不做更多：
     2. 主 session 验证产出：
         - 确认 change 分支已合并到 target_base_branch
         - 确认已推送
-    3. 验证通过 → goal state=complete，输出 "Goal <goal-id> complete"
-    4. 验证失败 → goal state=paused，记录 blocker
+    3. 验证通过 → `aiws goal advance --goal-id <goal-id>`（至 complete）→ 输出 "Goal <goal-id> complete"
+    4. 验证失败 → 暂停并记录 blocker（勿手改 JSON）
 
 5g) **Simple Goal Escape Hatch**：若 goal 为简单改动（≤3 文件，配置/doc/规范变更，无架构风险）：
     - 可跳过 PHASE 3（REVIEW），在 PHASE 2 验证后直接进入 PHASE 4

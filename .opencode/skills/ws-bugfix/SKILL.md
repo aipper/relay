@@ -1,111 +1,64 @@
 ---
 name: ws-bugfix
-description: 使用时机：从禅道/外部系统拉取 bug 进行修复时。触发词：bug、缺陷、修复、禅道、zentao。注意：非禅道小修复请用 ws-dev-lite。
+description: 使用时机：从禅道/外部系统拉取 bug 进行修复时。触发词：bug、修复、禅道。注意：非禅道小修复请用 ws-dev-lite。
 ---
 
-用中文输出（命令/路径/代码标识符保持原样不翻译）。
+目标：用 FSM 驱动 bug 修复全流程——禅道拉取 → 诊断 → 修复 → review → finish。
+非目标：不自动 commit/push；不写入 secrets；不凭空改代码。
 
-目标：
-- 用禅道 MCP 拉取 bug 详情与附件（尤其图片）
-- 把证据落盘到 `.aiws/changes/<change-id>/bug/`（避免只停留在对话）
-- 把修复任务汇总/更新到 `issues/fix_bus_issues.csv`
-- 与 `ws-dev` / `aiws change` 流程绑定，确保可追溯、可验证
+前置：`$ws-preflight`
 
-非目标（强制）：
-- 不自动 commit / push
-- 不写入任何 secrets（token、cookie、内网地址）
-- 不在无法复现时直接改代码（先产出阻塞信息）
+## 数据真值约定（所有 Phase 必须遵守）
 
-前置：
-1) 先运行 `$ws-preflight`。
-2) 准备 `change-id`（建议：`bug-<bug-id>` 或 `bugfix-<bug-id>-<slug>`）。
-3) 建立 change 上下文（推荐先于任何落盘）：
-   - 若当前还不在 `change/<change-id>` 分支 / worktree，先调用 `aiws change start`
-   - 工作区必须先干净；否则不要先写 `.aiws/changes/<change-id>/bug/` 或 `issues/fix_bus_issues.csv`，避免后续切 worktree 时工件留在原工作区
-   - 仓库已有提交：优先 `--worktree`
-   - superproject + submodule：优先 `--worktree --submodules`
-   - 仓库尚无提交 / 不满足 worktree 前置条件：回退 `--no-switch`
-```bash
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "error: working tree dirty before ws-bugfix creates change context"
-  exit 2
-fi
+> **JSON 是 bug 详情唯一真值源**。所有 phase 的 agent 必须从 `bug/zentao-bug-<id>.json` 读取 bug 详情（steps/expect/actual/notes 等），**不得**依赖任何 Markdown 文件中的转述。
+>
+> Bugfix 目录下 `.md` 文件（如有）仅为人类可读的索引摘要，不具备数据权威性。Dev/Diagnose agent 被喂入 prompt 时，应优先 inline 注入 JSON 原文，而非 MD 的「分析」段。
 
-if git rev-parse --verify HEAD >/dev/null 2>&1; then
-  if [[ -f .gitmodules ]] && git config --file .gitmodules --get-regexp '^submodule\\..*\\.path$' >/dev/null 2>&1; then
-    aiws change start <change-id> --hooks --worktree --submodules
-  else
-    aiws change start <change-id> --hooks --worktree
-  fi
-else
-  aiws change start <change-id> --hooks --no-switch
-fi
-```
-   - 若上一步创建了 worktree：后续 bug 证据、CSV 更新、`$ws-dev` 修复都必须在该 worktree 中继续；不要回原工作区重复创建 change
-   - 若该 change 涉及 submodule：
-     - 优先复用 `$ws-dev` 的 `submodules.targets` 生成/确认流程
-     - detached HEAD 时默认建议取 `.gitmodules` 声明的分支
-     - 已附着在某个本地分支时默认建议取当前分支
-     - 以上都只是建议值，最终必须显式写入 `.aiws/changes/<change-id>/submodules.targets`
+## Bugfix FSM — 5 个 Phase
 
-建议流程（按顺序）：
+使用 `aiws bugfix start|status|advance` 驱动状态机。
 
-## 1) 通过禅道 MCP 拉取 bug
-- 使用当前会话中已启用的 zentao MCP 工具获取：
-  - `bug_id`、标题、优先级/严重级、模块、状态、指派人
-  - 重现步骤、期望结果、实际结果
-  - 附件列表（含图片 URL/文件名）
-- 若当前环境没有 zentao MCP 工具：立即停止并提示用户先配置，不要猜数据。
+### PHASE 0 — INTAKE（数据获取，无 AI 转译）
+`aiws bugfix start <bug-id>`
+- 创建 change + bugfix-state.json
+- 通过 Zentao MCP 拉取 bug 详情
+- **原始 JSON** 落盘到 `bug/zentao-bug-<id>.json`（完整字段，不允许裁剪）
+- 下载附件图片到 `bug/images/<id>/`
+- **不生成 intake Markdown**（不需要 "分析"段或 AI 重述）
+- 输出摘要信息到终端即可
+- `aiws bugfix advance <change-id>` → DIAGNOSE
 
-## 2) 证据落盘（强制）
-在当前 active change 上下文的 `.aiws/changes/<change-id>/bug/` 下落盘：
-- `zentao-bug-<bug-id>.json`：原始字段快照（避免信息丢失）
-- `zentao-bug-<bug-id>.md`：人类可读摘要（复现步骤/期望/实际/风险）
-- `images/<bug-id>/...`：下载的图片附件（保留原扩展名）
+### PHASE 1 — DIAGNOSE
+- **Bug 详情源**：`bug/zentao-bug-<id>.json`（直接读取，不参考任何 MD）
+- 运行 `diagnosing-bugs`（反馈循环 → 复现 → 假设 → 打点）
+- 确认 root cause 后 `aiws bugfix advance` → FIX
 
-建议目录：
-```text
-.aiws/changes/<change-id>/bug/
-  zentao-bug-<bug-id>.json
-  zentao-bug-<bug-id>.md
-  images/<bug-id>/
-```
+### PHASE 2 — FIX
+- **Bug 详情源**：`bug/zentao-bug-<id>.json`（直接读取）
+- 进入 `$ws-dev` 做最小改动
+- LSP clean + 测试通过
 
-## 3) 汇总到 issues/fix_bus_issues.csv（upsert）
-- 目标文件：当前 active change 上下文中的 `issues/fix_bus_issues.csv`
-- 若文件不存在，先创建表头：
-```csv
-Bug_ID,Title,Severity,Module,Status,Assigned_To,Change_ID,Image_Count,Image_Paths,Evidence_Path,Verify_Command,Fix_Status,Updated_At,Notes
-```
-- 以 `Bug_ID` 为主键 upsert：
-  - 已存在：更新状态/证据/图片路径
-  - 不存在：新增一行
+### PHASE 2.5 — REQ SYNC GATE（硬阻断）
 
-字段约束：
-- `Change_ID`：必须等于当前 `change-id`
-- `Evidence_Path`：指向 `.aiws/changes/<change-id>/bug/zentao-bug-<bug-id>.md`
-- `Image_Paths`：多个路径用 `;` 分隔
-- `Fix_Status`：`TODO|DOING|DONE|BLOCKED`
+在 FIX 完成后、进入 REVIEW 前，**必须**执行需求同步检查：
 
-## 4) 修复执行与回填
-- 进入 `$ws-dev` 做最小改动修复；若 `ws-bugfix` 创建了 worktree，则必须在该 worktree 中继续。
-- 完成后回填 `issues/fix_bus_issues.csv`：
-  - `Fix_Status`
-  - `Verify_Command`
-  - `Updated_At`
-  - `Notes`（必要时写阻塞原因）
+1. 对比本次修复涉及的 API 行为、接口字段、错误信息是否与 `REQUIREMENTS.md` 当前描述一致
+2. 若存在偏差（例如：bug 暴露了需求描述不准确、修复改变了接口行为、新增了字段/状态码等）：
+   - 运行 `$ws-req-change` 更新 `REQUIREMENTS.md`
+   - 或记录到 `requirements/CHANGELOG.md`
+3. 输出 `REQ_SYNC:` 状态：
+   - `SYNCED` — 已同步（REQUIREMENTS.md 已更新）
+   - `NOT_NEEDED` — 本次修复不影响需求描述
+   - `BLOCKED` — 应更新但未更新，阻断进入 REVIEW
+4. 只有 `REQ_SYNC` 为 `SYNCED` 或 `NOT_NEEDED` 时，才能 `aiws bugfix advance` → REVIEW
 
-## 5) 验证与交付
-```bash
-aiws change validate <change-id> --strict
-aiws validate . --stamp
-```
-- 需要提交时走 `$ws-commit`。
-- 需要收尾合并时走 `$ws-finish`（或在 superproject + submodule 场景走 `$ws-deliver`）。
+### PHASE 3 — REVIEW
+- `$ws-review` + `$ws-commit`
+- review 文件落盘后 `aiws bugfix advance` → FINISH
 
-输出要求：
-- `Change_ID:` `<change-id>`
-- `Change context:` `<当前分支或 worktree 路径>`
-- `CSV:` `issues/fix_bus_issues.csv` 中对应 `Bug_ID` 行的关键字段
-- `Evidence:` `.aiws/changes/<change-id>/bug/zentao-bug-<bug-id>.md` + 图片目录
-- `Verify:` 实际运行命令与结果（未运行不声称已运行）
+### PHASE 4 — FINISH
+- `$ws-finish` 收尾合并
+- 回填 `issues/fix_bus_issues.csv`
+- `aiws bugfix advance` → DONE
+
+中断后恢复：`aiws bugfix status <change-id>` 查看当前 phase，继续对应步骤。

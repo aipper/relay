@@ -31,6 +31,15 @@ fi
 
 "$aiws_bin" validate .
 
+# Goal state integrity check (blocking if errors)
+if [[ -d "$root/.aiws/goals" ]]; then
+  if ! "$aiws_bin" goal validate-state >/dev/null 2>&1; then
+    echo "error: goal state validation failed — state machine integrity check" >&2
+    echo "hint: run 'aiws goal validate-state' to see details" >&2
+    exit 1
+  fi
+fi
+
 # Quality gates (non-blocking warnings)
 if [[ -f "package.json" ]] && grep -q '"lint"' package.json 2>/dev/null; then
   npm run lint >/dev/null 2>&1 || echo "warn: lint found issues (non-blocking)" >&2

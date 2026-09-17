@@ -6,6 +6,11 @@ import { e2eMockPlugin } from "./vite-plugin-e2e-mock";
 const disablePwa = process.env.RELAY_DISABLE_PWA === "1";
 const useMock = process.env.RELAY_E2E_MOCK === "1";
 
+// Dev-only: proxy API/WS to the relay backend so the browser can call same-origin
+// and avoid CORS (the Rust server doesn't emit CORS headers in dev). Override
+// the target via RELAY_DEV_PROXY_TARGET if the backend runs elsewhere.
+const apiTarget = process.env.RELAY_DEV_PROXY_TARGET || "http://localhost:8787";
+
 export default defineConfig({
   build: {
     // Prefer modern JS output to avoid downlevel private-field helpers that can be brittle in some environments.
@@ -32,4 +37,14 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    proxy: {
+      "/health": apiTarget,
+      "/auth": apiTarget,
+      "/hosts": apiTarget,
+      "/sessions": apiTarget,
+      "/server": apiTarget,
+      "/ws": { target: apiTarget, ws: true },
+    },
+  },
 });

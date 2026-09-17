@@ -73,6 +73,25 @@
 - 必须执行的测试命令列表
 - 必须携带/回传 `X-Request-Id` 的接口范围
 
+### 5.1) 前端测试门禁（Verification Tier）
+
+根据改动类型，要求不同的验证方式：
+
+改动类型分类：
+- `pure-ui`：纯界面调整（颜色、间距、文案等视觉层面变更，不含交互逻辑）
+  - 要求：仅需 lint + 构建，无需启动后端
+- `frontend-logic`：前端交互/逻辑变动（API 调用、状态管理、表单校验等）
+  - 要求：必须配置 `AI_WORKSPACE.md` 的 `playwright_test_cmd` / `start_cmd` / `health_check`
+  - 要求：必须启动后端并通过 Playwright 浏览器级验证
+- `backend-api`：后端 API/服务逻辑变动
+  - 要求：单元测试 + 接口测试
+- `full-stack`：同时涉及前后端
+  - 要求：前端 Playwright 验证 + 后端测试
+- `config-docs`：仅配置文件/文档改动
+  - 要求：lint + 构建
+
+判定方式：由 `ws-dev` 入口根据 diff 文件路径自动判定；或者在 `proposal.md` 中显式声明。
+
 ## 6) 服务端/自动化测试约束（工作区模式，强制）
 
 当本目录按 AI Workspace 运行（存在 `AI_WORKSPACE.md` / `REQUIREMENTS.md` / `tools/server_test_runner.py`）时，约束如下：

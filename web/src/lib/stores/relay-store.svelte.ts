@@ -53,6 +53,7 @@ class RelayStore {
   isMobile = $state(false);
   sessionSearch = $state("");
   hostGroupCollapsed = $state<Record<string, boolean>>({});
+  sidebarSide = $state<"left" | "right">("left");
   approvalModalOpen = $state(false);
   approvalModalShowArgs = $state(false);
   approvalForSession = $state(false);
@@ -190,6 +191,9 @@ class RelayStore {
       const hgc = localStorage.getItem("relay.hostGroupCollapsed.v1");
       if (hgc) { try { this.hostGroupCollapsed = JSON.parse(hgc) as Record<string, boolean>; } catch {} }
 
+      const ss = localStorage.getItem("relay.sidebarSide");
+      if (ss === "right") this.sidebarSide = "right";
+
       const cwdRaw = localStorage.getItem(START_CWD_STORAGE_KEY);
       if (cwdRaw) { try { this.startCwdByHost = JSON.parse(cwdRaw) as Record<string, string>; } catch {} }
     } catch (e) {
@@ -207,9 +211,15 @@ class RelayStore {
     return null;
   }
 
-  setCustomBaseUrl(url: string) { this.customBaseUrl = url; }
+  setCustomBaseUrl(url: string) { this.customBaseUrl = url; this.useCustomServer = true; }
+  clearCustomBaseUrl() { this.customBaseUrl = ""; this.useCustomServer = false; }
   setCredentials(user: string, pass: string) { this.username = user; this.password = pass; }
   navigate(v: string) { this.view = v; }
+
+  toggleSidebarSide() {
+    this.sidebarSide = this.sidebarSide === "left" ? "right" : "left";
+    try { localStorage.setItem("relay.sidebarSide", this.sidebarSide); } catch {}
+  }
 
   persistServerPrefs() {
     try {

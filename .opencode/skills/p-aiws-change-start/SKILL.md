@@ -5,7 +5,7 @@ description: 私有：切分支并初始化变更工件（可选安装 hooks）
 
 目标：
 - 切到分支 `change/<change-id>` 并初始化 `.aiws/changes/<change-id>/` 工件
-  - 若检测到 `.gitmodules`（git submodules），默认优先使用 `--worktree`（失败则回退为 `--no-switch`），避免切走 superproject 分支导致 submodule 状态混乱
+  - 若检测到 `.gitmodules`（git submodules），默认使用 `--no-switch` 避免切走 superproject 分支导致 submodule 状态混乱；传 `--switch` 可强制切换
 
 要求：
 - 需要 git 仓库；若不是 git 仓库先 `git init`
@@ -26,8 +26,6 @@ fi
 - `--hooks`：同时执行 `aiws hooks install .`
 - `--title <title>`：写入标题
 - `--no-design`：不生成 design.md
-- `--switch`：显式允许切换 superproject 分支（仅在存在 `.gitmodules` 时有意义）
+- `--switch`：显式切换 superproject 分支（默认存在 `.gitmodules` 时不切换，传此参数强制切换）
 - `--no-switch`：不切换当前分支（仅确保 `change/<change-id>` 分支存在并初始化工件）；适用于 superproject + submodule 场景
-- `--worktree`：用 `git worktree` 创建独立工作区并在其中 checkout `change/<change-id>`（推荐用于 superproject + submodule）
-  - `--worktree-dir <path>`：覆盖 worktree 目录
-  - `--submodules`：在 worktree 内执行 `git submodule update --init --recursive`
+- `--allow-dirty`：允许 dirty 工作区执行 start（不推荐）
