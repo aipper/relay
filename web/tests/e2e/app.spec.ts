@@ -39,7 +39,7 @@ test.describe("会话列表", () => {
   });
 
   test("会话搜索过滤", async ({ page }) => {
-    const searchInput = page.getByPlaceholder(/搜索|search/i);
+    const searchInput = page.getByRole("searchbox", { name: "搜索会话" });
     await searchInput.fill("web");
     await page.waitForTimeout(300);
     await expect(page.getByText(/^web /).first()).toBeVisible({ timeout: 5000 });

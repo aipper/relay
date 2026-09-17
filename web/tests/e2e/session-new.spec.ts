@@ -21,7 +21,7 @@ test.describe("会话 新建", () => {
   test("新建会话 - 留空 Session ID 则新建", async ({ page }) => {
     await page.getByRole("button", { name: "启动" }).first().click();
     await page.waitForSelector("input[placeholder='ses_xxx 或留空新建']", { timeout: 30000 });
-    await page.getByRole("textbox", { name: "CWD（可选，主机路径）" }).fill("/tmp");
+    await page.locator("input[placeholder='/path/to/project']").fill("/tmp");
     await expect(page.locator("input[placeholder='ses_xxx 或留空新建']")).toHaveValue("");
   });
 });

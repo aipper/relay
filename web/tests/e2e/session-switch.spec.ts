@@ -13,18 +13,18 @@ test.describe("会话切换", () => {
 
   test("显示切换按钮", async ({ page }) => {
     await page.getByRole("button", { name: "会话" }).click();
-    await expect(page.getByRole("button", { name: "切换" })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: "切换", exact: true })).toBeVisible({ timeout: 5000 });
   });
 
   test("点击切换按钮显示会话列表", async ({ page }) => {
     await page.getByRole("button", { name: "会话" }).click();
-    await page.getByRole("button", { name: "切换" }).click();
+    await page.getByRole("button", { name: "切换", exact: true }).click();
     await expect(page.locator(".session-selector")).toBeVisible({ timeout: 5000 });
   });
 
   test("选择会话后切换", async ({ page }) => {
     await page.getByRole("button", { name: "会话" }).click();
-    await page.getByRole("button", { name: "切换" }).click();
+    await page.getByRole("button", { name: "切换", exact: true }).click();
     await expect(page.locator(".session-selector")).toBeVisible({ timeout: 5000 });
     await page.locator(".session-item").first().click();
     await page.waitForTimeout(500);

@@ -21,7 +21,8 @@ test.describe("审批流程", () => {
   test("点击审批会话展示审批卡片", async ({ page }) => {
     await page.getByText(/待审批/).first().click();
     await page.waitForTimeout(1000);
-    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: /同意|批准|approve/i }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /拒绝|deny/i }).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("同意操作发送 approve", async ({ page }) => {

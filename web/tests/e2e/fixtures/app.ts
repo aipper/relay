@@ -39,6 +39,10 @@ export const test = base.extend<TestFixtures>({
 
       const originalFetch = window.fetch.bind(window);
       (window as unknown as Record<string, unknown>).WebSocket = class extends EventTarget {
+        static CONNECTING = 0;
+        static OPEN = 1;
+        static CLOSING = 2;
+        static CLOSED = 3;
         url: string;
         readyState: number = 0;
         CONNECTING = 0;

@@ -9,7 +9,6 @@ test.describe("认证流程", () => {
     await expect(page.getByRole("textbox", { name: "用户名" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "密码" })).toBeVisible();
     await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-    await expect(page.getByText("刷新后保持登录")).toBeVisible();
   });
 
   test("登录表单交互", async ({ page }) => {
@@ -68,10 +67,11 @@ test.describe("认证流程", () => {
     await page.waitForLoadState("networkidle", { timeout: 30000 });
     await page.getByRole("textbox", { name: "用户名" }).fill("admin");
     await page.getByRole("textbox", { name: "密码" }).fill("password");
-    await page.getByText("刷新后保持登录").click();
     await page.getByRole("button", { name: "登录" }).click();
 
     await expect(page.getByText("已连接")).toBeVisible({ timeout: 15000 });
+    await page.getByRole("button", { name: "设置" }).click();
+    await expect(page.getByText("刷新后保持登录")).toBeVisible({ timeout: 5000 });
     await page.waitForLoadState("domcontentloaded");
     const hasAuth = await page.evaluate(() => {
       const raw = localStorage.getItem("relay.auth.v1");
