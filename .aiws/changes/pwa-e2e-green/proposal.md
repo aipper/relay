@@ -1,7 +1,7 @@
 # Proposal: pwa-e2e-green
 
 Change_ID: pwa-e2e-green
-Req_ID: 无
+Req_ID: PWA-E2E-001
 Problem_ID: PWA-E2E-001
 Contract_Row: PWA-E2E-001
 Plan_File: .aiws/plan/2026-09-17_17-20-56-pwa-e2e-green.md
