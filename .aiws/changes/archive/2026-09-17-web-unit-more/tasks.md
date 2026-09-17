@@ -6,6 +6,6 @@
 - [x] 2.2 `bun run build` exit 0
 - [x] 3.1 证据落盘 evidence/
 - [x] 3.2 review 落盘
-- [ ] 4.1 提交并 finish
-- [ ] 4.2 归档 archive
-- [ ] 4.3 push
+- [x] 4.1 提交并 finish
+- [x] 4.2 归档 archive
+- [x] 4.3 push

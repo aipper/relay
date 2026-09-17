@@ -33,7 +33,28 @@
         "push": false,
         "gateTier": "strict"
       }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-09-17T11:08:06Z",
+      "payload": {
+        "ok": true,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 2,
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "archive",
+      "timestamp": "2026-09-17T11:08:06Z",
+      "payload": {
+        "archived_to": ".aiws/changes/archive/2026-09-17-web-unit-more"
+      }
     }
   ],
-  "updated_at": "2026-09-17T11:07:48Z"
+  "updated_at": "2026-09-17T11:08:06Z"
 }
