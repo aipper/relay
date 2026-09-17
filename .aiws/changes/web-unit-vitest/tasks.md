@@ -7,8 +7,8 @@
 ## 0. Preflight
 
 - [x] 0.1 阅读并遵守 `AI_PROJECT.md` / `AI_WORKSPACE.md` / `REQUIREMENTS.md`
-- [ ] 0.2 运行门禁校验：`aiws validate .`（预置 `.agents/skills` 漂移已知阻断，见前 changes 记录）
-- [ ] 0.3 若真值文件发生变化，同步基线：`aiws change sync web-unit-vitest`
+- [x] 0.2 运行门禁校验：`aiws validate .`（预置 `.agents/skills` 漂移已知阻断，见前 changes 记录）
+- [x] 0.3 若真值文件发生变化（N/A：REQUIREMENTS/AI_PROJECT/AI_WORKSPACE 均未动），同步基线：`aiws change sync web-unit-vitest`
 
 ## 1. 需求/问题合同（如适用）
 
@@ -29,5 +29,5 @@
 ## 4. 交付与归档
 
 - [x] 4.1 证据落盘（见 3.2）
-- [ ] 4.2 交叉审计 `$ws-review`（test-only，通用 review）
-- [ ] 4.3 归档：`aiws change archive web-unit-vitest`
+- [x] 4.2 交叉审计 `$ws-review`（test-only，通用 review）
+- [x] 4.3 归档：`aiws change archive web-unit-vitest`

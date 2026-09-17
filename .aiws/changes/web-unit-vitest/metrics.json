@@ -23,7 +23,17 @@
         "current_branch": "change/web-unit-vitest",
         "hooks": true
       }
+    },
+    {
+      "type": "finish_local",
+      "timestamp": "2026-09-17T10:27:44Z",
+      "payload": {
+        "into": "main",
+        "from": "change/web-unit-vitest",
+        "push": false,
+        "gateTier": "strict"
+      }
     }
   ],
-  "updated_at": "2026-09-17T10:19:08Z"
+  "updated_at": "2026-09-17T10:27:44Z"
 }
