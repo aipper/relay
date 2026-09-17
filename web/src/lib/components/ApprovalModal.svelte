@@ -12,7 +12,10 @@
 
   export let onClose: () => void = () => {};
   export let onSendDecision: (decision: string) => void = () => {};
+  export let onSendAction: (actionId: string) => void = () => {};
   export let onToggleApprovalForSession: (v: boolean) => void = () => {};
+
+  $: actionList = Array.isArray(awaiting?.actions) ? awaiting.actions.filter((a: any) => a && typeof a.id === "string" && typeof a.label === "string") : [];
 </script>
 
 {#if show && awaiting}
@@ -73,8 +76,14 @@
       </div>
       <div class="modal-actions">
         <button class="secondary" on:click={onClose} type="button">取消</button>
-        <button on:click={() => { onSendDecision("deny"); onClose(); }} disabled={!selectedRunId || status !== "connected"} type="button">拒绝</button>
-        <button on:click={() => { onSendDecision("approve"); onClose(); }} disabled={!selectedRunId || status !== "connected"} type="button">同意</button>
+        {#if actionList.length > 0}
+          {#each actionList as action (action.id)}
+            <button on:click={() => { onSendAction(action.id); onClose(); }} disabled={!selectedRunId || status !== "connected"} type="button">{action.label}</button>
+          {/each}
+        {:else}
+          <button on:click={() => { onSendDecision("deny"); onClose(); }} disabled={!selectedRunId || status !== "connected"} type="button">拒绝</button>
+          <button on:click={() => { onSendDecision("approve"); onClose(); }} disabled={!selectedRunId || status !== "connected"} type="button">同意</button>
+        {/if}
       </div>
     </div>
   </div>

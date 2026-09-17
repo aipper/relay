@@ -171,6 +171,10 @@ class RelayStore {
   #mobileTabResetRunId = "";
   #lastStartToolsForceRefreshKey = "";
   #lastSuggestedStartCwd = "";
+  // Phase D2 (paseo-absorb-v1): highest seen host seq per run, for reconnect gap-fill.
+  // Tracked by ID (seq), never by content matching.
+  #maxSeqByRun: Record<string, number> = {};
+  #backfillInFlightByRun: Record<string, boolean> = {};
 
   constructor() {
     try {
@@ -259,7 +263,11 @@ class RelayStore {
     nextWs.onopen = () => {
       if (this.#ws === nextWs) {
         this.status = "connected";
-        if (this.#wsSubscribedRunId || this.selectedRunId) this.#subscribeToRun(this.#wsSubscribedRunId || this.selectedRunId);
+        if (this.#wsSubscribedRunId || this.selectedRunId) {
+          const runId = this.#wsSubscribedRunId || this.selectedRunId;
+          this.#subscribeToRun(runId);
+          void this.backfillAfterReconnect(runId);
+        }
       }
     };
     nextWs.onclose = () => { if (this.#ws === nextWs) this.status = "disconnected"; };
@@ -352,6 +360,12 @@ class RelayStore {
             op_args: dataAny(msg, "op_args"), op_args_summary: dataString(msg, "op_args_summary"),
             approve_text: dataString(msg, "approve_text"), deny_text: dataString(msg, "deny_text"),
             questions: dataAny(msg, "questions"),
+            actions: Array.isArray(isRecord(msg.data) ? (msg.data as Record<string, unknown>)["actions"] : undefined)
+              ? ((msg.data as Record<string, unknown>)["actions"] as Array<{ id: string; label: string; behavior?: string }>)
+              : undefined,
+            suggestions: Array.isArray(isRecord(msg.data) ? (msg.data as Record<string, unknown>)["suggestions"] : undefined)
+              ? ((msg.data as Record<string, unknown>)["suggestions"] as Array<{ id?: string; label: string; text?: string }>)
+              : undefined,
           };
         } else if (msg.type === "run.input") {
           this.#runsUpdateInPlace(nextRuns, msg.run_id, (cur) => ({ ...cur, last_active_at, status: "running" }));
@@ -372,7 +386,13 @@ class RelayStore {
     if (readyChanged) this.runReadyByRun = nextRunReadyByRun;
     if (newMessages.length > 0 && selectedId) {
       const existing = this.messagesByRun[selectedId] ?? [];
-      this.messagesByRun = { ...this.messagesByRun, [selectedId]: truncateHead([...existing, ...newMessages], 1000) };
+      const seenSeq = new Set<number>();
+      for (const m of existing) { if (typeof m.seq === "number") seenSeq.add(m.seq); }
+      const fresh = newMessages.filter((m) => typeof m.seq !== "number" || !seenSeq.has(m.seq));
+      if (fresh.length > 0) {
+        for (const m of fresh) { if (typeof m.seq === "number") seenSeq.add(m.seq); }
+        this.messagesByRun = { ...this.messagesByRun, [selectedId]: truncateHead([...existing, ...fresh], 1000) };
+      }
     }
     if (this.#wsQueuePos >= this.#wsQueue.length) { this.#wsQueue = []; this.#wsQueuePos = 0; return; }
     this.#scheduleWsFlush();
@@ -385,17 +405,22 @@ class RelayStore {
 
   #envToMessage(env: any): ChatMessage | null {
     if (!env.run_id) return null;
+    const seq = typeof env.seq === "number" && Number.isFinite(env.seq) ? (env.seq as number) : null;
+    if (seq !== null) {
+      const cur = this.#maxSeqByRun[env.run_id] ?? -1;
+      if (seq > cur) this.#maxSeqByRun[env.run_id] = seq;
+    }
     if (env.type === "run.output") {
-      return { key: `${env.ts}:run.output:${env.seq ?? uid()}`, ts: env.ts, role: "assistant", kind: env.type, actor: dataString(env, "actor"), text: sanitizeTerminalOutput(dataString(env, "text") ?? ""), data: env.data };
+      return { key: `${env.ts}:run.output:${env.seq ?? uid()}`, ts: env.ts, role: "assistant", kind: env.type, actor: dataString(env, "actor"), seq, text: sanitizeTerminalOutput(dataString(env, "text") ?? ""), data: env.data };
     }
     if (env.type === "run.input") {
-      return { key: `${env.ts}:run.input:${dataString(env, "input_id") ?? uid()}`, ts: env.ts, role: "user", kind: env.type, actor: dataString(env, "actor"), text: dataString(env, "text_redacted") ?? "", data: env.data };
+      return { key: `${env.ts}:run.input:${dataString(env, "input_id") ?? uid()}`, ts: env.ts, role: "user", kind: env.type, actor: dataString(env, "actor"), seq, text: dataString(env, "text_redacted") ?? "", data: env.data };
     }
     if (env.type === "run.permission_requested") {
-      return { key: `${env.ts}:run.permission_requested:${dataString(env, "request_id") ?? uid()}`, ts: env.ts, role: "system", kind: env.type, request_id: dataString(env, "request_id"), text: dataString(env, "prompt") ?? "", data: env.data };
+      return { key: `${env.ts}:run.permission_requested:${dataString(env, "request_id") ?? uid()}`, ts: env.ts, role: "system", kind: env.type, request_id: dataString(env, "request_id"), seq, text: dataString(env, "prompt") ?? "", data: env.data };
     }
     if (env.type === "run.started" || env.type === "run.exited") {
-      return { key: `${env.ts}:${env.type}:${env.seq ?? uid()}`, ts: env.ts, role: "system", kind: env.type, text: env.type === "run.started" ? "run started" : "run exited", data: env.data };
+      return { key: `${env.ts}:${env.type}:${env.seq ?? uid()}`, ts: env.ts, role: "system", kind: env.type, seq, text: env.type === "run.started" ? "run started" : "run exited", data: env.data };
     }
     return null;
   }
@@ -503,18 +528,95 @@ class RelayStore {
       if (r.status === 401) { this.disconnect(); return; }
       if (!r.ok) return;
       const msgs = (await r.json()) as ChatMessageApi[];
-      this.messagesByRun = { ...this.messagesByRun, [runId]: msgs.map((m) => ({
+      const mapped = msgs.map((m) => ({
         key: String(m.id), ts: m.ts, role: m.role === "assistant" || m.role === "user" ? m.role : "system",
         kind: m.kind, actor: m.actor, request_id: m.request_id,
+        seq: typeof m.seq === "number" ? m.seq : null,
         text: m.kind === "run.output" ? sanitizeTerminalOutput(m.text) : m.text, data: m.data,
-      })) };
+      })) as ChatMessage[];
+      for (const m of mapped) {
+        if (typeof m.seq === "number") {
+          const cur = this.#maxSeqByRun[runId] ?? -1;
+          if (m.seq > cur) this.#maxSeqByRun[runId] = m.seq;
+        }
+      }
+      this.messagesByRun = { ...this.messagesByRun, [runId]: mapped };
     } catch (e) { console.warn("loadMessages failed", e); }
+  }
+
+  async backfillAfterReconnect(runId: string) {
+    if (!runId || !this.token) return;
+    if (this.#backfillInFlightByRun[runId]) return;
+    const highest = this.#maxSeqByRun[runId];
+    if (highest === undefined) return;
+    this.#backfillInFlightByRun[runId] = true;
+    try {
+      const r = await fetchWithTimeout(
+        `${this.apiBaseUrl.replace(/\/$/, "")}/sessions/${encodeURIComponent(runId)}/messages?limit=200&after_seq=${highest}`,
+        { headers: { Authorization: `Bearer ${this.token}` } }, 20_000);
+      if (r.status === 401) { this.disconnect(); return; }
+      if (!r.ok) return;
+      const msgs = (await r.json()) as ChatMessageApi[];
+      if (!Array.isArray(msgs) || msgs.length === 0) return;
+      const existing = this.messagesByRun[runId] ?? [];
+      const seenSeq = new Set<number>();
+      for (const m of existing) { if (typeof m.seq === "number") seenSeq.add(m.seq); }
+      const fresh: ChatMessage[] = [];
+      for (const m of msgs) {
+        const seq = typeof m.seq === "number" ? m.seq : null;
+        if (seq !== null) {
+          if (seenSeq.has(seq)) continue;
+          seenSeq.add(seq);
+          const cur = this.#maxSeqByRun[runId] ?? -1;
+          if (seq > cur) this.#maxSeqByRun[runId] = seq;
+        }
+        fresh.push({
+          key: String(m.id), ts: m.ts, role: m.role === "assistant" || m.role === "user" ? m.role : "system",
+          kind: m.kind, actor: m.actor, request_id: m.request_id, seq,
+          text: m.kind === "run.output" ? sanitizeTerminalOutput(m.text) : m.text, data: m.data,
+        });
+      }
+      if (fresh.length > 0) {
+        this.messagesByRun = { ...this.messagesByRun, [runId]: truncateHead([...existing, ...fresh], 1000) };
+        this.#hydrateAwaitingFromMessages(runId);
+      }
+    } catch (e) { console.warn("backfillAfterReconnect failed", e); }
+    finally { this.#backfillInFlightByRun[runId] = false; }
   }
 
   async selectSession(runId: string) {
     this.selectedRunId = runId; this.#subscribeToRun(runId);
     this.sessionDetailTab = "messages"; this.outputAutoScroll = true;
     if (!this.messagesByRun[runId]) await this.loadMessages(runId);
+    this.#hydrateAwaitingFromMessages(runId);
+  }
+
+  #hydrateAwaitingFromMessages(runId: string) {
+    if (this.awaitingByRun[runId]) return;
+    const msgs = this.messagesByRun[runId] ?? [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]!;
+      if (m.kind === "run.permission_requested" && m.request_id) {
+        const d = (m.data ?? {}) as Record<string, unknown>;
+        this.awaitingByRun = {
+          ...this.awaitingByRun,
+          [runId]: {
+            reason: typeof d["reason"] === "string" ? d["reason"] : undefined,
+            prompt: typeof m.text === "string" ? m.text : undefined,
+            request_id: m.request_id,
+            op_tool: typeof d["op_tool"] === "string" ? d["op_tool"] : undefined,
+            op_args: d["op_args"],
+            op_args_summary: typeof d["op_args_summary"] === "string" ? d["op_args_summary"] : undefined,
+            approve_text: typeof d["approve_text"] === "string" ? d["approve_text"] : undefined,
+            deny_text: typeof d["deny_text"] === "string" ? d["deny_text"] : undefined,
+            questions: d["questions"],
+            actions: Array.isArray(d["actions"]) ? d["actions"] : undefined,
+            suggestions: Array.isArray(d["suggestions"]) ? d["suggestions"] : undefined,
+          },
+        };
+        return;
+      }
+    }
   }
 
   runToolFor(runId: string): string { return this.runs.find((x) => x.id === runId)?.tool ?? ""; }
@@ -542,13 +644,24 @@ class RelayStore {
     this.#sendWs({ type: "run.send_input", ts: new Date().toISOString(), run_id: this.selectedRunId, data: { input_id: uid(), actor: "web", text: text.replace(/\r\n/g, "\r").replace(/\n/g, "\r") } });
   }
 
-  sendDecision(decision: string) {
+  sendDecision(decision: string, selectedActionId?: string) {
     if (!this.selectedRunId) return;
     const a = this.selectedAwaiting; const reqId = a?.request_id;
     if (!reqId) { this.#sendInput(decision === "approve" ? "y\n" : "n\n"); return; }
     const data: Record<string, unknown> = { request_id: reqId, actor: "web" };
     if (decision === "approve" && this.approvalForSession) data["decision"] = "approve_for_session";
+    if (selectedActionId) data["selected_action_id"] = selectedActionId;
     this.#sendWs({ type: decision === "approve" ? "run.permission.approve" : "run.permission.deny", ts: new Date().toISOString(), run_id: this.selectedRunId, data });
+  }
+
+  sendActionDecision(actionId: string) {
+    if (!this.selectedRunId) return;
+    const a = this.selectedAwaiting;
+    const actions = Array.isArray(a?.actions) ? a.actions : [];
+    const action = actions.find((x: { id: string }) => x.id === actionId);
+    const behavior = String(action?.behavior ?? "").toLowerCase();
+    const decision = behavior === "deny" || behavior === "abort" ? "deny" : "approve";
+    this.sendDecision(decision, actionId);
   }
 
   sendStop(signal = "term") {

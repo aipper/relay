@@ -72,8 +72,30 @@
     }
   }
 
+  // Phase A (paseo-absorb-v1): exact-match local slash commands.
+  // Mirrors paseo client-slash-commands semantics: intercept only on
+  // exact match, no-args, no-attachments. ChatInput has no attachments
+  // prop, so the no-attachments condition is vacuously true here.
+  const LOCAL_COMMANDS = new Set(["/quit", "/clear"]);
+
+  function isLocalCommand(text: string): boolean {
+    return LOCAL_COMMANDS.has(text.trim());
+  }
+
+  function handleLocalCommand(_cmd: string): void {
+    // /clear: drop the draft locally; /quit: no-op in the PWA (no PTY to quit).
+    // Intentionally never calls onSendChatInput so nothing reaches run.send_input.
+    localText = "";
+    showCommands = false;
+    showPrompts = false;
+  }
+
   function handleSend() {
     if (!localText.trim()) return;
+    if (isLocalCommand(localText)) {
+      handleLocalCommand(localText.trim());
+      return;
+    }
     onSendChatInput(localText);
     localText = "";
     showCommands = false;

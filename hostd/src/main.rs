@@ -573,6 +573,15 @@ async fn connect_and_run(
                             if request_id.is_empty() {
                                 continue;
                             }
+                            let selected_action_id = parsed
+                                .as_ref()
+                                .and_then(|p| p.selected_action_id.as_deref())
+                                .or_else(|| {
+                                    env.data
+                                        .get("selected_action_id")
+                                        .and_then(|v| v.as_str())
+                                })
+                                .map(|s| s.to_string());
 
                             let decision = parsed.as_ref().and_then(|p| p.decision);
                             let allow_tools = parsed
@@ -614,7 +623,15 @@ async fn connect_and_run(
                                         if approved { "approve" } else { "deny" }
                                     }
                                 };
-                                let _ = rm.decide_permission(run_id, actor, request_id, decision_str).await;
+                                let _ = rm
+                                    .decide_permission_with_action(
+                                        run_id,
+                                        actor,
+                                        request_id,
+                                        decision_str,
+                                        selected_action_id.as_deref(),
+                                    )
+                                    .await;
                             }
                         } else if env.r#type == "run.stop" {
                             let Some(run_id) = env.run_id.as_deref() else { continue; };
@@ -801,7 +818,11 @@ async fn connect_and_run(
                                                 "op_args": op_args,
                                                 "op_args_summary": op_args_summary,
                                                 "approve_text": "",
-                                                "deny_text": ""
+                                                "deny_text": "",
+                                                "actions": [
+                                                    { "id": "approve", "label": "Approve", "behavior": "approve" },
+                                                    { "id": "deny", "label": "Deny", "behavior": "deny" }
+                                                ]
                                             }),
                                         )
                                         .await;

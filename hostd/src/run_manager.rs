@@ -2,7 +2,7 @@ use anyhow::Context;
 use chrono::Utc;
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
-use relay_protocol::{WsEnvelope, redaction::Redactor};
+use relay_protocol::{PermissionAction, PermissionActionBehavior, WsEnvelope, redaction::Redactor};
 use serde_json::Value as JsonValue;
 use serde_json::json;
 use std::fs;
@@ -310,6 +310,26 @@ struct PendingPermission {
     approve_text: String,
     deny_text: String,
     rpc_request_id: Option<i64>,
+    actions: Option<Vec<PermissionAction>>,
+}
+
+fn default_permission_actions() -> Vec<PermissionAction> {
+    vec![
+        PermissionAction {
+            id: "approve".to_string(),
+            label: "Approve".to_string(),
+            behavior: Some(PermissionActionBehavior::Approve),
+        },
+        PermissionAction {
+            id: "deny".to_string(),
+            label: "Deny".to_string(),
+            behavior: Some(PermissionActionBehavior::Deny),
+        },
+    ]
+}
+
+fn permission_actions_json(actions: &[PermissionAction]) -> JsonValue {
+    json!(actions)
 }
 
 #[derive(Clone)]
@@ -1431,6 +1451,7 @@ impl RunManager {
                                             approve_text: approve_text.clone(),
                                             deny_text: deny_text.clone(),
                                             rpc_request_id: None,
+                                            actions: Some(default_permission_actions()),
                                         });
                                     }
 
@@ -1441,7 +1462,8 @@ impl RunManager {
                                             "reason": "prompt",
                                             "prompt": prompt,
                                             "approve_text": approve_text,
-                                            "deny_text": deny_text
+                                            "deny_text": deny_text,
+                                            "actions": permission_actions_json(&default_permission_actions())
                                         }),
                                     );
                                     pr.host_id = Some(host_id.clone());
@@ -1915,6 +1937,7 @@ impl RunManager {
                                                 approve_text: "".to_string(),
                                                 deny_text: "".to_string(),
                                                 rpc_request_id: Some(rpc_request_id),
+                                                actions: Some(default_permission_actions()),
                                             });
                                         }
 
@@ -1932,7 +1955,8 @@ impl RunManager {
                                                 "prompt": prompt,
                                                 "op_tool": "codex",
                                                 "approve_text": "",
-                                                "deny_text": ""
+                                                "deny_text": "",
+                                                "actions": permission_actions_json(&default_permission_actions())
                                             }),
                                         );
                                         pr.host_id = Some(host_id.clone());
@@ -2616,6 +2640,18 @@ impl RunManager {
         request_id: &str,
         decision: &str,
     ) -> anyhow::Result<()> {
+        self.decide_permission_with_action(run_id, actor, request_id, decision, None)
+            .await
+    }
+
+    pub async fn decide_permission_with_action(
+        &self,
+        run_id: &str,
+        actor: &str,
+        request_id: &str,
+        decision: &str,
+        selected_action_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         let run = {
             let runs = self.runs.read().await;
             runs.get(run_id).cloned()
@@ -2693,9 +2729,27 @@ impl RunManager {
         }
 
         let text = match decision {
-            "approve" => pending.approve_text,
-            "deny" => pending.deny_text,
-            _ => return Err(anyhow::anyhow!("invalid decision")),
+            "approve" => pending.approve_text.clone(),
+            "deny" => pending.deny_text.clone(),
+            _ => {
+                let Some(action_id) = selected_action_id else {
+                    return Err(anyhow::anyhow!("invalid decision"));
+                };
+                let Some(actions) = pending.actions.as_ref() else {
+                    return Err(anyhow::anyhow!("invalid decision"));
+                };
+                let Some(action) = actions.iter().find(|a| a.id == action_id) else {
+                    return Err(anyhow::anyhow!("unknown selected_action_id"));
+                };
+                match action.behavior {
+                    Some(PermissionActionBehavior::Approve) => pending.approve_text.clone(),
+                    Some(PermissionActionBehavior::Deny)
+                    | Some(PermissionActionBehavior::Abort) => pending.deny_text.clone(),
+                    Some(PermissionActionBehavior::Custom) | None => {
+                        return Err(anyhow::anyhow!("custom action has no PTY mapping"));
+                    }
+                }
+            }
         };
 
         self.send_input(run_id, actor, request_id, &text).await?;

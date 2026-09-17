@@ -63,6 +63,7 @@
 
   // Callbacks - Decision
   export let onSendDecision: (decision: string) => void = () => {};
+  export let onSendAction: (actionId: string) => void = () => {};
   export let onToggleApprovalForSession: (v: boolean) => void = () => {};
 
   // Callbacks - Output
@@ -164,6 +165,7 @@
             {approvalForSession}
             bind:approvalAnswersJson
             {onSendDecision}
+            {onSendAction}
             {onToggleApprovalForSession}
           />
         {:else if awaitingIsPrompt(selectedAwaiting)}

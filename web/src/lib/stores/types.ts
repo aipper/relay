@@ -26,6 +26,7 @@ export type ChatMessage = {
   kind: string;
   actor?: string | null;
   request_id?: string | null;
+  seq?: number | null;
   text: string;
   data?: unknown;
 };
@@ -85,6 +86,20 @@ export type SearchMatch = {
 
 export type RiskKind = "read" | "write" | "exec" | "other";
 
+export type PermissionActionBehavior = "approve" | "deny" | "abort" | "custom";
+
+export type PermissionAction = {
+  id: string;
+  label: string;
+  behavior?: PermissionActionBehavior | string;
+};
+
+export type PermissionSuggestion = {
+  id?: string;
+  label: string;
+  text?: string;
+};
+
 export type AwaitingState = {
   reason?: string;
   prompt?: string;
@@ -95,6 +110,8 @@ export type AwaitingState = {
   approve_text?: string;
   deny_text?: string;
   questions?: unknown;
+  actions?: PermissionAction[];
+  suggestions?: PermissionSuggestion[];
 };
 
 export type OutputMatch = {

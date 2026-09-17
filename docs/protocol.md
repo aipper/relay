@@ -158,6 +158,10 @@ Emitted when a run needs an explicit user decision (approve/deny) to proceed.
 - `op_args_summary`: optional short args summary for list/cards (recommended max 80 chars)
 - `approve_text`: suggested text to write to PTY on approve (e.g. `"y\n"`)
 - `deny_text`: suggested text to write to PTY on deny (e.g. `"n\n"`)
+- `actions`: optional structured approval actions (additive; old clients ignore unknown fields and fall back to approve/deny):
+  - `[{ id, label, behavior? }]` where `behavior` is `approve | deny | abort | custom`
+  - When present, the UI renders one button per action (label = `label`); when absent, the UI renders the legacy approve/deny buttons.
+- `suggestions`: optional suggested quick replies (additive): `[{ id?, label, text? }]`
 
 ### `run.permission.approve` / `run.permission.deny` (web/cli → server → hostd)
 
@@ -167,6 +171,7 @@ Structured decisions for a previous `run.permission_requested`.
 
 - `request_id`: UUID
 - `actor`: `web | cli | system` (optional)
+- `selected_action_id`: optional id of the chosen `actions[]` entry (additive; hosts fall back to the envelope type when absent)
 
 ## WS-RPC (M4-A2)
 
@@ -367,3 +372,13 @@ Stop a run with an explicit ack response (request/response style).
 - `request_id`: UUID
 - `signal`: `int | term | kill` (default `term`; `int` ≈ Ctrl+C)
 - `actor`: `web | cli | system` (optional)
+
+## Messages API (M5)
+
+`GET /runs/:run_id/messages?limit=200[&before_id=...][&after_seq=...][&include_output=...]` (Bearer auth)
+
+- `before_id`: paginate backwards (only events with `id < before_id`).
+- `after_seq`: incremental backfill (only events with `seq > after_seq`); omitted = old behavior.
+- `include_output`: default `true`; `false` excludes `run.output` (unchanged by `after_seq`).
+
+Each message carries `id`, `seq` (nullable for events without a host seq), `ts`, `role`, `kind`, `text`.

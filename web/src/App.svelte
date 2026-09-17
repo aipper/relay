@@ -110,6 +110,7 @@
   riskForOpTool={(name: string | null | undefined) => relay.riskForOpTool(name)}
   onClose={() => { relay.approvalModalOpen = false; relay.approvalModalShowArgs = false; }}
   onSendDecision={(d: string) => { relay.sendDecision(d); relay.approvalModalOpen = false; relay.approvalModalShowArgs = false; }}
+  onSendAction={(a: string) => { relay.sendActionDecision(a); relay.approvalModalOpen = false; relay.approvalModalShowArgs = false; }}
   onToggleApprovalForSession={(v: boolean) => (relay.approvalForSession = v)}
 />
 

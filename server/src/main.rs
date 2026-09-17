@@ -1,3 +1,4 @@
+mod coalescer;
 mod config;
 mod db;
 
@@ -373,6 +374,7 @@ async fn http_server_logs_tail(
 #[derive(Deserialize)]
 struct MessagesQuery {
     before_id: Option<i64>,
+    after_seq: Option<i64>,
     limit: Option<i64>,
     include_output: Option<bool>,
 }
@@ -425,8 +427,15 @@ async fn http_list_messages(
 
     let limit = q.limit.unwrap_or(200);
     let include_output = q.include_output.unwrap_or(true);
-    let rows = match db::list_message_events(&state.db, &run_id, include_output, q.before_id, limit)
-        .await
+    let rows = match db::list_message_events(
+        &state.db,
+        &run_id,
+        include_output,
+        q.before_id,
+        q.after_seq,
+        limit,
+    )
+    .await
     {
         Ok(r) => r,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
@@ -700,15 +709,56 @@ fn validate_jwt(state: &AppState, token: &str) -> anyhow::Result<Claims> {
     Ok(claims)
 }
 
+fn output_visible(subscribed_runs: &HashMap<String, bool>, env: &WsEnvelope) -> bool {
+    let Some(run_id) = env.run_id.as_deref() else {
+        return false;
+    };
+    let Some(include_output) = subscribed_runs.get(run_id) else {
+        return false;
+    };
+    *include_output
+}
+
 async fn handle_app_socket(state: AppState, mut socket: WebSocket) {
     let mut rx = state.app_tx.subscribe();
     let mut subscribed_runs: HashMap<String, bool> = HashMap::new();
+    // Phase B: per-connection leading-edge output coalescer. Raw chunks are
+    // still persisted per-chunk in handle_host_socket before fan-out, so this
+    // only shapes what each PWA client receives.
+    let mut coalescer = coalescer::OutputCoalescer::from_env();
+    let coalesce_delay = coalescer.delay();
+    let mut flush_tick = tokio::time::interval(coalesce_delay);
+    flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         tokio::select! {
+            _ = flush_tick.tick() => {
+                for env in coalescer.collect_due(Instant::now()) {
+                    if output_visible(&subscribed_runs, &env) {
+                        let Ok(text) = serde_json::to_string(&env) else { continue; };
+                        if socket.send(Message::Text(text)).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
             msg = rx.recv() => {
                 match msg {
                     Ok(env) => {
+                        if coalescer::OutputCoalescer::should_coalesce(&env) {
+                            match coalescer.push(env, Instant::now()) {
+                                coalescer::PushOutcome::EmitNow { envelope } => {
+                                    if output_visible(&subscribed_runs, &envelope) {
+                                        let Ok(text) = serde_json::to_string(&envelope) else { continue; };
+                                        if socket.send(Message::Text(text)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                coalescer::PushOutcome::Buffered => {}
+                            }
+                            continue;
+                        }
                         if env.r#type == "run.output" {
                             let Some(run_id) = env.run_id.as_deref() else {
                                 continue;
@@ -1471,17 +1521,59 @@ mod tests {
         .await
         .unwrap();
 
-        let without_output = db::list_message_events(&db, "run-1", false, None, 50)
+        let without_output = db::list_message_events(&db, "run-1", false, None, None, 50)
             .await
             .unwrap();
         assert_eq!(without_output.len(), 1);
         assert_eq!(without_output[0].r#type, "tool.result");
 
-        let with_output = db::list_message_events(&db, "run-1", true, None, 50)
+        let with_output = db::list_message_events(&db, "run-1", true, None, None, 50)
             .await
             .unwrap();
         assert_eq!(with_output.len(), 2);
         assert_eq!(with_output[0].r#type, "tool.result");
         assert_eq!(with_output[1].r#type, "run.output");
+    }
+
+    #[tokio::test]
+    async fn list_message_events_after_seq_filters_by_seq() {
+        let db = db::connect("sqlite::memory:").await.unwrap();
+        db::init(&db).await.unwrap();
+
+        let ts = Utc::now();
+        for (seq, text) in [(1, "one"), (2, "two"), (3, "three")] {
+            db::insert_event(
+                &db,
+                "run-1",
+                Some(seq),
+                ts,
+                "run.output",
+                Some("stdout"),
+                None,
+                None,
+                Some(text),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+
+        let all = db::list_message_events(&db, "run-1", true, None, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 3);
+
+        let filtered = db::list_message_events(&db, "run-1", true, None, Some(1), 50)
+            .await
+            .unwrap();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|r| r.seq.unwrap_or(0) > 1));
+
+        let no_output = db::list_message_events(&db, "run-1", false, None, Some(0), 50)
+            .await
+            .unwrap();
+        assert!(no_output.is_empty());
     }
 }

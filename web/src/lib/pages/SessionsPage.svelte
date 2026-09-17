@@ -225,6 +225,7 @@
         onSendChatInput={(text: string) => relay.sendChatInput(text)}
         onOpenInputModal={(text: string) => relay.openInputModal(text)}
         onSendDecision={(d: string) => relay.sendDecision(d)}
+        onSendAction={(a: string) => relay.sendActionDecision(a)}
         onToggleApprovalForSession={(v: boolean) => relay.approvalForSession = v}
         onToggleOutputAutoScroll={() => relay.toggleOutputAutoScroll()}
         onQueueStdin={(data: string) => relay.queueStdin(data)}

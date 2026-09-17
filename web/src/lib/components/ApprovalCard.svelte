@@ -6,7 +6,10 @@
   export let approvalAnswersJson: string = "";
 
   export let onSendDecision: (decision: string) => void = () => {};
+  export let onSendAction: (actionId: string) => void = () => {};
   export let onToggleApprovalForSession: () => void = () => {};
+
+  $: actionList = Array.isArray(awaiting?.actions) ? awaiting.actions.filter((a: any) => a && typeof a.id === "string" && typeof a.label === "string") : [];
 </script>
 
 {#if awaiting}
@@ -49,8 +52,14 @@
       {/if}
 
       <div class="approval-card-actions">
-        <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => onSendDecision("deny")}>拒绝</button>
-        <button type="button" disabled={status !== "connected"} on:click={() => onSendDecision("approve")}>同意</button>
+        {#if actionList.length > 0}
+          {#each actionList as action (action.id)}
+            <button type="button" disabled={status !== "connected"} on:click={() => onSendAction(action.id)}>{action.label}</button>
+          {/each}
+        {:else}
+          <button class="secondary" type="button" disabled={status !== "connected"} on:click={() => onSendDecision("deny")}>拒绝</button>
+          <button type="button" disabled={status !== "connected"} on:click={() => onSendDecision("approve")}>同意</button>
+        {/if}
       </div>
     </div>
   </div>

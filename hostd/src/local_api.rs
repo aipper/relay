@@ -724,7 +724,11 @@ async fn fs_write(
                     "op_args": args_for_event,
                     "op_args_summary": op_args_summary,
                     "approve_text": "",
-                    "deny_text": ""
+                    "deny_text": "",
+                    "actions": [
+                        { "id": "approve", "label": "Approve", "behavior": "approve" },
+                        { "id": "deny", "label": "Deny", "behavior": "deny" }
+                    ]
                 }),
             )
             .await;
@@ -924,7 +928,11 @@ async fn bash_run(
                     "op_args": args_for_event,
                     "op_args_summary": op_args_summary,
                     "approve_text": "",
-                    "deny_text": ""
+                    "deny_text": "",
+                    "actions": [
+                        { "id": "approve", "label": "Approve", "behavior": "approve" },
+                        { "id": "deny", "label": "Deny", "behavior": "deny" }
+                    ]
                 }),
             )
             .await;

@@ -633,6 +633,7 @@ pub async fn list_message_events(
     run_id: &str,
     include_output: bool,
     before_id: Option<i64>,
+    after_seq: Option<i64>,
     limit: i64,
 ) -> anyhow::Result<Vec<MessageEventRow>> {
     let limit = limit.clamp(1, 500);
@@ -653,6 +654,7 @@ WHERE run_id=?1
     'tool.result'
   )
   AND (?3 IS NULL OR id < ?3)
+  AND (?5 IS NULL OR seq > ?5)
 ORDER BY id DESC
 LIMIT ?4
 "#,
@@ -661,6 +663,7 @@ LIMIT ?4
     .bind(include_output)
     .bind(before_id)
     .bind(limit)
+    .bind(after_seq)
     .fetch_all(pool)
     .await?;
     Ok(rows)
