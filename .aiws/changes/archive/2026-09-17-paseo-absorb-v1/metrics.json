@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "change_id": "paseo-absorb-v1",
+  "events": [
+    {
+      "type": "change_new",
+      "timestamp": "2026-09-17T03:14:30Z",
+      "payload": {
+        "title": "paseo-absorb-v1",
+        "created_at": "2026-09-17T03:14:30Z",
+        "base_branch": "main",
+        "templates": "/home/ab/code/relay/.aiws/changes/templates",
+        "no_design": false
+      }
+    },
+    {
+      "type": "change_start",
+      "timestamp": "2026-09-17T03:14:30Z",
+      "payload": {
+        "mode": "switch",
+        "branch": "change/paseo-absorb-v1",
+        "from_branch": "main",
+        "current_branch": "change/paseo-absorb-v1",
+        "hooks": true
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-09-17T03:15:27Z",
+      "payload": {
+        "ok": true,
+        "strict": false,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 7,
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-09-17T08:49:03Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 6,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-09-17T08:49:38Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 9,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-09-17T08:50:34Z",
+      "payload": {
+        "ok": false,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 3,
+        "warnings": 0,
+        "exit_code": 2
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-09-17T08:54:55Z",
+      "payload": {
+        "ok": true,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 0,
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "validate",
+      "timestamp": "2026-09-17T08:55:07Z",
+      "payload": {
+        "ok": true,
+        "strict": true,
+        "allow_truth_drift": false,
+        "check_evidence": false,
+        "check_scope": false,
+        "errors": 0,
+        "warnings": 0,
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "archive",
+      "timestamp": "2026-09-17T08:55:07Z",
+      "payload": {
+        "archived_to": ".aiws/changes/archive/2026-09-17-paseo-absorb-v1"
+      }
+    }
+  ],
+  "updated_at": "2026-09-17T08:55:07Z"
+}
