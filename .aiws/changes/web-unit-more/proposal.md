@@ -4,7 +4,7 @@
 Change_ID: web-unit-more
 Req_ID: WEB-UNIT-003
 Problem_ID: PWA-UNIT-003
-Contract_Row: WEB-UNIT-003
+Contract_Row: WEB-UNIT-003, PWA-UNIT-003
 Plan_File: .aiws/plan/2026-09-17_19-40-00-web-unit-more.md
 Evidence_Path: .aiws/changes/web-unit-more/evidence/
 Change_Type: config-docs
